@@ -1,0 +1,67 @@
+<p align="center"><b>中文</b> · <a href="README.en.md">English</a></p>
+
+<h1 align="center">DSH VS Code Workbench</h1>
+
+<p align="center">在 DeepSeek Harness 中叠加 VS Code 风格的本地开发工作台。</p>
+
+## 功能
+
+- 资源管理器：懒加载目录，支持新建、重命名、删除和刷新。
+- 编辑器：Monaco 多标签编辑、脏状态、原子保存、版本冲突和外部变更提示。
+- 预览：Markdown 默认渲染，可切换源码与大纲；支持工作区相对链接、图片和常见图片文件预览。
+- 搜索：基于 `@vscode/ripgrep` 的全文搜索，支持大小写、全词、正则和包含/排除规则。
+- Git：状态分组、暂存、撤销暂存、丢弃、提交、分支切换、内联/并排差异和提交图表。
+- 布局：可调节和折叠的左侧视图、底部面板与状态栏；设置统一管理主题和栏宽。
+- DSH 对话：右侧复用官方会话界面，保留消息、编程工具、模型、附件和权限能力。
+- 状态恢复：按工作区保存活动视图、标签、栏宽和面板状态，刷新后继续工作。
+
+工作台通过官方 `sidebar.footer.action` 和 `shell.overlay` 扩展点挂载，不替换或卸载 `ui-layout`。
+
+## 安装
+
+推荐安装包含终端适配器的聚合包：
+
+```bash
+dsh plugin --profile web add dsh-vscode-plugin
+```
+
+仅使用工作台和扩展 API：
+
+```bash
+dsh plugin --profile web add dsh-vscode-workbench
+```
+
+## 快捷键
+
+| 快捷键 | 操作 |
+| --- | --- |
+| `Ctrl+Shift+E` | 打开资源管理器 |
+| `Ctrl+Shift+F` | 打开搜索 |
+| `Ctrl+Shift+G` | 打开源代码管理 |
+| `Ctrl+S` | 保存当前文件 |
+| `Ctrl+Alt+B` | 显示或隐藏 DSH 对话栏 |
+
+终端快捷键由 `dsh-vscode-plugin` 注册。
+
+## 扩展
+
+浏览器端提供 `vscodeWorkbench` 服务，可注册底部面板和命令，并控制工作台与面板显隐。`dsh-vscode-plugin` 使用该接口挂载 `@xterm/xterm`。
+
+## 安全
+
+Host 只接受当前 DSH 会话工作目录内的相对路径，并阻止目录穿越与符号链接越界。保存使用版本校验和原子替换；Git 与 ripgrep 使用参数数组启动，不拼接 Shell 命令。
+
+## 开发
+
+```bash
+pnpm install
+pnpm typecheck
+pnpm test
+pnpm build
+```
+
+需要 Node.js `^22.19 || >=24`、pnpm 11.7 和系统 Git。
+
+## 许可证
+
+[MIT](LICENSE)

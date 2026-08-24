@@ -48,8 +48,10 @@ dsh plugin --profile web add dsh-vscode-workbench
 | `Ctrl+Shift+G` | Open Source Control |
 | `Ctrl+S` | Save the active file |
 | `Ctrl+Alt+B` | Toggle the DSH conversation panel |
+| `Ctrl+\`` | Toggle the registered terminal panel |
+| `Ctrl+Shift+\`` | Create a terminal and show its panel |
 
-Terminal shortcuts are registered by `dsh-vscode-plugin`.
+The terminal remains an independent plugin. This workbench only owns the shortcuts and invokes it through `registerBottomPanel()` and the `terminal.new` command.
 
 
 ## Security

@@ -8,6 +8,7 @@ import type { VscodeWorkbench } from './service.ts'
 import { WorkbenchController } from './service.ts'
 import { Launcher, Workbench } from './Workbench.tsx'
 import { installStyles } from './styles.ts'
+import { handleTerminalShortcut } from './shortcuts.ts'
 
 export type { BottomPanelContribution, BottomPanelProps, VscodeWorkbench, WorkbenchCommand, WorkbenchSnapshot, WorkbenchView } from './service.ts'
 
@@ -33,6 +34,7 @@ export function apply(ctx: ClientContext): void {
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'dsh-vscode-workbench-overlay', inject: () => ({ service }) }, Overlay))
   ctx.effect(() => {
     const onKey = (event: KeyboardEvent) => {
+      if (handleTerminalShortcut(event, service)) return
       if (event.isComposing || !event.ctrlKey || event.altKey) return
       const view = event.shiftKey && event.code === 'KeyE' ? 'explorer' : event.shiftKey && event.code === 'KeyF' ? 'search' : event.shiftKey && event.code === 'KeyG' ? 'git' : undefined
       if (view !== undefined) { event.preventDefault(); service.show(view) }

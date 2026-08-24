@@ -46,10 +46,6 @@ dsh plugin --profile web add dsh-vscode-workbench
 | `Ctrl+Shift+G` | 打开源代码管理 |
 | `Ctrl+S` | 保存当前文件 |
 | `Ctrl+Alt+B` | 显示或隐藏 DSH 对话栏 |
-| `Ctrl+\`` | 显示或隐藏已注册的终端面板 |
-| `Ctrl+Shift+\`` | 新建终端并显示终端面板 |
-
-终端仍由独立插件提供；本工作台只注册快捷键，并通过 `registerBottomPanel()` 和 `terminal.new` 命令调用它。
 
 
 ## 安全

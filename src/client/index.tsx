@@ -19,10 +19,10 @@ const Overlay = ({ service, useSessions }: PropsRuntime<'shell.overlay'> & { ser
   const sessionId = useSessions(state => state.current) as string | undefined
   return <Workbench key={sessionId ?? 'no-session'} service={service} useSessions={useSessions as never}/>
 }
-const Footer = ({ service, wide }: PropsRuntime<'sidebar.footer.action'> & { service: VscodeWorkbench }) => {
+const Footer = ({ service }: PropsRuntime<'sidebar.footer.action'> & { service: VscodeWorkbench }) => {
   const [target, setTarget] = useState<HTMLElement>()
   useLayoutEffect(() => { const mount = document.createElement('div'); mount.className = 'dvw-launcher-mount'; document.body.append(mount); setTarget(mount); return () => mount.remove() }, [])
-  return target === undefined ? null : createPortal(<Launcher service={service} wide={wide}/>, target)
+  return target === undefined ? null : createPortal(<Launcher service={service} wide={false}/>, target)
 }
 
 export const inject = ['slots']

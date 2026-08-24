@@ -4,6 +4,10 @@
 
 <p align="center">在 DeepSeek Harness 中叠加 VS Code 风格的本地开发工作台。</p>
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/workbench-overview.svg" width="720" alt="工作台布局：活动栏、资源管理器/搜索/源代码管理、Monaco 编辑器、DSH 对话栏与状态栏">
+</p>
+
 ## 功能
 
 - 资源管理器：懒加载目录，支持新建、重命名、删除和刷新。

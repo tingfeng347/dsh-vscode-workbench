@@ -4,6 +4,10 @@
 
 <p align="center">A VS Code-style local development workbench for DeepSeek Harness.</p>
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/workbench-overview.svg" width="720" alt="Workbench layout: activity bar, Explorer/Search/Source Control sidebar, Monaco editor, DSH conversation panel and status bar">
+</p>
+
 ## Features
 
 - Explorer: lazy directory loading with create, rename, delete, and refresh actions.

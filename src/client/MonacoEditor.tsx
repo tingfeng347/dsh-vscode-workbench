@@ -3,6 +3,15 @@ import { useEffect, useRef, useState } from 'react'
 type Monaco = typeof import('monaco-editor')
 declare global { interface Window { require?: { (ids: string[], done: () => void): void; config(value: unknown): void }; monaco?: Monaco } }
 let loading: Promise<Monaco> | undefined
+/** Monaco chrome used by both editors so only the narrow native scrollbar remains. */
+export const WORKBENCH_EDITOR_CHROME = {
+  minimap: { enabled: false },
+  renderOverviewRuler: false,
+  overviewRulerLanes: 0,
+  hideCursorInOverviewRuler: true,
+  scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
+} as const
+
 export function loadMonaco(): Promise<Monaco> {
   loading ??= new Promise((resolve, reject) => {
     const start = () => {
@@ -19,7 +28,7 @@ export function loadMonaco(): Promise<Monaco> {
 
 export function MonacoDiffEditor(props: { uri: string; original: string; modified: string; mode: 'inline' | 'split'; theme: 'dark' | 'light' }) {
   const root=useRef<HTMLDivElement>(null);const editor=useRef<import('monaco-editor').editor.IStandaloneDiffEditor>();const models=useRef<{original:import('monaco-editor').editor.ITextModel;modified:import('monaco-editor').editor.ITextModel}>();const [error,setError]=useState<string>()
-  useEffect(()=>{let disposed=false;void loadMonaco().then(monaco=>{if(disposed||root.current===null)return;const safe=props.uri.replace(/^\/+/, '');const original=monaco.editor.createModel(props.original,undefined,monaco.Uri.parse(`dvw-diff-original:///${safe}`));const modified=monaco.editor.createModel(props.modified,undefined,monaco.Uri.parse(`dvw-diff-modified:///${safe}`));models.current={original,modified};const instance=monaco.editor.createDiffEditor(root.current,{automaticLayout:true,readOnly:true,renderSideBySide:props.mode==='split',theme:props.theme==='dark'?'vs-dark':'vs',fontSize:14,minimap:{enabled:false},originalEditable:false,renderOverviewRuler:true,ignoreTrimWhitespace:false});instance.setModel({original,modified});editor.current=instance}).catch(error=>setError(error instanceof Error?error.message:String(error)));return()=>{disposed=true;editor.current?.dispose();editor.current=undefined;models.current?.original.dispose();models.current?.modified.dispose();models.current=undefined}},[props.uri])
+  useEffect(()=>{let disposed=false;void loadMonaco().then(monaco=>{if(disposed||root.current===null)return;const safe=props.uri.replace(/^\/+/, '');const original=monaco.editor.createModel(props.original,undefined,monaco.Uri.parse(`dvw-diff-original:///${safe}`));const modified=monaco.editor.createModel(props.modified,undefined,monaco.Uri.parse(`dvw-diff-modified:///${safe}`));models.current={original,modified};const instance=monaco.editor.createDiffEditor(root.current,{automaticLayout:true,readOnly:true,renderSideBySide:props.mode==='split',theme:props.theme==='dark'?'vs-dark':'vs',fontSize:14,...WORKBENCH_EDITOR_CHROME,originalEditable:false,ignoreTrimWhitespace:false});instance.setModel({original,modified});editor.current=instance}).catch(error=>setError(error instanceof Error?error.message:String(error)));return()=>{disposed=true;editor.current?.dispose();editor.current=undefined;models.current?.original.dispose();models.current?.modified.dispose();models.current=undefined}},[props.uri])
   useEffect(()=>{const value=models.current;if(value===undefined)return;if(value.original.getValue()!==props.original)value.original.setValue(props.original);if(value.modified.getValue()!==props.modified)value.modified.setValue(props.modified)},[props.original,props.modified])
   useEffect(()=>{editor.current?.updateOptions({renderSideBySide:props.mode==='split'})},[props.mode])
   useEffect(()=>{if(window.monaco!==undefined)window.monaco.editor.setTheme(props.theme==='dark'?'vs-dark':'vs')},[props.theme])
@@ -39,7 +48,7 @@ export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' 
       const uri = monaco.Uri.parse(`file:///${props.uri.replace(/^\/+/, '')}`)
       model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(props.value, undefined, uri)
       if (model.getValue() !== props.value) model.setValue(props.value)
-      const instance = monaco.editor.create(root.current, { model, automaticLayout: true, theme: props.theme === 'dark' ? 'vs-dark' : 'vs', fontSize: 14, minimap: { enabled: true }, wordWrap: 'off' })
+      const instance = monaco.editor.create(root.current, { model, automaticLayout: true, theme: props.theme === 'dark' ? 'vs-dark' : 'vs', fontSize: 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off' })
       editor.current = instance
       const change = instance.onDidChangeModelContent(() => callbacks.current.onChange(instance.getValue()))
       instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => callbacks.current.onSave())

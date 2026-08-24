@@ -34,13 +34,6 @@ The workbench mounts through the official `sidebar.footer.action` and `shell.ove
 
 ## Installation
 
-Install the aggregate package for the complete workbench with terminal integration:
-
-```bash
-dsh plugin --profile web add dsh-vscode-plugin
-```
-
-Install only the workbench and its extension API:
 
 ```bash
 dsh plugin --profile web add dsh-vscode-workbench
@@ -58,9 +51,6 @@ dsh plugin --profile web add dsh-vscode-workbench
 
 Terminal shortcuts are registered by `dsh-vscode-plugin`.
 
-## Extension API
-
-The browser exposes a `vscodeWorkbench` service for registering bottom panels and commands and controlling workbench visibility. `dsh-vscode-plugin` uses this API to mount `@xterm/xterm`.
 
 ## Security
 

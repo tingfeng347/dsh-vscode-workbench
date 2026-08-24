@@ -33,14 +33,6 @@
 
 ## 安装
 
-推荐安装包含终端适配器的聚合包：
-
-```bash
-dsh plugin --profile web add dsh-vscode-plugin
-```
-
-仅使用工作台和扩展 API：
-
 ```bash
 dsh plugin --profile web add dsh-vscode-workbench
 ```
@@ -57,9 +49,6 @@ dsh plugin --profile web add dsh-vscode-workbench
 
 终端快捷键由 `dsh-vscode-plugin` 注册。
 
-## 扩展
-
-浏览器端提供 `vscodeWorkbench` 服务，可注册底部面板和命令，并控制工作台与面板显隐。`dsh-vscode-plugin` 使用该接口挂载 `@xterm/xterm`。
 
 ## 安全
 

@@ -1,5 +1,5 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import { useLayoutEffect, useState } from 'react'
+import { useEffect, useLayoutEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -21,8 +21,10 @@ const Overlay = ({ service, useSessions }: PropsRuntime<'shell.overlay'> & { ser
 }
 const Footer = ({ service }: PropsRuntime<'sidebar.footer.action'> & { service: VscodeWorkbench }) => {
   const [target, setTarget] = useState<HTMLElement>()
+  const [visible, setVisible] = useState(() => service.getSnapshot().visible)
   useLayoutEffect(() => { const mount = document.createElement('div'); mount.className = 'dvw-launcher-mount'; document.body.append(mount); setTarget(mount); return () => mount.remove() }, [])
-  return target === undefined ? null : createPortal(<Launcher service={service}/>, target)
+  useEffect(() => service.subscribe(() => setVisible(service.getSnapshot().visible)), [service])
+  return target === undefined || visible ? null : createPortal(<Launcher service={service}/>, target)
 }
 
 export const inject = ['slots']

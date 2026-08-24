@@ -21,6 +21,23 @@
 
 The workbench mounts through the official `sidebar.footer.action` and `shell.overlay` extension points. It does not replace or disable `ui-layout`.
 
+## Screenshots
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/explorer.png" width="800" alt="Explorer and Monaco editor">
+  <br><em>Explorer and Monaco editor</em>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/search.png" width="800" alt="ripgrep full-text search">
+  <br><em>ripgrep full-text search</em>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control.png" width="800" alt="Source control and commit graph">
+  <br><em>Source control and commit graph</em>
+</p>
+
 ## Installation
 
 Install the aggregate package for the complete workbench with terminal integration:

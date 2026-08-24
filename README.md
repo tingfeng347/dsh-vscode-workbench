@@ -21,6 +21,23 @@
 
 工作台通过官方 `sidebar.footer.action` 和 `shell.overlay` 扩展点挂载，不替换或卸载 `ui-layout`。
 
+## 截图
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/explorer.png" width="800" alt="资源管理器与 Monaco 编辑器">
+  <br><em>资源管理器与 Monaco 编辑器</em>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/search.png" width="800" alt="基于 ripgrep 的全文搜索">
+  <br><em>基于 ripgrep 的全文搜索</em>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control.png" width="800" alt="源代码管理与提交图表">
+  <br><em>源代码管理与提交图表</em>
+</p>
+
 ## 安装
 
 推荐安装包含终端适配器的聚合包：

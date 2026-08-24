@@ -1,0 +1,146 @@
+name: Release and publish to npm
+
+on:
+  push:
+    tags:
+      - "v*"
+
+concurrency:
+  group: release-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build and verify package
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+
+      - name: Verify release tag matches package version
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          PACKAGE_VERSION="$(node -p 'require("./package.json").version')"
+          test "$RELEASE_TAG" = "v$PACKAGE_VERSION" || {
+            echo "Release tag $RELEASE_TAG does not match package version $PACKAGE_VERSION"
+            exit 1
+          }
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run quality checks
+        run: |
+          pnpm typecheck
+          pnpm test
+
+      - name: Build package
+        run: pnpm build
+
+      - name: Pack distribution
+        run: pnpm pack --pack-destination dist
+
+      - name: Verify distribution contents
+        run: |
+          PACKAGE_FILE="$(find dist -maxdepth 1 -name '*.tgz' -type f -print -quit)"
+          test -n "$PACKAGE_FILE" || {
+            echo "npm package was not created"
+            exit 1
+          }
+
+          for REQUIRED_FILE in \
+            package/package.json \
+            package/lib/index.js \
+            package/lib/client.js \
+            package/lib/types/index.d.ts \
+            package/README.md \
+            package/README.en.md \
+            package/LICENSE
+          do
+            tar -tzf "$PACKAGE_FILE" | grep -qx "$REQUIRED_FILE" || {
+              echo "npm package is missing $REQUIRED_FILE"
+              exit 1
+            }
+          done
+
+          PACKAGE_NAME="$(tar -xOzf "$PACKAGE_FILE" package/package.json | node -e 'let value=""; process.stdin.on("data", chunk => value += chunk); process.stdin.on("end", () => console.log(JSON.parse(value).name))')"
+          PACKAGE_VERSION="$(tar -xOzf "$PACKAGE_FILE" package/package.json | node -e 'let value=""; process.stdin.on("data", chunk => value += chunk); process.stdin.on("end", () => console.log(JSON.parse(value).version))')"
+          test "$PACKAGE_NAME" = "dsh-vscode-workbench"
+          test "v$PACKAGE_VERSION" = "${{ github.ref_name }}"
+
+      - name: Upload npm package
+        uses: actions/upload-artifact@v4
+        with:
+          name: npm-package
+          path: dist/*.tgz
+          if-no-files-found: error
+
+  release:
+    name: Create GitHub release
+    needs: [build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download npm package
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+          path: dist
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TAG"
+          else
+            gh release create "$RELEASE_TAG" --title "$RELEASE_TAG" --generate-notes
+          fi
+          gh release upload "$RELEASE_TAG" dist/*.tgz --clobber
+
+  publish:
+    name: Publish npm package
+    needs: [build, release]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Download npm package
+        uses: actions/download-artifact@v4
+        with:
+          name: npm-package
+          path: dist
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      - name: Publish package
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          NPM_CONFIG_PROVENANCE: "true"
+        run: npm publish ./dist/*.tgz --access public --provenance

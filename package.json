@@ -4,6 +4,18 @@
   "description": "Explorer, Monaco editor, search and local Git overlay for DSH",
   "type": "module",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tingfeng347/dsh-vscode-workbench.git"
+  },
+  "homepage": "https://github.com/tingfeng347/dsh-vscode-workbench#readme",
+  "bugs": {
+    "url": "https://github.com/tingfeng347/dsh-vscode-workbench/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://registry.npmjs.org"
+  },
   "engines": {
     "node": "^22.19.0 || >=24.0.0"
   },

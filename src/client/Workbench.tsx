@@ -74,38 +74,55 @@ function Search(props: { sessionId: string; onOpen(path: string, line: number, c
   return <><div className="dvw-side-head">搜索</div><form className="dvw-search-form" onSubmit={event => { event.preventDefault(); void search() }}><input className="dvw-input" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索" autoFocus/><div className="dvw-options">{([['caseSensitive','Aa'],['wholeWord','Ab'],['regex','.*']] as const).map(([key,label]) => <label key={key}><input type="checkbox" checked={flags[key]} onChange={e => setFlags({ ...flags, [key]: e.target.checked })}/>{label}</label>)}<button className="dvw-icon" title="搜索" disabled={busy}><Icon name="search"/></button></div><input className="dvw-input" value={include} onChange={e=>setInclude(e.target.value)} placeholder="包含文件，例如 src/**"/><input className="dvw-input" value={exclude} onChange={e=>setExclude(e.target.value)} placeholder="排除文件，例如 **/*.test.ts"/></form>{error&&<div className="dvw-error">{error}</div>}{limited&&<div className="dvw-message">结果已截断到 2000 条</div>}<div className="dvw-results">{[...groups].map(([path, rows]) => <div key={path}><div className="dvw-result-file"><Icon name="chevron-down"/> {path} <span className="dvw-badge">{rows.length}</span></div>{rows.map((row,index)=><div className="dvw-result" key={`${row.line}:${row.column}:${index}`} onClick={()=>props.onOpen(path,row.line,row.column)}><span className="dvw-line">{row.line}</span><span className="dvw-preview">{row.preview}</span></div>)}</div>)}</div></>
 }
 
-interface GraphRow { commit: GitCommit; lane: number; before: string[]; after: string[]; parentLanes: number[] }
+export interface GraphTrack { hash: string; color: number }
+export interface GraphRow { commit: GitCommit; lane: number; before: GraphTrack[]; after: GraphTrack[]; parentLanes: number[] }
 export function graphRows(commits: GitCommit[]): GraphRow[] {
-  const visible=new Set(commits.map(commit=>commit.hash))
-  let lanes: string[] = commits[0] ? [commits[0].hash] : []
+  const visible = new Set(commits.map(commit => commit.hash))
+  let nextColor = 0
+  let lanes: GraphTrack[] = commits[0] ? [{ hash: commits[0].hash, color: nextColor++ }] : []
   return commits.map(commit => {
-    let lane = lanes.indexOf(commit.hash)
-    if (lane < 0) { lanes=[commit.hash,...lanes]; lane = 0 }
-    const before=[...lanes];const after=before.filter(hash=>hash!==commit.hash)
-    const parents=commit.parents.filter(parent=>visible.has(parent));parents.forEach((parent,index)=>{if(!after.includes(parent))after.splice(Math.min(lane+index,after.length),0,parent)})
-    const parentLanes=parents.map(parent=>after.indexOf(parent)).filter(index=>index>=0)
-    lanes=after
-    return {commit,lane,before,after,parentLanes}
+    let lane = lanes.findIndex(track => track.hash === commit.hash)
+    if (lane < 0) { lanes = [{ hash: commit.hash, color: nextColor++ }, ...lanes]; lane = 0 }
+    const before = [...lanes]
+    const current = before[lane]!
+    const after = before.filter(track => track.hash !== commit.hash)
+    const parents = commit.parents.filter(parent => visible.has(parent))
+    parents.forEach((parent, index) => {
+      if (after.some(track => track.hash === parent)) return
+      const color = index === 0 ? current.color : nextColor++
+      after.splice(Math.min(lane + index, after.length), 0, { hash: parent, color })
+    })
+    const parentLanes = parents.map(parent => after.findIndex(track => track.hash === parent)).filter(index => index >= 0)
+    lanes = after
+    return { commit, lane, before, after, parentLanes }
   })
 }
 
 const GRAPH_COLORS = ['#4c8dff','#d94f9f','#4fc1b0','#d9a441','#9b7bea']
-function graphColor(lane:number):string{return GRAPH_COLORS[lane%GRAPH_COLORS.length]!}
+function graphColor(color:number):string{return GRAPH_COLORS[color%GRAPH_COLORS.length]!}
 function graphWidth(row:GraphRow):number{return Math.max(row.before.length,row.after.length,row.lane+1,1)*14+8}
 
+/** Draw a fixed-radius, orthogonal transition between two graph lanes. */
+export function graphTrackPath(from: number, to: number, startY: number, endY: number, bendY: number): string {
+  if (from === to) return `M ${from} ${startY} V ${endY}`
+  const direction = Math.sign(to - from)
+  const radius = Math.min(5, Math.abs(to - from) / 2, Math.abs(bendY - startY), Math.abs(endY - bendY))
+  return `M ${from} ${startY} V ${bendY - radius} Q ${from} ${bendY} ${from + direction * radius} ${bendY} H ${to - direction * radius} Q ${to} ${bendY} ${to} ${bendY + radius} V ${endY}`
+}
+
 function GraphTracks({row}:{row:GraphRow}) {
-  const width=graphWidth(row);const x=row.lane*14+8
+  const width=graphWidth(row);const x=row.lane*14+8;const current=row.before[row.lane]!
   return <svg className="dvw-graph-svg" width={width} height="38" viewBox={`0 0 ${width} 38`} aria-hidden="true">
-    {row.before.map((hash,lane)=>{if(hash===row.commit.hash)return null;const target=row.after.indexOf(hash);const nextLane=target>=0?target:lane;const next=nextLane*14+8;const start=lane*14+8;return <path key={`continue-${hash}`} d={`M ${start} 0 C ${start} 14 ${next} 24 ${next} 38`} fill="none" stroke={graphColor(nextLane)} strokeWidth="2"/>})}
-    <path d={`M ${x} 0 V 19`} fill="none" stroke={graphColor(row.lane)} strokeWidth="2"/>
-    {row.parentLanes.map((parent,index)=>{const target=parent*14+8;return <path key={`parent-${parent}-${index}`} d={`M ${x} 19 C ${x} 27 ${target} 30 ${target} 38`} fill="none" stroke={graphColor(parent)} strokeWidth="2"/>})}
-    <circle cx={x} cy="19" r="5" fill="var(--dvw-surface-1)" stroke={graphColor(row.lane)} strokeWidth="2"/>
+    {row.before.map((track,lane)=>{if(track.hash===row.commit.hash)return null;const target=row.after.findIndex(next=>next.hash===track.hash);const nextLane=target>=0?target:lane;return <path key={`continue-${track.hash}`} d={graphTrackPath(lane*14+8,nextLane*14+8,0,38,19)} fill="none" stroke={graphColor(track.color)} strokeWidth="2" vectorEffect="non-scaling-stroke"/>})}
+    <path d={`M ${x} 0 V 19`} fill="none" stroke={graphColor(current.color)} strokeWidth="2" vectorEffect="non-scaling-stroke"/>
+    {row.parentLanes.map((parent,index)=>{const target=parent*14+8;const track=row.after[parent]!;return <path key={`parent-${track.hash}-${index}`} d={graphTrackPath(x,target,19,38,29)} fill="none" stroke={graphColor(track.color)} strokeWidth="2" vectorEffect="non-scaling-stroke"/>})}
+    <circle cx={x} cy="19" r="5" fill="var(--dvw-surface-1)" stroke={graphColor(current.color)} strokeWidth="2" vectorEffect="non-scaling-stroke"/>
   </svg>
 }
 
 function GraphContinuation({row}:{row:GraphRow}) {
   const width=graphWidth(row)
-  return <svg className="dvw-graph-continuation" width={width} height="100%" viewBox={`0 0 ${width} 100`} preserveAspectRatio="none" aria-hidden="true">{row.after.map((hash,lane)=><line key={hash} x1={lane*14+8} y1="0" x2={lane*14+8} y2="100" stroke={graphColor(lane)} strokeWidth="2" vectorEffect="non-scaling-stroke"/>)}</svg>
+  return <svg className="dvw-graph-continuation" width={width} height="100%" viewBox={`0 0 ${width} 100`} preserveAspectRatio="none" aria-hidden="true">{row.after.map((track,lane)=><line key={track.hash} x1={lane*14+8} y1="0" x2={lane*14+8} y2="100" stroke={graphColor(track.color)} strokeWidth="2" vectorEffect="non-scaling-stroke"/>)}</svg>
 }
 
 function CommitGraph({ commits, expanded, files, onToggle, onOpenFile }: { commits: GitCommit[]; expanded?: string; files: Map<string,GitCommitFile[]>; onToggle(commit:GitCommit):void; onOpenFile(commit:GitCommit,file:GitCommitFile):void }) {

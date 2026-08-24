@@ -14,7 +14,10 @@ export type { BottomPanelContribution, BottomPanelProps, VscodeWorkbench, Workbe
 declare module '@deepseek-ai/cordis' { interface Context { vscodeWorkbench: VscodeWorkbench } }
 declare module '@deepseek-ai/dsh-client-ui-slots' { interface SlotInjectMap { 'dsh-vscode-workbench.overlay': { service: VscodeWorkbench }; 'dsh-vscode-workbench.launcher': { service: VscodeWorkbench } } }
 
-const Overlay = ({ service, useSessions }: PropsRuntime<'shell.overlay'> & { service: VscodeWorkbench }) => <Workbench service={service} useSessions={useSessions as never}/>
+const Overlay = ({ service, useSessions }: PropsRuntime<'shell.overlay'> & { service: VscodeWorkbench }) => {
+  const sessionId = useSessions(state => state.current) as string | undefined
+  return <Workbench key={sessionId ?? 'no-session'} service={service} useSessions={useSessions as never}/>
+}
 const Footer = ({ service, wide }: PropsRuntime<'sidebar.footer.action'> & { service: VscodeWorkbench }) => {
   const marker=useRef<HTMLSpanElement>(null);const [target,setTarget]=useState<HTMLElement|null>()
   useLayoutEffect(()=>{let container=marker.current?.parentElement;while(container?.previousElementSibling===null)container=container.parentElement;const region=container?.previousElementSibling;if(!(region instanceof HTMLElement)){setTarget(null);return}const mount=document.createElement('div');mount.className='dvw-sidebar-launcher-mount';region.prepend(mount);setTarget(mount);return()=>mount.remove()},[])

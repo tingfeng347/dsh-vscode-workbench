@@ -1,0 +1,3 @@
+- insert:
+    - id: vscode-workbench
+      name: dsh-vscode-workbench

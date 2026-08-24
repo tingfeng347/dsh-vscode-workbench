@@ -69,6 +69,7 @@ jobs:
             package/lib/index.js \
             package/lib/client.js \
             package/lib/types/index.d.ts \
+            package/cordis.patch.yml \
             package/README.md \
             package/README.en.md \
             package/LICENSE

@@ -1,8 +1,9 @@
-<p align="center"><a href="README.md">中文</a> · <b>English</b></p>
+
 
 <h1 align="center">DSH VS Code Workbench</h1>
 
 <p align="center">A VS Code-style local development workbench for DeepSeek Harness.</p>
+<p align="center"><a href="README.md">中文</a> · <b>English</b></p>
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/workbench-overview.svg" width="720" alt="Workbench layout: activity bar, Explorer/Search/Source Control sidebar, Monaco editor, DSH conversation panel and status bar">
@@ -28,10 +29,6 @@ The workbench mounts through the official `sidebar.footer.action` and `shell.ove
   <br><em>Explorer and Monaco editor</em>
 </p>
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/search.png" width="800" alt="ripgrep full-text search">
-  <br><em>ripgrep full-text search</em>
-</p>
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control.png" width="800" alt="Source control and commit graph">

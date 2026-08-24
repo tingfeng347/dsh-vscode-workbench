@@ -1,8 +1,9 @@
-<p align="center"><b>中文</b> · <a href="README.en.md">English</a></p>
 
 <h1 align="center">DSH VS Code Workbench</h1>
 
 <p align="center">在 DeepSeek Harness 中叠加 VS Code 风格的本地开发工作台。</p>
+
+<p align="center"><b>中文</b> · <a href="README.en.md">English</a></p>
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/workbench-overview.svg" width="720" alt="工作台布局：活动栏、资源管理器/搜索/源代码管理、Monaco 编辑器、DSH 对话栏与状态栏">
@@ -28,10 +29,6 @@
   <br><em>资源管理器与 Monaco 编辑器</em>
 </p>
 
-<p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/search.png" width="800" alt="基于 ripgrep 的全文搜索">
-  <br><em>基于 ripgrep 的全文搜索</em>
-</p>
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control.png" width="800" alt="源代码管理与提交图表">

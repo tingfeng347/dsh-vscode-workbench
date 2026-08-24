@@ -1,21 +1,41 @@
-
-
 <h1 align="center">DSH VS Code Workbench</h1>
 
 <p align="center">A VS Code-style local development workbench for DeepSeek Harness.</p>
 <p align="center"><a href="README.md">中文</a> · <b>English</b></p>
 
+## Highlights
+
+- **Genuine VS Code feel**: explorer / search / source-control views, an activity bar, and `Ctrl+Shift+E/F/G` shortcuts — the workflow you already know.
+- **Reliable saves**: atomic writes with revision checks; conflicts are raised instead of silently overwriting.
+- **External-change awareness**: a WebSocket watches the workspace, flagging files changed on disk in the tab and status bar.
+- **Commit graph**: a swimlane commit graph visualizes branch history.
+- **Per-workspace restore**: active view, tabs, widths, panels, and tree expansion persist per workspace across reloads.
 
 ## Features
 
-- Explorer: lazy directory loading with create, rename, delete, and refresh actions.
-- Editor: Monaco tabs, dirty state, atomic saves, revision conflicts, and external-change notices.
-- Preview: rendered Markdown by default with source and outline modes, workspace-relative links, and image previews.
-- Search: `@vscode/ripgrep` full-text search with case, whole-word, regex, and include/exclude controls.
-- Git: grouped status, stage, unstage, discard, commit, branch switching, inline/side-by-side diffs, and a commit graph.
-- Layout: resizable and collapsible primary view, bottom panel, and status bar, with centralized theme and width settings.
-- DSH conversation: reuses the official conversation UI with messages, coding tools, models, attachments, and permissions.
-- Restore: persists the active view, tabs, widths, and panel state per workspace across reloads.
+### Explorer
+A lazily loaded tree with create / rename / delete and refresh.
+
+### Editor
+Monaco tabs with dirty tracking, atomic saves, and revision-conflict plus external-change notices.
+
+### Preview
+Markdown rendered by default with source and outline modes; workspace-relative links, image and common file previews.
+
+### Search
+`@vscode/ripgrep` full-text search with case, whole-word, regex, and include / exclude controls.
+
+### Git
+Grouped status, stage, unstage, discard, commit, branch switching, inline / side-by-side diffs, and a commit graph.
+
+### Layout
+Resizable and collapsible primary view, an extensible bottom panel, and a status bar; theme and widths centralized in settings.
+
+### DSH conversation
+Reuses the official conversation UI with messages, coding tools, models, attachments, and permissions.
+
+### Restore
+Persists the active view, tabs, widths, and panel state per workspace across reloads.
 
 The workbench mounts through the official `sidebar.footer.action` and `shell.overlay` extension points. It does not replace or disable `ui-layout`.
 
@@ -26,14 +46,12 @@ The workbench mounts through the official `sidebar.footer.action` and `shell.ove
   <br><em>Explorer and Monaco editor</em>
 </p>
 
-
 <p align="center">
   <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control.png" width="800" alt="Source control and commit graph">
   <br><em>Source control and commit graph</em>
 </p>
 
 ## Installation
-
 
 ```bash
 dsh plugin --profile web add dsh-vscode-workbench
@@ -48,7 +66,6 @@ dsh plugin --profile web add dsh-vscode-workbench
 | `Ctrl+Shift+G` | Open Source Control |
 | `Ctrl+S` | Save the active file |
 | `Ctrl+Alt+B` | Toggle the DSH conversation panel |
-
 
 ## Security
 

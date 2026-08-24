@@ -1,5 +1,5 @@
 import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
-import { useLayoutEffect, useRef, useState } from 'react'
+import { useLayoutEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
@@ -20,9 +20,9 @@ const Overlay = ({ service, useSessions }: PropsRuntime<'shell.overlay'> & { ser
   return <Workbench key={sessionId ?? 'no-session'} service={service} useSessions={useSessions as never}/>
 }
 const Footer = ({ service, wide }: PropsRuntime<'sidebar.footer.action'> & { service: VscodeWorkbench }) => {
-  const marker=useRef<HTMLSpanElement>(null);const [target,setTarget]=useState<HTMLElement|null>()
-  useLayoutEffect(()=>{let container=marker.current?.parentElement;while(container?.previousElementSibling===null)container=container.parentElement;const region=container?.previousElementSibling;if(!(region instanceof HTMLElement)){setTarget(null);return}const mount=document.createElement('div');mount.className='dvw-sidebar-launcher-mount';region.prepend(mount);setTarget(mount);return()=>mount.remove()},[])
-  return <><span ref={marker} hidden/>{target===undefined?null:target===null?<Launcher service={service} wide={wide}/>:createPortal(<Launcher service={service} wide={wide}/>,target)}</>
+  const [target, setTarget] = useState<HTMLElement>()
+  useLayoutEffect(() => { const mount = document.createElement('div'); mount.className = 'dvw-launcher-mount'; document.body.append(mount); setTarget(mount); return () => mount.remove() }, [])
+  return target === undefined ? null : createPortal(<Launcher service={service} wide={wide}/>, target)
 }
 
 export const inject = ['slots']

@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile, readFile } from 'node:fs/promis
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
-import { codiconAsset, createEntry, gitAction, gitStatus, listFiles, readDocument, renameEntry, saveDocument, workspaceImage, workspacePath } from '../src/host.ts'
+import { codiconAsset, createEntry, gitAction, gitStatus, listFiles, readDocument, renameEntry, saveDocument, uploadFile, workspaceImage, workspacePath } from '../src/host.ts'
 
 const roots:string[]=[]
 async function temp(){const value=await mkdtemp(join(tmpdir(),'dvw-'));roots.push(value);return value}
@@ -12,6 +12,7 @@ describe('workspace filesystem',()=>{
   it('lists lazily and performs guarded mutations',async()=>{const root=await temp();await mkdir(join(root,'src'));await writeFile(join(root,'src','a.ts'),'one');expect((await listFiles(root,'')).map(x=>x.name)).toEqual(['src']);const doc=await readDocument(root,'src/a.ts');await saveDocument(root,'src/a.ts','two',doc.revision);expect(await readFile(join(root,'src','a.ts'),'utf8')).toBe('two');await createEntry(root,'src/b.ts','file');await renameEntry(root,'src/b.ts','src/c.ts');expect((await listFiles(root,'src')).map(x=>x.name)).toEqual(['a.ts','c.ts'])})
   it('rejects traversal and symlink escape',async()=>{const root=await temp();const outside=await temp();await writeFile(join(outside,'secret'),'x');await symlink(outside,join(root,'link'));await expect(workspacePath(root,'../x')).rejects.toMatchObject({code:'path-outside'});await expect(readDocument(root,'link/secret')).rejects.toMatchObject({code:'path-outside'})})
   it('rejects stale saves',async()=>{const root=await temp();await writeFile(join(root,'a'),'one');const doc=await readDocument(root,'a');await writeFile(join(root,'a'),'external');await expect(saveDocument(root,'a','mine',doc.revision)).rejects.toMatchObject({code:'revision-conflict'})})
+  it('uploads files only to an existing workspace directory without overwriting',async()=>{const root=await temp();await mkdir(join(root,'uploads'));const entry=await uploadFile(root,'uploads','report.txt',Buffer.from('received'));expect(entry.path).toBe('uploads/report.txt');expect(await readFile(join(root,'uploads','report.txt'),'utf8')).toBe('received');await expect(uploadFile(root,'uploads','report.txt',Buffer.from('again'))).rejects.toMatchObject({code:'EEXIST'});await expect(uploadFile(root,'../outside','x.txt',Buffer.from('x'))).rejects.toMatchObject({code:'path-outside'});await expect(uploadFile(root,'uploads','../x.txt',Buffer.from('x'))).rejects.toMatchObject({code:'filename-invalid'})})
   it('serves only workspace images through the preview resolver',async()=>{const root=await temp();await writeFile(join(root,'preview.png'),'image');await writeFile(join(root,'notes.txt'),'text');expect(await workspaceImage(root,'preview.png')).toMatchObject({type:'image/png'});await expect(workspaceImage(root,'notes.txt')).rejects.toMatchObject({code:'unsupported-media'});await expect(workspaceImage(root,'../preview.png')).rejects.toMatchObject({code:'path-outside'})})
 })
 

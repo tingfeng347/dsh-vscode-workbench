@@ -95,6 +95,17 @@ export async function createEntry(cwd: string, path: string, kind: 'file' | 'dir
   else { const handle = await open(absolute, 'wx'); await handle.close() }
 }
 
+/** Write an uploaded file into an existing workspace directory without overwriting files. */
+export async function uploadFile(cwd: string, directory: string, name: string, content: Buffer): Promise<FileEntry> {
+  if (name === '' || name === '.' || name === '..' || name.includes('/') || name.includes('\\')) throw new WorkbenchError('filename-invalid', 'uploaded file name is invalid')
+  const targetPath = directory === '' ? name : `${directory}/${name}`
+  const { root, absolute } = await workspacePath(cwd, targetPath, true)
+  const handle = await open(absolute, 'wx')
+  try { await handle.writeFile(content) } finally { await handle.close() }
+  const info = await lstat(absolute)
+  return { name, path: relativePath(root, absolute), kind: 'file', size: info.size, mtimeMs: info.mtimeMs }
+}
+
 export async function renameEntry(cwd: string, path: string, nextPath: string): Promise<void> {
   const source = await workspacePath(cwd, path)
   const target = await workspacePath(cwd, nextPath, true)

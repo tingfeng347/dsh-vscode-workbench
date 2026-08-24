@@ -5,9 +5,9 @@ import type { Duplex } from 'node:stream'
 import chokidar from 'chokidar'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { HostContext } from './context.ts'
-import { codiconAsset, createEntry, cwdFor, deleteEntry, gitAction, gitStatus, listFiles, monacoAsset, readDocument, renameEntry, saveDocument, searchWorkspace, workspaceImage } from './host.ts'
+import { codiconAsset, createEntry, cwdFor, deleteEntry, gitAction, gitStatus, listFiles, monacoAsset, readDocument, renameEntry, saveDocument, searchWorkspace, uploadFile, workspaceImage } from './host.ts'
 import type { SearchRequest } from './types.ts'
-import { readBody, send, sendError, stringField, trusted, WorkbenchError } from './wire.ts'
+import { readBinaryBody, readBody, send, sendError, stringField, trusted, WorkbenchError } from './wire.ts'
 
 export { WorkbenchError } from './wire.ts'
 export * from './types.ts'
@@ -56,6 +56,19 @@ export function apply(ctx: HostContext): void {
       } catch (error) { sendError(res, error) }
     },
   }), 'dsh-vscode-workbench: API')
+
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact', path: '/dsh-vscode/upload', handler: async (req, res) => {
+      if (!trusted(req, ctx.webRuntime.trustedHosts)) return send(res, 403, { ok: false, error: { code: 'forbidden', message: 'forbidden' } })
+      if (req.method !== 'POST') return send(res, 405, { ok: false, error: { code: 'method', message: 'POST required' } })
+      try {
+        const url = new URL(req.url ?? '/', 'http://dsh.local')
+        const sessionId = url.searchParams.get('sessionId'); const directory = url.searchParams.get('directory'); const name = url.searchParams.get('name')
+        if (sessionId === null || directory === null || name === null) throw new WorkbenchError('bad-request', 'sessionId, directory and name are required')
+        send(res, 201, { ok: true, value: await uploadFile(cwdFor(ctx, sessionId), directory, name, await readBinaryBody(req)) })
+      } catch (error) { sendError(res, error) }
+    },
+  }), 'dsh-vscode-workbench: file upload')
 
   ctx.effect(() => ctx.webServer.register({
     kind:'prefix',path:'/dsh-vscode/file',handler:async(req,res)=>{if(!trusted(req,ctx.webRuntime.trustedHosts)){res.writeHead(403);res.end();return}try{const url=new URL(req.url??'/','http://dsh.local');const sessionId=url.searchParams.get('sessionId');const path=url.searchParams.get('path');if(sessionId===null||path===null)throw new WorkbenchError('bad-request','sessionId and path are required');const asset=await workspaceImage(cwdFor(ctx,sessionId),path);res.writeHead(200,{'content-type':asset.type,'x-content-type-options':'nosniff','cache-control':'no-store'});res.end(await readFile(asset.path))}catch(error){sendError(res,error)}}

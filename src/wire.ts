@@ -20,6 +20,19 @@ export async function readBody(req: IncomingMessage): Promise<Record<string, unk
   } catch { throw new WorkbenchError('bad-json', 'request body must be a JSON object') }
 }
 
+/** Read a binary upload while enforcing a fixed request limit. */
+export async function readBinaryBody(req: IncomingMessage, limit = 100 * 1024 * 1024): Promise<Buffer> {
+  const chunks: Buffer[] = []
+  let size = 0
+  for await (const chunk of req) {
+    const value = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+    size += value.length
+    if (size > limit) throw new WorkbenchError('too-large', 'uploaded file is too large', 413)
+    chunks.push(value)
+  }
+  return Buffer.concat(chunks)
+}
+
 export function stringField(body: Record<string, unknown>, key: string): string {
   const value = body[key]
   if (typeof value !== 'string') throw new WorkbenchError('bad-request', `${key} must be a string`)

@@ -14,7 +14,7 @@
 ## Features
 
 ### Explorer
-A lazily loaded tree with create / rename / delete and refresh.
+A lazily loaded tree with create, upload, rename, delete, and refresh. Drop local files onto the workspace root or any directory; Git file markers show `A`, `M`, and other status codes.
 
 ### Editor
 Monaco tabs with dirty tracking, atomic saves, and revision-conflict plus external-change notices.

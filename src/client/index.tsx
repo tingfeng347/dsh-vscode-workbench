@@ -22,7 +22,7 @@ const Overlay = ({ service, useSessions }: PropsRuntime<'shell.overlay'> & { ser
 const Footer = ({ service }: PropsRuntime<'sidebar.footer.action'> & { service: VscodeWorkbench }) => {
   const [target, setTarget] = useState<HTMLElement>()
   useLayoutEffect(() => { const mount = document.createElement('div'); mount.className = 'dvw-launcher-mount'; document.body.append(mount); setTarget(mount); return () => mount.remove() }, [])
-  return target === undefined ? null : createPortal(<Launcher service={service} wide={false}/>, target)
+  return target === undefined ? null : createPortal(<Launcher service={service}/>, target)
 }
 
 export const inject = ['slots']

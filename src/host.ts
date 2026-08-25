@@ -54,11 +54,15 @@ export async function listFiles(cwd: string, path: string): Promise<FileEntry[]>
   const values = await readdir(absolute, { withFileTypes: true })
   const rows = await Promise.all(values.filter(item => item.name !== '.git').map(async item => {
     const full = join(absolute, item.name)
-    const info = await lstat(full)
-    const kind = item.isDirectory() ? 'directory' as const : 'file' as const
+    const linkInfo = await lstat(full)
+    if (!item.isSymbolicLink()) return { name: item.name, path: relativePath(root, full), kind: linkInfo.isDirectory() ? 'directory' as const : 'file' as const, size: linkInfo.size, mtimeMs: linkInfo.mtimeMs }
+    const actual = await realpath(full).catch(() => undefined)
+    if (actual === undefined || !inside(root, actual)) return undefined
+    const info = await stat(full)
+    const kind = info.isDirectory() ? 'directory' as const : 'file' as const
     return { name: item.name, path: relativePath(root, full), kind, size: info.size, mtimeMs: info.mtimeMs }
   }))
-  return rows.sort((a, b) => a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'directory' ? -1 : 1)
+  return rows.filter(row => row !== undefined).sort((a, b) => a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'directory' ? -1 : 1)
 }
 
 export async function readDocument(cwd: string, path: string): Promise<FileDocument> {

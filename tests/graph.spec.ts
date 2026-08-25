@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GitCommit } from '../src/types.ts'
-import { createdEntryPath, graphRows, graphTrackPath, renamedPath, tabLabel, uploadDestination } from '../src/client/Workbench.tsx'
+import { createdEntryPath, directoryAffected, graphRows, graphTrackPath, renamedPath, restoreTabPaths, tabLabel, uploadDestination } from '../src/client/Workbench.tsx'
 import { markdownHeadings, markdownWorkspacePath } from '../src/client/MarkdownPreview.tsx'
 
 function commit(hash: string, parents: string[]): GitCommit {
@@ -47,5 +47,9 @@ describe('Editor tab labels',()=>{it('shows only the filename while paths remain
 describe('Explorer upload destination',()=>{it('uses the selected directory and falls back to the workspace root',()=>{expect(uploadDestination('docs/assets')).toBe('docs/assets');expect(uploadDestination()).toBe('')})})
 
 describe('Explorer inline creation',()=>{it('creates entries in the selected directory or workspace root',()=>{expect(createdEntryPath('docs/assets','logo.svg')).toBe('docs/assets/logo.svg');expect(createdEntryPath('','README.md')).toBe('README.md')})})
+
+describe('Explorer targeted refresh',()=>{it('reloads only the directory containing a changed path',()=>{expect(directoryAffected('src/client',['src/client/App.tsx'])).toBe(true);expect(directoryAffected('src',['src/client/App.tsx'])).toBe(false);expect(directoryAffected('src',['src'])).toBe(true)})})
+
+describe('Lazy tab restore',()=>{it('restores unique unloaded tab headers without content',()=>{expect(restoreTabPaths(['src/a.ts','src/b.ts','src/a.ts']).map(tab=>({path:tab.path,loaded:tab.loaded,draft:tab.draft}))).toEqual([{path:'src/a.ts',loaded:false,draft:''},{path:'src/b.ts',loaded:false,draft:''}])})})
 
 describe('Explorer rename target',()=>{it('keeps an entry in its current directory',()=>{expect(renamedPath('docs/assets/old.txt','new.txt')).toBe('docs/assets/new.txt');expect(renamedPath('old.txt','new.txt')).toBe('new.txt')})})

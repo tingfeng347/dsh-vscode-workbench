@@ -1,6 +1,7 @@
 /** DSH host plugin for the VS Code workbench. */
 import { readFile } from 'node:fs/promises'
 import type { IncomingMessage } from 'node:http'
+import { isAbsolute, relative, sep } from 'node:path'
 import type { Duplex } from 'node:stream'
 import chokidar from 'chokidar'
 import { WebSocket, WebSocketServer } from 'ws'
@@ -93,10 +94,12 @@ export function apply(ctx: HostContext): void {
       wss.handleUpgrade(req as IncomingMessage, socket as Duplex, head, (ws) => {
         const sessionId = new URL(req.url ?? '/', 'http://dsh.local').searchParams.get('sessionId')
         if (sessionId === null) { ws.close(1008, 'sessionId required'); return }
-        const watcher = chokidar.watch(cwdFor(ctx, sessionId), { ignoreInitial: true, ignored: /(^|[/\\])(\.git|node_modules)([/\\]|$)/, awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 25 } })
+        const workspace = cwdFor(ctx, sessionId)
+        const watcher = chokidar.watch(workspace, { ignoreInitial: true, ignored: /(^|[/\\])(\.git|node_modules|\.next|\.nuxt|\.turbo|\.vite|coverage)([/\\]|$)/, awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 25 } })
         let paths = new Set<string>(); let timer: ReturnType<typeof setTimeout> | undefined
         watcher.on('all', (_event, path) => {
-          paths.add(path); clearTimeout(timer); timer = setTimeout(() => {
+          const changed = isAbsolute(path) ? relative(workspace, path) : path
+          paths.add(changed.split(sep).join('/')); clearTimeout(timer); timer = setTimeout(() => {
             if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'files.changed', paths: [...paths] }))
             paths = new Set()
           }, 150)

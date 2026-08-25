@@ -1,5 +1,5 @@
 /** One directory entry returned by the workbench host. */
-export interface FileEntry { name: string; path: string; kind: 'file' | 'directory'; size: number; mtimeMs: number }
+export interface FileEntry { name: string; path: string; kind: 'file' | 'directory'; size?: number; mtimeMs?: number }
 /** A text file together with its optimistic-concurrency revision. */
 export interface FileDocument { path: string; content: string; revision: string; size: number; binary: boolean; tooLarge: boolean }
 /** One ripgrep match. */

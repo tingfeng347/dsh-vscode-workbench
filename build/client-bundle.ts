@@ -12,13 +12,15 @@ export function dshPackage(packageName: string): UserConfig[] {
     {
       entry: { index: './src/index.ts' }, outDir: './lib', format: 'esm',
       platform: 'node', dts: false, sourcemap: true, clean: false,
-      external: [/^[^./]/], outputOptions: { entryFileNames: '[name].js' },
+      deps: { neverBundle: true }, outputOptions: { entryFileNames: '[name].js' },
     },
     {
       entry: { client: './src/client/index.tsx' }, outDir: './lib', format: 'cjs',
       platform: 'browser', dts: false, sourcemap: true, clean: false,
-      external: EXTERNALS,
-      noExternal: (id: string) => EXTERNALS.includes(id) ? undefined : true,
+      deps: {
+        neverBundle: EXTERNALS,
+        alwaysBundle: (id: string) => EXTERNALS.includes(id) ? undefined : true,
+      },
       define: { 'process.env.NODE_ENV': JSON.stringify(process.env.NODE_ENV ?? 'production') },
       outputOptions: {
         entryFileNames: 'client.js', codeSplitting: false,

@@ -18,6 +18,14 @@ interface TreeProps { sessionId: string; path: string; depth: number; expanded: 
 /** Return the basename shown in a tab while preserving its full internal path. */
 export function tabLabel(tab:Pick<Tab,'path'|'title'|'diffSourcePath'>):string{const path=tab.title??tab.diffSourcePath??tab.path.replace(/^diff:/,'');return path.split(/[\\/]/).at(-1)??path}
 
+/** Invoke `fn` at most once per `ms` after the latest call, always running the freshest callback. */
+function useDebouncedCallback(fn: () => void, ms: number): () => void {
+  const fnRef = useRef(fn); fnRef.current = fn
+  const timer = useRef<ReturnType<typeof setTimeout>>()
+  useEffect(() => () => clearTimeout(timer.current), [])
+  return useCallback(() => { clearTimeout(timer.current); timer.current = setTimeout(() => fnRef.current(), ms) }, [ms])
+}
+
 function useDshDarkTheme(): boolean {
   const read = () => document.body.hasAttribute('data-ds-dark-theme')
   const [dark, setDark] = useState(read)
@@ -54,7 +62,8 @@ function Explorer(props: { sessionId: string; cwd?: string; selected?: string; o
       .then(status => setStatuses(new Map(status.changes.map(change => [change.path, gitStatusCode(change)]))))
       .catch(() => setStatuses(new Map()))
   }, [props.sessionId])
-  useEffect(() => { refreshStatus(); const handler = () => refreshStatus(); window.addEventListener('dvw-files-changed', handler); return () => window.removeEventListener('dvw-files-changed', handler) }, [refreshStatus])
+  const refreshStatusDebounced = useDebouncedCallback(refreshStatus, 500)
+  useEffect(() => { refreshStatus(); const handler = () => refreshStatusDebounced(); window.addEventListener('dvw-files-changed', handler); return () => window.removeEventListener('dvw-files-changed', handler) }, [refreshStatus, refreshStatusDebounced])
   const create = async (kind: 'file' | 'directory') => { const path = prompt(kind === 'file' ? '新文件路径' : '新目录路径'); if (!path) return; try { await api('fs.create', { sessionId: props.sessionId, path, kind }); setRevision(x => x + 1); window.dispatchEvent(new Event('dvw-files-changed')) } catch (error) { alert(String(error)) } }
   const upload = useCallback(async (directory: string, files: FileList) => { try { await Promise.all([...files].map(async file => { const query = new URLSearchParams({ sessionId: props.sessionId, directory, name: file.name }); const response = await fetch(`/dsh-vscode/upload?${query}`, { method: 'POST', headers: { 'content-type': file.type || 'application/octet-stream' }, body: file }); const answer = await response.json() as { ok: boolean; error?: { message?: string } }; if (!response.ok || !answer.ok) throw new Error(answer.error?.message ?? 'upload failed') })); setRevision(value => value + 1); window.dispatchEvent(new Event('dvw-files-changed')) } catch (error) { alert(error instanceof Error ? error.message : String(error)) } }, [props.sessionId])
   useEffect(() => {
@@ -187,7 +196,8 @@ function GitGroupHeader({ title, count, expanded, onToggle, children }: { title:
 function Git(props: { sessionId: string; onDiff(key:string, diff:GitDiff, title?:string, sourcePath?:string): void }) {
   const [status, setStatus] = useState<GitStatus>(); const [commits,setCommits]=useState<GitCommit[]>([]); const [message, setMessage] = useState(''); const [error, setError] = useState<string>(); const [busy,setBusy]=useState(false); const [expanded,setExpanded]=useState({staged:true,changes:true,graph:true});const [expandedCommit,setExpandedCommit]=useState<string>();const [commitFileMap,setCommitFileMap]=useState<Map<string,GitCommitFile[]>>(new Map())
   const refresh = useCallback(() => { void Promise.all([api<GitStatus>('git.status',{sessionId:props.sessionId}),api<GitCommit[]>('git.action',{sessionId:props.sessionId,action:'log'})]).then(([nextStatus,nextCommits])=>{setStatus(nextStatus);setCommits(nextCommits);setError(undefined)}).catch(error=>setError(String(error))) }, [props.sessionId])
-  useEffect(refresh,[refresh]); useEffect(()=>{const fn=()=>refresh();window.addEventListener('dvw-files-changed',fn);return()=>window.removeEventListener('dvw-files-changed',fn)},[refresh])
+  const refreshDebounced = useDebouncedCallback(refresh, 500)
+  useEffect(refresh,[refresh]); useEffect(()=>{const fn=()=>refreshDebounced();window.addEventListener('dvw-files-changed',fn);return()=>window.removeEventListener('dvw-files-changed',fn)},[refreshDebounced])
   const action = async (name: string, path?: string, value?: string) => { setBusy(true);try { const result = await api<GitStatus | GitDiff>('git.action',{sessionId:props.sessionId,action:name,path,value}); if(name==='diff'&&'diff'in result){const key=path??'';props.onDiff(key,result,key.split('/').at(-1)??key,key)} else {setStatus(result as GitStatus);if(name==='commit')refresh()} } catch(error){setError(String(error))}finally{setBusy(false)} }
   const branch = async () => { const branches=await api<string[]>('git.action',{sessionId:props.sessionId,action:'branches'}); const choice=prompt(`切换分支，或输入 +新分支\n${branches.join('\n')}`); if(!choice)return; await action(choice.startsWith('+')?'branch.create':'branch.switch',undefined,choice.replace(/^\+/,'')) }
   const toggleCommit=async(commit:GitCommit)=>{if(expandedCommit===commit.hash){setExpandedCommit(undefined);return}setExpandedCommit(commit.hash);if(commitFileMap.has(commit.hash))return;setBusy(true);try{const files=await api<GitCommitFile[]>('git.action',{sessionId:props.sessionId,action:'commit.files',value:commit.hash});setCommitFileMap(current=>new Map(current).set(commit.hash,files))}catch(error){setError(String(error))}finally{setBusy(false)}}

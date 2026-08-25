@@ -26,7 +26,7 @@ body[data-ds-dark-theme] .dvw-overlay,.dvw-overlay[data-dvw-theme=dark]{color-sc
 .dvw-chat{grid-column:4;grid-row:1/3;min-width:0;background:var(--dvw-base);border-left:1px solid var(--dvw-border);position:relative}
 .dvw-chat-head{height:36px;display:flex;align-items:center;justify-content:space-between;padding:0 6px 0 12px;border-bottom:1px solid var(--dvw-border);background:var(--dvw-base);font-weight:600}
 .dvw-chat-head>span{display:flex;align-items:center;gap:7px}.dvw-chat-body{height:calc(100% - 36px);background:var(--dvw-base)}
-.dvw-dsh-mark{min-width:18px;height:18px;display:inline-grid;place-items:center;color:currentColor;font-size:0}.dvw-dsh-mark svg{display:block}
+.dvw-dsh-mark{display:block}
 .dvw-chat-resizer{position:fixed;top:0;right:calc(var(--dvw-chat-width) - 4px);bottom:0;width:8px;z-index:4;cursor:ew-resize;touch-action:none}
 .dvw-chat-resizer:hover,.dvw-chat-resizer:active{background:var(--dvw-accent)}
 .dvw-chat-toggle{position:absolute;z-index:5;top:6px;right:6px;border:1px solid var(--dvw-border);background:var(--dvw-base)}

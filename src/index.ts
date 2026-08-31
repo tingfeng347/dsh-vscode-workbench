@@ -7,6 +7,7 @@ import chokidar from 'chokidar'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { HostContext } from './context.ts'
 import { codiconAsset, createEntry, cwdFor, deleteEntry, gitAction, gitStatus, listFiles, monacoAsset, readDocument, renameEntry, saveDocument, searchWorkspace, uploadFile, workspaceImage } from './host.ts'
+import { installTerminal } from './terminal.ts'
 import type { SearchRequest } from './types.ts'
 import { readBinaryBody, readBody, send, sendError, stringField, trusted, WorkbenchError } from './wire.ts'
 
@@ -33,6 +34,7 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
 }
 
 export function apply(ctx: HostContext): void {
+  installTerminal(ctx)
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact', path: '/dsh-vscode/codicons/codicon.ttf', handler: async (req, res) => {
       if (!trusted(req, ctx.webRuntime.trustedHosts)) { res.writeHead(403); res.end(); return }

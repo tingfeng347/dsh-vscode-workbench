@@ -6,7 +6,7 @@ import type { Duplex } from 'node:stream'
 import chokidar from 'chokidar'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { HostContext } from './context.ts'
-import { codiconAsset, createEntry, cwdFor, deleteEntry, gitAction, gitStatus, listFiles, monacoAsset, readDocument, renameEntry, saveDocument, searchWorkspace, uploadFile, workspaceImage } from './host.ts'
+import { codiconAsset, createEntry, cwdFor, deleteEntry, gitAction, gitStatus, listFiles, monacoAsset, readDocument, renameEntry, saveDocument, searchWorkspace, uploadFile, workspacePreviewFile } from './host.ts'
 import { installTerminal } from './terminal.ts'
 import type { SearchRequest } from './types.ts'
 import { readBinaryBody, readBody, send, sendError, stringField, trusted, WorkbenchError } from './wire.ts'
@@ -74,8 +74,8 @@ export function apply(ctx: HostContext): void {
   }), 'dsh-vscode-workbench: file upload')
 
   ctx.effect(() => ctx.webServer.register({
-    kind:'prefix',path:'/dsh-vscode/file',handler:async(req,res)=>{if(!trusted(req,ctx.webRuntime.trustedHosts)){res.writeHead(403);res.end();return}try{const url=new URL(req.url??'/','http://dsh.local');const sessionId=url.searchParams.get('sessionId');const path=url.searchParams.get('path');if(sessionId===null||path===null)throw new WorkbenchError('bad-request','sessionId and path are required');const asset=await workspaceImage(cwdFor(ctx,sessionId),path);res.writeHead(200,{'content-type':asset.type,'x-content-type-options':'nosniff','cache-control':'no-store'});res.end(await readFile(asset.path))}catch(error){sendError(res,error)}}
-  }), 'dsh-vscode-workbench: image preview')
+    kind:'prefix',path:'/dsh-vscode/file',handler:async(req,res)=>{if(!trusted(req,ctx.webRuntime.trustedHosts)){res.writeHead(403);res.end();return}try{const url=new URL(req.url??'/','http://dsh.local');const sessionId=url.searchParams.get('sessionId');const path=url.searchParams.get('path');if(sessionId===null||path===null)throw new WorkbenchError('bad-request','sessionId and path are required');const asset=await workspacePreviewFile(cwdFor(ctx,sessionId),path);res.writeHead(200,{'content-type':asset.type,'x-content-type-options':'nosniff','cache-control':'no-store'});res.end(await readFile(asset.path))}catch(error){sendError(res,error)}}
+  }), 'dsh-vscode-workbench: file preview')
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/dsh-vscode/monaco', handler: async (req, res) => {

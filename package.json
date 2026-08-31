@@ -62,11 +62,12 @@
     "pack:plugin": "pnpm build && node scripts/clean.mjs dist && pnpm pack --pack-destination dist"
   },
   "dependencies": {
-    "@xterm/addon-fit": "^0.11.0",
-    "@xterm/xterm": "^5.5.0",
     "@vscode/codicons": "^0.0.36",
     "@vscode/ripgrep": "^1.15.14",
+    "@xterm/addon-fit": "^0.11.0",
+    "@xterm/xterm": "^5.5.0",
     "chokidar": "^4.0.3",
+    "docx-preview": "^0.4.0",
     "dompurify": "^3.2.6",
     "marked": "^16.3.0",
     "monaco-editor": "^0.52.2",

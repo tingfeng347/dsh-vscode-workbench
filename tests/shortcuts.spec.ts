@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 import { WorkbenchController } from '../src/client/service.ts'
-import { handleTerminalShortcut, openTerminal } from '../src/client/shortcuts.ts'
+import { handleTerminalShortcut, openTerminal, toggleTerminal } from '../src/client/shortcuts.ts'
 import { readFileSync } from 'node:fs'
 
 function keyboard(shiftKey = false): KeyboardEvent {
@@ -33,6 +33,15 @@ describe('terminal shortcuts', () => {
     expect(service.getSnapshot()).toMatchObject({ visible: true, bottomPanel: 'terminal' })
     expect(openTerminal(service)).toBe(true)
     expect(service.getSnapshot().bottomPanel).toBe('terminal')
+  })
+
+  it('toggles the terminal from the activity bar', () => {
+    const service = new WorkbenchController(undefined)
+    service.registerBottomPanel({ id: 'terminal', title: 'Terminal', component: () => null })
+    expect(toggleTerminal(service)).toBe(true)
+    expect(service.getSnapshot().bottomPanel).toBe('terminal')
+    expect(toggleTerminal(service)).toBe(true)
+    expect(service.getSnapshot().bottomPanel).toBeUndefined()
   })
 
   it('opens the panel and runs the new-terminal command', async () => {

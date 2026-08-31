@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile, readFile } from 'node:fs/promis
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
-import { codiconAsset, createEntry, gitAction, gitStatus, listFiles, readDocument, renameEntry, saveDocument, uploadFile, workspaceImage, workspacePath } from '../src/host.ts'
+import { codiconAsset, createEntry, gitAction, gitStatus, listFiles, readDocument, renameEntry, saveDocument, uploadFile, workspaceImage, workspacePath, workspacePreviewFile } from '../src/host.ts'
 
 const roots:string[]=[]
 async function temp(){const value=await mkdtemp(join(tmpdir(),'dvw-'));roots.push(value);return value}
@@ -15,6 +15,7 @@ describe('workspace filesystem',()=>{
   it('rejects stale saves',async()=>{const root=await temp();await writeFile(join(root,'a'),'one');const doc=await readDocument(root,'a');await writeFile(join(root,'a'),'external');await expect(saveDocument(root,'a','mine',doc.revision)).rejects.toMatchObject({code:'revision-conflict'})})
   it('uploads files only to an existing workspace directory without overwriting',async()=>{const root=await temp();await mkdir(join(root,'uploads'));const entry=await uploadFile(root,'uploads','report.txt',Buffer.from('received'));expect(entry.path).toBe('uploads/report.txt');expect(await readFile(join(root,'uploads','report.txt'),'utf8')).toBe('received');await expect(uploadFile(root,'uploads','report.txt',Buffer.from('again'))).rejects.toMatchObject({code:'EEXIST'});await expect(uploadFile(root,'../outside','x.txt',Buffer.from('x'))).rejects.toMatchObject({code:'path-outside'});await expect(uploadFile(root,'uploads','../x.txt',Buffer.from('x'))).rejects.toMatchObject({code:'filename-invalid'})})
   it('serves only workspace images through the preview resolver',async()=>{const root=await temp();await writeFile(join(root,'preview.png'),'image');await writeFile(join(root,'notes.txt'),'text');expect(await workspaceImage(root,'preview.png')).toMatchObject({type:'image/png'});await expect(workspaceImage(root,'notes.txt')).rejects.toMatchObject({code:'unsupported-media'});await expect(workspaceImage(root,'../preview.png')).rejects.toMatchObject({code:'path-outside'})})
+  it('serves PDF and Word documents through the protected preview resolver',async()=>{const root=await temp();await writeFile(join(root,'report.pdf'),'pdf');await writeFile(join(root,'report.docx'),'word');await writeFile(join(root,'notes.txt'),'text');expect(await workspacePreviewFile(root,'report.pdf')).toMatchObject({type:'application/pdf'});expect(await workspacePreviewFile(root,'report.docx')).toMatchObject({type:'application/vnd.openxmlformats-officedocument.wordprocessingml.document'});await expect(workspacePreviewFile(root,'notes.txt')).rejects.toMatchObject({code:'unsupported-media'})})
 })
 
 describe('local Git',()=>{

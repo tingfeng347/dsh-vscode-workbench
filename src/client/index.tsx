@@ -6,6 +6,7 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { VscodeWorkbench } from './service.ts'
 import { WorkbenchController } from './service.ts'
+import { TerminalPanel } from './TerminalPanel.tsx'
 import { Launcher, Workbench } from './Workbench.tsx'
 import { installStyles } from './styles.ts'
 import { handleTerminalShortcut } from './shortcuts.ts'
@@ -32,6 +33,8 @@ export function apply(ctx: ClientContext): void {
   const service = new WorkbenchController()
   ctx.effect(() => installStyles(), 'dsh-vscode-workbench: styles')
   ctx.effect(() => { const dispose = ctx.reflect.provide('vscodeWorkbench', service); return () => { void dispose() } }, 'dsh-vscode-workbench: service')
+  ctx.effect(() => service.registerBottomPanel({ id: 'terminal', title: '终端', component: TerminalPanel }), 'dsh-vscode-workbench: terminal panel')
+  ctx.effect(() => service.registerCommand({ id: 'terminal.new', run() { window.dispatchEvent(new Event('dvw-terminal-new')) } }), 'dsh-vscode-workbench: terminal command')
   ctx.slots.inject('sidebar.footer.action', () => ctx.slots.register({ name: 'sidebar.footer.action', id: 'dsh-vscode-workbench-launcher', inject: () => ({ service }) }, Footer))
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'dsh-vscode-workbench-overlay', inject: () => ({ service }) }, Overlay))
   ctx.effect(() => {

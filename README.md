@@ -35,6 +35,9 @@ Markdown 默认渲染，可切换源码与大纲；支持工作区相对链接�
 ### DSH 对话
 右侧复用官方会话界面，保留消息、编程工具、模型、附件与权限能力。
 
+### 终端
+内置由 `node-pty` 与 xterm 驱动的本地交互终端。点击左侧活动栏终端图标打开底部面板，支持多终端、重命名、尺寸自适应、ANSI 输出与 Ctrl+C。
+
 ### 状态恢复
 按工作区保存活动视图、标签、栏宽与面板状态，刷新后继续工作。
 
@@ -58,6 +61,13 @@ Markdown 默认渲染，可切换源码与大纲；支持工作区相对链接�
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
+使用 pnpm 安装时，`node-pty` 需要执行受限的原生构建脚本。若出现构建许可提示，请在当前 profile 的 `pnpm-workspace.yaml` 中加入：
+
+```yaml
+allowBuilds:
+  node-pty: true
+```
+
 ## 快捷键
 
 | 快捷键 | 操作 |
@@ -67,10 +77,14 @@ dsh plugin --profile web add dsh-vscode-workbench
 | `Ctrl+Shift+G` | 打开源代码管理 |
 | `Ctrl+S` | 保存当前文件 |
 | `Ctrl+Alt+B` | 显示或隐藏 DSH 对话栏 |
+| `Ctrl+\`` | 显示或隐藏终端 |
+| `Ctrl+Shift+\`` | 新建终端 |
+
+左侧活动栏的终端按钮会展开终端面板；已打开时再次点击不会关闭它。
 
 ## 安全
 
-Host 只接受当前 DSH 会话工作目录内的相对路径，并阻止目录穿越与符号链接越界。保存使用版本校验与原子替换；Git 与 ripgrep 使用参数数组启动，不拼接 Shell 命令。
+Host 只接受当前 DSH 会话工作目录内的相对路径，并阻止目录穿越与符号链接越界。保存使用版本校验与原子替换；Git 与 ripgrep 使用参数数组启动，不拼接 Shell 命令。终端只接受同源 loopback 请求，固定在会话工作目录启动，并移除 API key、token、secret 等敏感环境变量。
 
 ## 开发
 
@@ -81,7 +95,7 @@ pnpm test
 pnpm build
 ```
 
-需要 Node.js `^22.19 || >=24`、pnpm 11.7 与系统 Git。
+需要 Node.js `^22.19 || >=24`、pnpm 11.7、系统 Git，以及 `node-pty` 所需的本机构建环境（预编译产物不可用时）。
 
 ## 许可证
 

@@ -34,6 +34,9 @@ Resizable and collapsible primary view, an extensible bottom panel, and a status
 ### DSH conversation
 Reuses the official conversation UI with messages, coding tools, models, attachments, and permissions.
 
+### Terminal
+The workbench includes an interactive local terminal powered by `node-pty` and xterm. Use the terminal icon in the left activity bar to open the bottom panel; it supports multiple terminals, renaming, resize, ANSI output, and Ctrl+C.
+
 ### Restore
 Persists the active view, tabs, widths, and panel state per workspace across reloads.
 
@@ -57,6 +60,13 @@ The workbench mounts through the official `sidebar.footer.action` and `shell.ove
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
+With pnpm, `node-pty` needs approval to run its native build script. If pnpm asks for it, add the following to the active profile's `pnpm-workspace.yaml`:
+
+```yaml
+allowBuilds:
+  node-pty: true
+```
+
 ## Shortcuts
 
 | Shortcut | Action |
@@ -66,10 +76,12 @@ dsh plugin --profile web add dsh-vscode-workbench
 | `Ctrl+Shift+G` | Open Source Control |
 | `Ctrl+S` | Save the active file |
 | `Ctrl+Alt+B` | Toggle the DSH conversation panel |
+| `Ctrl+\`` | Show or hide the terminal |
+| `Ctrl+Shift+\`` | Create a terminal |
 
 ## Security
 
-The host accepts only paths relative to the active DSH session workspace and rejects traversal and symlink escape. Saves use revision checks and atomic replacement. Git and ripgrep run with argument arrays rather than shell-concatenated commands.
+The host accepts only paths relative to the active DSH session workspace and rejects traversal and symlink escape. Saves use revision checks and atomic replacement. Git and ripgrep run with argument arrays rather than shell-concatenated commands. The terminal accepts same-origin loopback requests only, starts in the session workspace, and removes API keys, tokens, secrets, and similar environment variables.
 
 ## Development
 
@@ -80,7 +92,7 @@ pnpm test
 pnpm build
 ```
 
-Requires Node.js `^22.19 || >=24`, pnpm 11.7, and system Git.
+Requires Node.js `^22.19 || >=24`, pnpm 11.7, system Git, and the native build prerequisites for `node-pty` when no prebuild is available.
 
 ## License
 

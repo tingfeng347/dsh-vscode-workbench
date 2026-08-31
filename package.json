@@ -1,6 +1,6 @@
 {
   "name": "dsh-vscode-workbench",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Explorer, Monaco editor, search and local Git overlay for DSH",
   "type": "module",
   "license": "MIT",

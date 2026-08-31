@@ -131,6 +131,11 @@ export async function workspaceImage(cwd:string,path:string):Promise<{path:strin
 /** Resolve a supported preview file inside the workspace. */
 export async function workspacePreviewFile(cwd:string,path:string):Promise<{path:string;type:string}>{const resolved=await workspacePath(cwd,path);const type=PREVIEW_TYPES[extname(resolved.absolute).toLowerCase()];if(type===undefined)throw new WorkbenchError('unsupported-media','file is not a supported preview format',415);return {path:resolved.absolute,type}}
 
+/** Resolve the PDF.js worker shipped with this plugin's runtime dependency. */
+export function pdfWorkerAsset(): { path: string; type: string } {
+  return { path: require.resolve('pdfjs-dist/legacy/build/pdf.worker.min.mjs'), type: 'text/javascript; charset=utf-8' }
+}
+
 interface ProcessResult { stdout: string; stderr: string; code: number }
 export function run(command: string, args: string[], cwd: string, timeout = PROCESS_TIMEOUT, signal?: AbortSignal): Promise<ProcessResult> {
   return new Promise((resolvePromise, reject) => {

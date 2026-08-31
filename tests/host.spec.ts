@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile, readFile } from 'node:fs/promis
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
-import { codiconAsset, createEntry, gitAction, gitStatus, listFiles, readDocument, renameEntry, saveDocument, uploadFile, workspaceImage, workspacePath, workspacePreviewFile } from '../src/host.ts'
+import { codiconAsset, createEntry, gitAction, gitStatus, listFiles, pdfWorkerAsset, readDocument, renameEntry, saveDocument, uploadFile, workspaceImage, workspacePath, workspacePreviewFile } from '../src/host.ts'
 
 const roots:string[]=[]
 async function temp(){const value=await mkdtemp(join(tmpdir(),'dvw-'));roots.push(value);return value}
@@ -25,4 +25,4 @@ describe('local Git',()=>{
   it('discards tracked and untracked changes together',async()=>{const root=await temp();const {execFile}=await import('node:child_process');const run=(args:string[])=>new Promise<void>((resolve,reject)=>execFile('git',args,{cwd:root},error=>error?reject(error):resolve()));await run(['init']);await run(['config','user.email','test@example.com']);await run(['config','user.name','Test']);await run(['config','core.autocrlf','false']);await writeFile(join(root,'tracked.txt'),'original\n');await gitAction(root,'stage.all');await gitAction(root,'commit',undefined,'initial');await writeFile(join(root,'tracked.txt'),'changed\n');await writeFile(join(root,'untracked.txt'),'temporary\n');expect((await gitStatus(root)).changes).toHaveLength(2);await gitAction(root,'discard.all');expect((await gitStatus(root)).changes).toEqual([]);expect(await readFile(join(root,'tracked.txt'),'utf8')).toBe('original\n');await expect(readFile(join(root,'untracked.txt'),'utf8')).rejects.toMatchObject({code:'ENOENT'})})
 })
 
-describe('client assets',()=>{it('resolves the VS Code Codicon font',()=>{expect(codiconAsset()).toMatchObject({type:'font/ttf'});expect(codiconAsset().path).toMatch(/codicon\.ttf$/)})})
+describe('client assets',()=>{it('resolves the VS Code Codicon font',()=>{expect(codiconAsset()).toMatchObject({type:'font/ttf'});expect(codiconAsset().path).toMatch(/codicon\.ttf$/)});it('resolves the PDF.js module worker',()=>{expect(pdfWorkerAsset()).toMatchObject({type:'text/javascript; charset=utf-8'});expect(pdfWorkerAsset().path).toMatch(/pdf\.worker\.min\.mjs$/)})})

@@ -6,7 +6,7 @@ import type { Duplex } from 'node:stream'
 import chokidar from 'chokidar'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { HostContext } from './context.ts'
-import { codiconAsset, createEntry, cwdFor, deleteEntry, gitAction, gitStatus, listFiles, monacoAsset, readDocument, renameEntry, saveDocument, searchWorkspace, uploadFile, workspacePreviewFile } from './host.ts'
+import { codiconAsset, createEntry, cwdFor, deleteEntry, gitAction, gitStatus, listFiles, monacoAsset, pdfWorkerAsset, readDocument, renameEntry, saveDocument, searchWorkspace, uploadFile, workspacePreviewFile } from './host.ts'
 import { installTerminal } from './terminal.ts'
 import type { SearchRequest } from './types.ts'
 import { readBinaryBody, readBody, send, sendError, stringField, trusted, WorkbenchError } from './wire.ts'
@@ -45,6 +45,17 @@ export function apply(ctx: HostContext): void {
       } catch (error) { sendError(res, error) }
     },
   }), 'dsh-vscode-workbench: Codicon font')
+
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact', path: '/dsh-vscode/pdfjs/worker.mjs', handler: async (req, res) => {
+      if (!trusted(req, ctx.webRuntime.trustedHosts)) { res.writeHead(403); res.end(); return }
+      try {
+        const asset = pdfWorkerAsset()
+        res.writeHead(200, { 'content-type': asset.type, 'cache-control': 'public, max-age=31536000, immutable' })
+        res.end(await readFile(asset.path))
+      } catch (error) { sendError(res, error) }
+    },
+  }), 'dsh-vscode-workbench: PDF.js worker')
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/dsh-vscode/api', handler: async (req, res) => {

@@ -33,7 +33,7 @@ function PanelResizer({ className, label, width, min, max, defaultWidth, directi
     if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
     event.preventDefault()
     const pointerDelta = event.key === 'ArrowRight' ? 10 : -10
-    onWidth(resizedPanelWidth(width, 0, pointerDelta, direction, min, max))
+    onWidth(Math.max(min, Math.min(max, Math.round(width + pointerDelta * direction))))
   }} onPointerDown={event => {
     if (event.button !== 0) return
     event.preventDefault()
@@ -48,21 +48,25 @@ function PanelResizer({ className, label, width, min, max, defaultWidth, directi
     document.body.style.userSelect = 'none'
     setDragging(true)
     const move = (next: PointerEvent) => onWidth(resizedPanelWidth(startWidth, startX, next.clientX, direction, min, max))
-    const cleanup = () => {
+    const cleanup = (commit = false, nextX = startX) => {
       window.removeEventListener('pointermove', move)
-      window.removeEventListener('pointerup', cleanup)
-      window.removeEventListener('pointercancel', cleanup)
-      window.removeEventListener('blur', cleanup)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', cancel)
+      window.removeEventListener('blur', cancel)
       document.body.style.cursor = previousCursor
       document.body.style.userSelect = previousUserSelect
       setDragging(false)
       stopDragging.current = () => {}
+      if (!commit) return
+      onWidth(Math.max(min, Math.min(max, Math.round(startWidth + (nextX - startX) * direction))))
     }
-    stopDragging.current = cleanup
+    const up = (next: PointerEvent) => cleanup(true, next.clientX)
+    const cancel = () => cleanup()
+    stopDragging.current = cancel
     window.addEventListener('pointermove', move)
-    window.addEventListener('pointerup', cleanup)
-    window.addEventListener('pointercancel', cleanup)
-    window.addEventListener('blur', cleanup)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', cancel)
+    window.addEventListener('blur', cancel)
   }}/>
 }
 

@@ -54,7 +54,11 @@ The workbench mounts through the official `sidebar.footer.action` and `shell.ove
   <br><em>Source control and commit graph</em>
 </p>
 
-![2026-08-31 22-52-58.png](https://pic1.imgdb.cn/i/034GkZFU8ULHsWgFio93Lw.png)
+<p align="center">
+  <img src="https://pic1.imgdb.cn/i/034GkZFU8ULHsWgFio93Lw.png" width="800" alt="terminal">
+  <br><em>terminal</em>
+</p>
+
 
 ## Installation
 

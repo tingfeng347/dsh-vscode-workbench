@@ -55,7 +55,11 @@ Markdown 默认渲染，可切换源码与大纲；支持工作区相对链接�
   <br><em>源代码管理与提交图表</em>
 </p>
 
-![2026-08-31 22-52-58.png](https://pic1.imgdb.cn/i/034GkZFU8ULHsWgFio93Lw.png)
+<p align="center">
+  <img src="https://pic1.imgdb.cn/i/034GkZFU8ULHsWgFio93Lw.png" width="800" alt="终端">
+  <br><em>终端</em>
+</p>
+
 
 ## 安装
 

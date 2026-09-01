@@ -5,48 +5,46 @@
 </p>
 
 <p align="center">A VS Code-style local development workbench for DeepSeek Harness.</p>
+
+<p align="center">
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/v/dsh-vscode-workbench?logo=npm&label=npm" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/dm/dsh-vscode-workbench?label=downloads" alt="npm downloads"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/stargazers"><img src="https://img.shields.io/github/stars/tingfeng347/dsh-vscode-workbench?logo=github&label=Stars" alt="GitHub stars"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/commits/main"><img src="https://img.shields.io/github/last-commit/tingfeng347/dsh-vscode-workbench?label=last%20commit" alt="Last commit"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tingfeng347/dsh-vscode-workbench?label=license" alt="MIT license"></a>
+  <br>
+  <a href="https://awesome-dsh-plugin.com/p/tingfeng347/dsh-vscode-workbench/"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
+  <a href="https://dshpluginhub.ai/plugins/dsh-vscode-workbench"><img src="https://dshpluginhub.ai/badges/plugins/dsh-vscode-workbench.svg" alt="Listed on DSH Plugin Hub"></a>
+  <a href="https://dshmarket.com/p/tingfeng347/dsh-vscode-workbench/"><img src="https://img.shields.io/badge/dsh--market-Listed-5b7cfa?style=flat" alt="Listed on dsh-market"></a>
+  <a href="https://dshmk.com/plugins/1343926987"><img src="https://img.shields.io/badge/DSH%20Plugin%20Market-Listed-0ea5e9?style=flat" alt="Listed on DSH Plugin Market"></a>
+  <a href="https://dsh-ai.org/p/tingfeng347/dsh-vscode-workbench"><img src="https://img.shields.io/badge/dsh--ai.org-Listed-8b5cf6?style=flat" alt="Listed on dsh-ai.org"></a>
+  <a href="https://duink.com/plugins/1343926987/"><img src="https://img.shields.io/badge/DSH%20Universe-Listed-14b8a6?style=flat" alt="Listed on DSH Universe"></a>
+  <a href="https://deepseekplugin.org/en/plugins/tingfeng347-dsh-vscode-workbench"><img src="https://img.shields.io/badge/DeepseekPlugin-Listed-2563eb?style=flat" alt="Listed on DeepseekPlugin"></a>
+</p>
+
 <p align="center"><a href="README.md">中文</a> · <b>English</b></p>
 
 ## Highlights
 
-- **Genuine VS Code feel**: explorer / search / source-control views, an activity bar, and `Ctrl+Shift+E/F/G` shortcuts — the workflow you already know.
-- **Reliable saves**: atomic writes with revision checks; conflicts are raised instead of silently overwriting.
-- **External-change awareness**: a WebSocket watches the workspace, flagging files changed on disk in the tab and status bar.
-- **Commit graph**: a swimlane commit graph visualizes branch history.
-- **Per-workspace restore**: active view, tabs, widths, panels, and tree expansion persist per workspace across reloads.
+- **One local workbench**: explorer, Monaco editor, search, Git, terminal, and DSH conversation in one VS Code-style interface.
+- **Complete file experience**: open text, Markdown, images, PDF, and Word files directly; the tree supports drag-and-drop uploads and common file operations.
+- **Reliable and live**: atomic saves and revision checks prevent silent overwrites, while WebSocket updates flag external workspace changes.
+- **Visual Git workflow**: status, staging, commits, branches, diffs, commit files, and a swimlane commit graph.
+- **Persistent workspace context**: restore tabs, tree, views, panels, and widths per workspace; terminals support multiple sessions, splits, and rename.
+- **Built for DSH**: reuse the DSH conversation surface on the right and manage theme and layout from workbench settings.
 
 ## Features
 
-### Explorer
-A lazily loaded tree with create, upload, rename, delete, and refresh. Drop local files onto the workspace root or any directory; Git file markers show `A`, `M`, and other status codes.
-
-### Editor
-Monaco tabs with dirty tracking, atomic saves, and revision-conflict plus external-change notices.
-
-### Preview
-Markdown rendered by default with source and outline modes; workspace-relative links, image and common file previews.
-
-### Search
-`@vscode/ripgrep` full-text search with case, whole-word, regex, and include / exclude controls.
-
-### Git
-Grouped status, stage, unstage, discard, commit, branch switching, inline / side-by-side diffs, and a commit graph.
-
-### Layout
-Resizable and collapsible primary view, an extensible bottom panel, and a status bar; theme and widths centralized in settings.
-
-### DSH conversation
-Reuses the official conversation UI with messages, coding tools, models, attachments, and permissions.
-
-### Terminal
-The workbench includes an interactive local terminal powered by `node-pty` and xterm. Use the terminal icon in the left activity bar to open the bottom panel; it supports multiple terminals, renaming, resize, ANSI output, and Ctrl+C.
-
-### Restore
-Persists the active view, tabs, widths, and panel state per workspace across reloads.
+- **Files and editor**: lazy explorer with create, upload, drag-and-drop, rename, delete, and Git markers; Monaco tabs provide dirty state, atomic saves, and conflict notices.
+- **Preview**: Markdown source, outline, relative links, and images; built-in PDF paging and zoom plus DOCX rendering, with DOC/ODT download support.
+- **Search and Git**: `@vscode/ripgrep` supports case, whole-word, regex, and path filters; Git covers stage, unstage, discard, commit, branches, diffs, commit files, and the graph.
+- **Terminal**: `node-pty` and xterm with up to eight sessions, rename, a right-side switcher, splits, ANSI output, and Ctrl+C.
+- **Layout and DSH**: the primary view, terminal panel, and DSH conversation sidebar can be shown and resized independently; settings manage theme and widths.
+- **Sync and restore**: workspace file changes stream to the UI, while reload restores views, tabs, expanded directories, panels, and layout.
 
 The workbench mounts through the official `sidebar.footer.action` and `shell.overlay` extension points. It does not replace or disable `ui-layout`.
 
-## Screenshots
+## Demo
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/explorer.png" width="800" alt="Explorer and Monaco editor">
@@ -72,7 +70,7 @@ dsh plugin --profile web add dsh-vscode-workbench
 
 ### First terminal installation
 
-The terminal uses `node-pty`. On the first install, pnpm 11 may block its build script, so `dsh plugin ... add` can report `Ignored build scripts` and end with an error. This is an expected safety check: the dependency has already been written to the profile. Following the approach used by [DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar), run this on the machine that runs DSH:
+The terminal uses `node-pty`. On the first install, pnpm 11 may block its build script, so `dsh plugin ... add` can report `Ignored build scripts` and end with an error. This is an expected safety check: the dependency has already been written to the profile. Run this on the machine that runs DSH:
 
 ```bash
 cd ~/.dsh/profiles/web

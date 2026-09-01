@@ -6,48 +6,45 @@
 
 <p align="center">在 DeepSeek Harness 中叠加 VS Code 风格的本地开发工作台。</p>
 
+<p align="center">
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/v/dsh-vscode-workbench?logo=npm&label=npm" alt="npm 版本"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/dm/dsh-vscode-workbench?label=downloads" alt="npm 月下载量"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/stargazers"><img src="https://img.shields.io/github/stars/tingfeng347/dsh-vscode-workbench?logo=github&label=Stars" alt="GitHub Stars"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/commits/main"><img src="https://img.shields.io/github/last-commit/tingfeng347/dsh-vscode-workbench?label=last%20commit" alt="最近提交"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tingfeng347/dsh-vscode-workbench?label=license" alt="MIT 许可证"></a>
+  <br>
+  <a href="https://awesome-dsh-plugin.com/p/tingfeng347/dsh-vscode-workbench/"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
+  <a href="https://dshpluginhub.ai/plugins/dsh-vscode-workbench"><img src="https://dshpluginhub.ai/badges/plugins/dsh-vscode-workbench.svg" alt="DSH Plugin Hub 已收录"></a>
+  <a href="https://dshmarket.com/p/tingfeng347/dsh-vscode-workbench/"><img src="https://img.shields.io/badge/dsh--market-已收录-5b7cfa?style=flat" alt="dsh-market 已收录"></a>
+  <a href="https://dshmk.com/plugins/1343926987"><img src="https://img.shields.io/badge/DSH%20插件市场-已收录-0ea5e9?style=flat" alt="DSH 插件市场已收录"></a>
+  <a href="https://dsh-ai.org/p/tingfeng347/dsh-vscode-workbench"><img src="https://img.shields.io/badge/dsh--ai.org-已收录-8b5cf6?style=flat" alt="dsh-ai.org 已收录"></a>
+  <a href="https://duink.com/plugins/1343926987/"><img src="https://img.shields.io/badge/DSH%20Universe-已收录-14b8a6?style=flat" alt="DSH Universe 已收录"></a>
+  <a href="https://deepseekplugin.org/plugins/tingfeng347-dsh-vscode-workbench"><img src="https://img.shields.io/badge/DeepseekPlugin-已收录-2563eb?style=flat" alt="DeepseekPlugin 已收录"></a>
+</p>
+
 <p align="center"><b>中文</b> · <a href="README.en.md">English</a></p>
 
 ## 亮点
 
-- **真正的 VS Code 风格**：资源管理器 / 搜索 / 源代码管理三视图 + 活动栏 + `Ctrl+Shift+E/F/G` 快捷键，沿用熟悉的 VS Code 工作流。
-- **可靠的保存**：原子写入 + 版本校验，磁盘文件被外部改动时立即报冲突，绝不静默覆盖。
-- **外部变更可感知**：WebSocket 实时监听工作区，脏文件被外部修改会在标签与状态栏标记。
-- **提交图表**：泳道式提交图，分支历史一目了然。
-- **按工作区恢复**：活动视图、标签、栏宽、面板与目录展开状态随工作区持久化，刷新后继续工作。
+- **一体化本地工作台**：资源管理器、Monaco 编辑器、搜索、Git、终端和 DSH 对话集中在一个 VS Code 风格界面。
+- **完整文件体验**：文本、Markdown、图片、PDF 和 Word 文档均可直接打开；目录支持拖放上传和常用文件操作。
+- **可靠且实时**：原子保存与版本校验避免静默覆盖，WebSocket 会及时标记工作区的外部变更。
+- **可视化 Git 工作流**：覆盖状态、暂存、提交、分支、差异、提交文件与泳道式提交图。
+- **可持续的工作上下文**：按工作区恢复标签、目录、视图、面板与栏宽；终端支持多会话、分屏与重命名。
+- **贴合 DSH**：右侧直接复用 DSH 对话能力，主题与布局集中在工作台设置中管理。
 
 ## 功能
 
-### 资源管理器
-懒加载目录树，支持新建文件 / 目录、上传、重命名、删除与刷新。可把本地文件拖到工作区根目录或任一目录；新增文件显示 `A`，已修改文件显示 `M` 等 Git 状态。
-
-### 编辑器
-Monaco 多标签编辑，脏状态跟踪，原子保存，版本冲突与外部变更提示。
-
-### 预览
-Markdown 默认渲染，可切换源码与大纲；支持工作区相对链接、图片与常见图片文件预览。
-
-### 搜索
-基于 `@vscode/ripgrep` 的全文搜索，支持大小写、全词、正则与包含 / 排除规则。
-
-### Git
-状态分组、暂存、撤销暂存、丢弃、提交、分支切换、内联 / 并排差异与提交图表。
-
-### 布局
-可调节与折叠的左侧视图、可扩展的底部面板与状态栏；设置统一管理主题与栏宽。
-
-### DSH 对话
-右侧复用官方会话界面，保留消息、编程工具、模型、附件与权限能力。
-
-### 终端
-内置由 `node-pty` 与 xterm 驱动的本地交互终端。点击左侧活动栏终端图标打开底部面板，支持多终端、重命名、尺寸自适应、ANSI 输出与 Ctrl+C。
-
-### 状态恢复
-按工作区保存活动视图、标签、栏宽与面板状态，刷新后继续工作。
+- **文件与编辑器**：懒加载目录树、创建、上传、拖放、重命名、删除和 Git 状态；Monaco 多标签编辑支持脏状态、原子保存与冲突提示。
+- **预览**：Markdown 支持源码、大纲、相对链接和图片；内置 PDF 翻页缩放与 DOCX 渲染，DOC/ODT 可直接下载打开。
+- **搜索与 Git**：`@vscode/ripgrep` 支持大小写、全词、正则和路径筛选；Git 提供暂存、撤销、丢弃、提交、分支、差异、提交文件和提交图表。
+- **终端**：基于 `node-pty` 与 xterm，支持最多 8 个会话、会话重命名、右侧切换、分屏、ANSI 输出和 Ctrl+C。
+- **布局与 DSH**：左侧视图、终端面板和右侧 DSH 对话栏可独立显示和调整；设置面板管理主题与各栏宽度。
+- **同步与恢复**：工作区文件变化实时推送；刷新后恢复活动视图、标签、目录展开、面板和布局。
 
 工作台通过官方 `sidebar.footer.action` 与 `shell.overlay` 扩展点挂载，不替换或卸载 `ui-layout`。
 
-## 截图
+## 演示
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/explorer.png" width="800" alt="资源管理器与 Monaco 编辑器">
@@ -73,7 +70,7 @@ dsh plugin --profile web add dsh-vscode-workbench
 
 ### 首次安装终端支持
 
-终端使用 `node-pty`。pnpm 11 首次安装时会拦截其构建脚本，`dsh plugin ... add` 可能显示 `Ignored build scripts` 并以失败结束；这是预期的安全检查，插件依赖已经写入 profile。参考 [DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) 的处理方式，在 DSH 所在机器执行：
+终端使用 `node-pty`。pnpm 11 首次安装时会拦截其构建脚本，`dsh plugin ... add` 可能显示 `Ignored build scripts` 并以失败结束；这是预期的安全检查，插件依赖已经写入 profile。在 DSH 所在机器执行：
 
 ```bash
 cd ~/.dsh/profiles/web

@@ -1,5 +1,9 @@
 <h1 align="center">DSH VS Code Workbench</h1>
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/dsh-neon-workbench-core.svg" width="220" alt="DSH VS Code Workbench Logo">
+</p>
+
 <p align="center">A VS Code-style local development workbench for DeepSeek Harness.</p>
 <p align="center"><a href="README.md">中文</a> · <b>English</b></p>
 

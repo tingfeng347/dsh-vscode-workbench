@@ -66,12 +66,23 @@ The workbench mounts through the official `sidebar.footer.action` and `shell.ove
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
-With pnpm, `node-pty` needs approval to run its native build script. If pnpm asks for it, add the following to the active profile's `pnpm-workspace.yaml`:
+### First terminal installation
 
-```yaml
-allowBuilds:
-  node-pty: true
+The terminal uses `node-pty`. On the first install, pnpm 11 may block its build script, so `dsh plugin ... add` can report `Ignored build scripts` and end with an error. This is an expected safety check: the dependency has already been written to the profile. Following the approach used by [DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar), run this on the machine that runs DSH:
+
+```bash
+cd ~/.dsh/profiles/web
+pnpm approve-builds --all
 ```
+
+This approves the `node-pty` build and completes the installation. Restart `dsh web` afterwards. If the terminal still reports that `node-pty` cannot load, run:
+
+```bash
+cd ~/.dsh/profiles/web
+pnpm approve-builds --all && pnpm rebuild node-pty
+```
+
+pnpm can also delay versions published less than 24 hours ago. Retry after the waiting period, or use DSH's "Update now" action when it is offered.
 
 ## Shortcuts
 

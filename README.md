@@ -67,12 +67,23 @@ Markdown 默认渲染，可切换源码与大纲；支持工作区相对链接�
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
-使用 pnpm 安装时，`node-pty` 需要执行受限的原生构建脚本。若出现构建许可提示，请在当前 profile 的 `pnpm-workspace.yaml` 中加入：
+### 首次安装终端支持
 
-```yaml
-allowBuilds:
-  node-pty: true
+终端使用 `node-pty`。pnpm 11 首次安装时会拦截其构建脚本，`dsh plugin ... add` 可能显示 `Ignored build scripts` 并以失败结束；这是预期的安全检查，插件依赖已经写入 profile。参考 [DSH-better-sidebar](https://github.com/omdsh-dev/DSH-better-sidebar) 的处理方式，在 DSH 所在机器执行：
+
+```bash
+cd ~/.dsh/profiles/web
+pnpm approve-builds --all
 ```
+
+该命令会批准 `node-pty` 的构建并重新完成安装；完成后重启 `dsh web`。若终端仍提示 `node-pty` 加载失败，可执行：
+
+```bash
+cd ~/.dsh/profiles/web
+pnpm approve-builds --all && pnpm rebuild node-pty
+```
+
+刚发布不足 24 小时的版本可能被 pnpm 的安全等待期拦截。等待后重试即可；DSH 提供“立即更新”时可直接选择它。
 
 ## 快捷键
 
@@ -86,7 +97,7 @@ allowBuilds:
 | `Ctrl+\`` | 显示或隐藏终端 |
 | `Ctrl+Shift+\`` | 新建终端 |
 
-左侧活动栏的终端按钮会展开终端面板；已打开时再次点击不会关闭它。
+左侧活动栏的终端按钮可切换显示或隐藏终端面板。
 
 ## 安全
 

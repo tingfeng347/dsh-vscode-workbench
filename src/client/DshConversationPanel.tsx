@@ -2,8 +2,8 @@ import { useLayoutEffect } from 'react'
 
 /** Locate the resident DSH conversation without depending on generated CSS module names. */
 export function findDshConversationRoot(documentRoot: Document = document): HTMLElement | null {
-  const scroller = documentRoot.querySelector<HTMLElement>('[data-conversation-scroll]')
-  const root = scroller?.parentElement
+  const scroller = documentRoot.querySelector<HTMLElement>('[data-phase] [data-conversation-scroll]')
+  const root = scroller?.closest('[data-phase]')
   return root instanceof HTMLElement && root.dataset.phase !== undefined ? root : null
 }
 

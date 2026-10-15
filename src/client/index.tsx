@@ -1,8 +1,11 @@
-import type { ClientContext } from '@deepseek-ai/dsh-client-runtime/client'
+import type { Context as ClientContext } from '@deepseek-ai/cordis'
 import { useEffect, useLayoutEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
+import type {} from '@deepseek-ai/dsh-client-ui-session/client'
+import type {} from '@deepseek-ai/dsh-client-ui-renderer/client'
+import type {} from '@deepseek-ai/dsh-working-directory'
 import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { VscodeWorkbench } from './service.ts'
 import { WorkbenchController } from './service.ts'
@@ -10,15 +13,16 @@ import { TerminalPanel } from './TerminalPanel.tsx'
 import { Launcher, Workbench } from './Workbench.tsx'
 import { installStyles } from './styles.ts'
 import { handleTerminalShortcut } from './shortcuts.ts'
+import { mainViewSession } from './session.ts'
 
 export type { BottomPanelContribution, BottomPanelProps, VscodeWorkbench, WorkbenchCommand, WorkbenchSnapshot, WorkbenchView } from './service.ts'
 
 declare module '@deepseek-ai/cordis' { interface Context { vscodeWorkbench: VscodeWorkbench } }
-declare module '@deepseek-ai/dsh-client-ui-slots' { interface SlotInjectMap { 'dsh-vscode-workbench.overlay': { service: VscodeWorkbench }; 'dsh-vscode-workbench.launcher': { service: VscodeWorkbench } } }
 
 const Overlay = ({ service, useSessions }: PropsRuntime<'shell.overlay'> & { service: VscodeWorkbench }) => {
-  const sessionId = useSessions(state => state.current) as string | undefined
-  return <Workbench key={sessionId ?? 'no-session'} service={service} useSessions={useSessions as never}/>
+  const session = useSessions(mainViewSession)
+  const cwd = session?.projectionValues?.workingDirectory ?? session?.cwd
+  return <Workbench key={`${session?.id ?? 'no-session'}:${cwd ?? ''}`} service={service} sessionId={session?.id} cwd={cwd}/>
 }
 const Footer = ({ service }: PropsRuntime<'sidebar.footer.action'> & { service: VscodeWorkbench }) => {
   const [target, setTarget] = useState<HTMLElement>()

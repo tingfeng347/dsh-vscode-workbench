@@ -64,27 +64,47 @@
 
 ## 安装
 
+插件 0.1.9 适配 DeepSeek Harness `0.2.1-alpha.3`（Cordis `4.0.5-alpha.2`）。请先更新 Harness，再安装插件；Harness `0.1.1-rc.2` 对应插件 0.1.8。
+
 ```bash
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
 ### 首次安装终端支持
 
-终端使用 `node-pty`。pnpm 11 首次安装时会拦截其构建脚本，`dsh plugin ... add` 可能显示 `Ignored build scripts` 并以失败结束；这是预期的安全检查，插件依赖已经写入 profile。在 DSH 所在机器执行：
+终端使用 `node-pty`。如果安装日志提示其构建脚本被阻止，在 DSH 所在机器的 `~/.dsh/profiles/web/pnpm-workspace.yaml` 中合并以下配置，保留已有设置：
 
-```bash
-cd ~/.dsh/profiles/web
-pnpm approve-builds --all
+```yaml
+allowBuilds:
+  node-pty: true
 ```
 
-该命令会批准 `node-pty` 的构建并重新完成安装；完成后重启 `dsh web`。若终端仍提示 `node-pty` 加载失败，可执行：
+新版 Harness 可能回滚失败的安装，配置后应重新执行安装命令。若插件已安装但终端仍提示 `node-pty` 加载失败，可执行：
 
 ```bash
 cd ~/.dsh/profiles/web
-pnpm approve-builds --all && pnpm rebuild node-pty
+pnpm rebuild node-pty
 ```
 
 刚发布不足 24 小时的版本可能被 pnpm 的安全等待期拦截。等待后重试即可；DSH 提供“立即更新”时可直接选择它。
+
+### 从旧版升级
+
+运行中的插件管理器启用 HMR 时，不允许覆盖安装同名包。先在插件管理器中移除旧版，再安装新版；CLI 可使用：
+
+```bash
+dsh plugin --profile web remove dsh-vscode-workbench
+dsh plugin --profile web add dsh-vscode-workbench
+```
+
+完成后重新打开工作台，必要时重启 `dsh web` 并刷新页面。
+
+### 新版架构适配
+
+- 客户端通过 `ui-renderer` 提供的槽位服务注册界面，使用 `ui-session` 的 `mainView` 引用选择当前会话；不再依赖已移除的 `dsh-client-runtime`。
+- 文件、搜索、Git 和新建终端通过 `workingDirectory.get(session)` 使用会话当前目录，跟随工作目录投影切换；失效会话返回 404。
+- HTTP 与 WebSocket 接口使用 `connection.requestRejection()`，共享 Harness 登录认证及 Host/Origin 校验；终端额外保留 loopback 限制。
+- 对话栏按官方 `data-phase` 容器定位，支持新版 `conversation.content` 布局。
 
 ## 快捷键
 
@@ -102,7 +122,7 @@ pnpm approve-builds --all && pnpm rebuild node-pty
 
 ## 安全
 
-Host 只接受当前 DSH 会话工作目录内的相对路径，并阻止目录穿越与符号链接越界。保存使用版本校验与原子替换；Git 与 ripgrep 使用参数数组启动，不拼接 Shell 命令。终端只接受同源 loopback 请求，固定在会话工作目录启动，并移除 API key、token、secret 等敏感环境变量。
+所有插件接口要求 Harness 登录认证。Host 只接受当前 DSH 会话工作目录内的相对路径，并阻止目录穿越与符号链接越界。保存使用版本校验与原子替换；Git 与 ripgrep 使用参数数组启动，不拼接 Shell 命令。终端只接受同源 loopback 请求，固定在创建时的会话工作目录启动，并移除 API key、token、secret 等敏感环境变量。
 
 ## 开发
 

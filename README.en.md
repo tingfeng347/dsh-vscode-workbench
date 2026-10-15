@@ -64,27 +64,47 @@ The workbench mounts through the official `sidebar.footer.action` and `shell.ove
 
 ## Installation
 
+Plugin 0.1.9 targets DeepSeek Harness `0.2.1-alpha.3` (Cordis `4.0.5-alpha.2`). Update Harness before installing; plugin 0.1.8 targets Harness `0.1.1-rc.2`.
+
 ```bash
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
 ### First terminal installation
 
-The terminal uses `node-pty`. On the first install, pnpm 11 may block its build script, so `dsh plugin ... add` can report `Ignored build scripts` and end with an error. This is an expected safety check: the dependency has already been written to the profile. Run this on the machine that runs DSH:
+The terminal uses `node-pty`. If installation reports a blocked build script, merge the following into `~/.dsh/profiles/web/pnpm-workspace.yaml` on the DSH host, preserving existing settings:
 
-```bash
-cd ~/.dsh/profiles/web
-pnpm approve-builds --all
+```yaml
+allowBuilds:
+  node-pty: true
 ```
 
-This approves the `node-pty` build and completes the installation. Restart `dsh web` afterwards. If the terminal still reports that `node-pty` cannot load, run:
+Newer Harness releases may roll back failed installations, so run the install command again after configuring builds. If the plugin is installed but `node-pty` still cannot load, run:
 
 ```bash
 cd ~/.dsh/profiles/web
-pnpm approve-builds --all && pnpm rebuild node-pty
+pnpm rebuild node-pty
 ```
 
 pnpm can also delay versions published less than 24 hours ago. Retry after the waiting period, or use DSH's "Update now" action when it is offered.
+
+### Upgrading an existing installation
+
+The running plugin manager rejects installing over an existing package when HMR is active. Remove the old plugin before installing the new version. With the CLI:
+
+```bash
+dsh plugin --profile web remove dsh-vscode-workbench
+dsh plugin --profile web add dsh-vscode-workbench
+```
+
+Reopen the workbench afterwards; restart `dsh web` and refresh the page if needed.
+
+### Harness architecture integration
+
+- Client contributions use `ui-renderer` slots and select the current session through `ui-session`'s `mainView` retain count, replacing the removed `dsh-client-runtime`.
+- Files, search, Git and new terminals use `workingDirectory.get(session)`. Workspace selection follows the working-directory projection; missing sessions return 404.
+- HTTP and WebSocket routes share Harness authentication and Host/Origin checks through `connection.requestRejection()`. Terminals also require loopback access.
+- The conversation panel locates the official `data-phase` container across the new `conversation.content` layout.
 
 ## Shortcuts
 
@@ -100,7 +120,7 @@ pnpm can also delay versions published less than 24 hours ago. Retry after the w
 
 ## Security
 
-The host accepts only paths relative to the active DSH session workspace and rejects traversal and symlink escape. Saves use revision checks and atomic replacement. Git and ripgrep run with argument arrays rather than shell-concatenated commands. The terminal accepts same-origin loopback requests only, starts in the session workspace, and removes API keys, tokens, secrets, and similar environment variables.
+All plugin routes require Harness authentication. The host accepts only paths relative to the active DSH session workspace and rejects traversal and symlink escape. Saves use revision checks and atomic replacement. Git and ripgrep run with argument arrays rather than shell-concatenated commands. The terminal accepts same-origin loopback requests only, stays in the session workspace selected at creation, and removes API keys, tokens, secrets, and similar environment variables.
 
 ## Development
 

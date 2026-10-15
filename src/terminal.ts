@@ -8,7 +8,7 @@ import type { IPty } from 'node-pty'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { HostContext } from './context.ts'
 import { cwdFor } from './host.ts'
-import { readBody, send, sendError } from './wire.ts'
+import { authorize, readBody, send, sendError } from './wire.ts'
 
 export interface TerminalInfo { id: string; title: string; cwd: string; running: boolean; exitCode?: number; sequence: number }
 export interface TerminalOutput { sequence: number; data: string }
@@ -99,6 +99,7 @@ function terminalRequestAllowed(req: IncomingMessage): boolean {
 export function installTerminal(ctx: HostContext): void {
   const manager = new TerminalManager()
   ctx.effect(() => ctx.webServer.register({ kind: 'prefix', path: '/dsh-vscode-terminal/api', handler: async (req, res) => {
+    if (!authorize(req, res, ctx.connection)) return
     if (!terminalRequestAllowed(req)) return send(res, 403, { ok: false, error: { message: 'forbidden' } })
     if (req.method !== 'POST') return send(res, 405, { ok: false, error: { message: 'POST required' } })
     try {
@@ -119,13 +120,15 @@ export function installTerminal(ctx: HostContext): void {
 
   const webSocket = new WebSocketServer({ noServer: true })
   ctx.effect(() => ctx.webServer.registerUpgrade({ path: '/dsh-vscode-terminal/ws', handler(req, socket, head) {
-    if (!terminalRequestAllowed(req as IncomingMessage)) { socket.destroy(); return }
+    if (ctx.connection.requestRejection(req) !== undefined || !terminalRequestAllowed(req)) { socket.destroy(); return }
     webSocket.handleUpgrade(req as IncomingMessage, socket as Duplex, head, connection => {
       const url = new URL(req.url ?? '/', 'http://dsh.local')
       const sessionId = url.searchParams.get('sessionId')
       const id = url.searchParams.get('id')
       if (sessionId === null || id === null) { connection.close(1008, 'sessionId and id required'); return }
-      const handle = manager.get(cwdFor(ctx, sessionId), id)
+      let handle: TerminalHandle | undefined
+      try { handle = manager.get(cwdFor(ctx, sessionId), id) }
+      catch { connection.close(1008, 'session workspace unavailable'); return }
       if (handle === undefined) { connection.close(1008, 'terminal not found'); return }
       if (handle.replay !== '') connection.send(JSON.stringify({ type: 'replay', sequence: handle.info.sequence, data: handle.replay }))
       const listener = (output: TerminalOutput) => { if (connection.readyState === WebSocket.OPEN) connection.send(JSON.stringify({ type: 'output', ...output })) }

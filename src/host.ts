@@ -13,8 +13,9 @@ const TEXT_LIMIT = 5 * 1024 * 1024
 const PROCESS_TIMEOUT = 30_000
 
 export function cwdFor(ctx: HostContext, sessionId: string): string {
-  const cwd = ctx.sessions.get(sessionId)?.header.cwd
-  if (cwd === undefined || cwd === '') return process.cwd()
+  const session = ctx.sessions.get(sessionId)
+  if (session === undefined) throw new WorkbenchError('session-not-found', 'session not found', 404)
+  const cwd = ctx.workingDirectory.get(session)
   if (!isAbsolute(cwd)) throw new WorkbenchError('cwd-invalid', 'session working directory is not absolute')
   return normalize(cwd)
 }

@@ -99,6 +99,36 @@ dsh plugin --profile web add dsh-vscode-workbench
 
 完成后重新打开工作台，必要时重启 `dsh web` 并刷新页面。
 
+### 安装失败：Harness 版本不兼容
+
+如果安装只以这一行结束，说明 DSH 在安装前就拒绝了插件，pnpm 没有执行、也没有任何文件被写入：
+
+```
+dsh: plugin command failed; diagnostics: ~/.dsh/profiles/<profile>/.plugin-manager/logs/operation-*/pnpm.log
+```
+
+原因是 Harness 的兼容性预检：它用插件的 `@deepseek-ai/dsh*` peerDependencies 比对当前 Harness 版本，不匹配就中止安装。诊断日志里能看到真正的结论：
+
+```
+dsh: installation rejected: Plugin dsh-vscode-workbench@<插件版本> is incompatible with dsh <Harness 版本>: peerDependencies {...}
+dsh: nothing was installed.
+```
+
+插件市场把这类失败归入通用的 `plugin-side install failure`，所以自动提交的 Issue 里不会带上上面这行，正文只剩 `pnpm.log` 的路径。
+
+| 插件版本 | 需要的 Harness |
+| --- | --- |
+| 0.1.9 | `0.2.1-alpha.3` 及以上（Cordis `4.0.5-alpha.2`） |
+| 0.1.8 | `0.1.1-rc.2` |
+
+Harness `0.2.0-rc.2` 上没有可用的插件版本：0.1.9 依赖 Harness `0.2.1-alpha.2` 才引入的 `workingDirectory` 服务，0.1.8 又只适配 `0.1.1-rc.2`。请先把 Harness 升级到 `0.2.1-alpha.3` 及以上再安装，例如 npm 全局安装时：
+
+```bash
+npm i -g @deepseek-ai/dsh@0.2.1-alpha.4
+```
+
+`dsh plugin allow-version` 只跳过版本闸门，不会补上缺失的宿主服务，在 `0.2.0-rc.2` 上插件仍然加载不起来；请优先升级 Harness。
+
 ### 新版架构适配
 
 - 客户端通过 `ui-renderer` 提供的槽位服务注册界面，使用 `ui-session` 的 `mainView` 引用选择当前会话；不再依赖已移除的 `dsh-client-runtime`。

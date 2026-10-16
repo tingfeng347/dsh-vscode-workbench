@@ -99,6 +99,36 @@ dsh plugin --profile web add dsh-vscode-workbench
 
 Reopen the workbench afterwards; restart `dsh web` and refresh the page if needed.
 
+### Install fails: incompatible Harness
+
+If the install ends with only this line, Harness refused the plugin before installing anything — pnpm never ran and no file was written:
+
+```
+dsh: plugin command failed; diagnostics: ~/.dsh/profiles/<profile>/.plugin-manager/logs/operation-*/pnpm.log
+```
+
+Harness runs a compatibility preflight first: it compares the plugin's `@deepseek-ai/dsh*` peerDependencies with the running Harness version and aborts on a mismatch. The diagnostic log holds the actual verdict:
+
+```
+dsh: installation rejected: Plugin dsh-vscode-workbench@<plugin version> is incompatible with dsh <Harness version>: peerDependencies {...}
+dsh: nothing was installed.
+```
+
+The plugin marketplace files this under the generic `plugin-side install failure`, so the auto-submitted issue body keeps only the `pnpm.log` path instead of that line.
+
+| Plugin version | Required Harness |
+| --- | --- |
+| 0.1.9 | `0.2.1-alpha.3` or newer (Cordis `4.0.5-alpha.2`) |
+| 0.1.8 | `0.1.1-rc.2` |
+
+No plugin version runs on Harness `0.2.0-rc.2`: 0.1.9 needs the `workingDirectory` service that first shipped in Harness `0.2.1-alpha.2`, while 0.1.8 only targets `0.1.1-rc.2`. Update Harness to `0.2.1-alpha.3` or newer before installing, for example with a global npm install:
+
+```bash
+npm i -g @deepseek-ai/dsh@0.2.1-alpha.4
+```
+
+`dsh plugin allow-version` only bypasses the version gate; it does not supply the missing host services, so the plugin still fails to load on `0.2.0-rc.2`. Update Harness instead.
+
 ### Harness architecture integration
 
 - Client contributions use `ui-renderer` slots and select the current session through `ui-session`'s `mainView` retain count, replacing the removed `dsh-client-runtime`.

@@ -64,7 +64,11 @@ The workbench mounts through the official `sidebar.footer.action` and `shell.ove
 
 ## Installation
 
-Plugin 0.1.9 targets DeepSeek Harness `0.2.1-alpha.3` (Cordis `4.0.5-alpha.2`). Update Harness before installing; plugin 0.1.8 targets Harness `0.1.1-rc.2`.
+Plugin 0.1.10 targets DeepSeek Harness `0.2.1-rc.4` (Cordis `4.0.5`). Update Harness before installing; see the table below for older plugin versions.
+
+```bash
+npm i -g @deepseek-ai/dsh@0.2.1-rc.4
+```
 
 ```bash
 dsh plugin --profile web add dsh-vscode-workbench
@@ -107,7 +111,7 @@ If the install ends with only this line, Harness refused the plugin before insta
 dsh: plugin command failed; diagnostics: ~/.dsh/profiles/<profile>/.plugin-manager/logs/operation-*/pnpm.log
 ```
 
-Harness runs a compatibility preflight first: it compares the plugin's `@deepseek-ai/dsh*` peerDependencies with the running Harness version and aborts on a mismatch. The diagnostic log holds the actual verdict:
+Harness runs a compatibility preflight first: `engines.dsh` takes precedence; when absent, every `@deepseek-ai/dsh*` peerDependency must match the running Harness version. Prereleases participate in matching. A mismatch aborts installation. The diagnostic log holds the actual verdict:
 
 ```
 dsh: installation rejected: Plugin dsh-vscode-workbench@<plugin version> is incompatible with dsh <Harness version>: peerDependencies {...}
@@ -118,18 +122,21 @@ The plugin marketplace files this under the generic `plugin-side install failure
 
 | Plugin version | Required Harness |
 | --- | --- |
-| 0.1.9 | `0.2.1-alpha.3` or newer (Cordis `4.0.5-alpha.2`) |
+| 0.1.10 | `0.2.1-rc.4` (Cordis `4.0.5`, current validation baseline) |
+| 0.1.9 | `0.2.1-alpha.3` (Cordis `4.0.5-alpha.2`, previous validation baseline) |
 | 0.1.8 | `0.1.1-rc.2` |
 
-No plugin version runs on Harness `0.2.0-rc.2`: 0.1.9 needs the `workingDirectory` service that first shipped in Harness `0.2.1-alpha.2`, while 0.1.8 only targets `0.1.1-rc.2`. Update Harness to `0.2.1-alpha.3` or newer before installing, for example with a global npm install:
+No plugin version runs on Harness `0.2.0-rc.2`: 0.1.9 needs the `workingDirectory` service that first shipped in Harness `0.2.1-alpha.2`, while 0.1.8 only targets `0.1.1-rc.2`. Update Harness to `0.2.1-rc.4` before installing plugin 0.1.10, for example with a global npm install:
 
 ```bash
-npm i -g @deepseek-ai/dsh@0.2.1-alpha.4
+npm i -g @deepseek-ai/dsh@0.2.1-rc.4
 ```
 
 `dsh plugin allow-version` only bypasses the version gate; it does not supply the missing host services, so the plugin still fails to load on `0.2.0-rc.2`. Update Harness instead.
 
 ### Harness architecture integration
+
+Version 0.1.10 updates DSH development dependencies and peers to `0.2.1-rc.4`, updates Cordis to `4.0.5`, and declares `engines.dsh` explicitly. The official `evaluatePluginCompatibility()` validates the installation gate without version exemptions.
 
 - Client contributions use `ui-renderer` slots and select the current session through `ui-session`'s `mainView` retain count, replacing the removed `dsh-client-runtime`.
 - Files, search, Git and new terminals use `workingDirectory.get(session)`. Workspace selection follows the working-directory projection; missing sessions return 404.

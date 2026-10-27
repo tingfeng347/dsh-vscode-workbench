@@ -2,6 +2,8 @@ import { createServer, type IncomingMessage } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import { evaluatePluginCompatibility } from '@deepseek-ai/dsh-app-boot'
+import { readFile } from 'node:fs/promises'
 import { apply as applyConnection, type HostConnectionService } from '@deepseek-ai/dsh-client-connection'
 import type { Session } from '@deepseek-ai/dsh-session'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
@@ -14,6 +16,21 @@ import { mainViewSession } from '../src/client/session.ts'
 
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
+
+describe('Harness plugin installation compatibility', () => {
+  it('passes the official version gate on the supported runtime without exemptions', async () => {
+    const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
+    expect(evaluatePluginCompatibility(manifest, {}, '0.2.1-rc.4')).toBeUndefined()
+    // Check peer ranges too: engines.dsh takes precedence in the official gate.
+    const { engines, ...peerManifest } = manifest
+    expect(evaluatePluginCompatibility(peerManifest, {}, '0.2.1-rc.4')).toBeUndefined()
+    for (const runtime of ['0.1.1-rc.2', '0.2.0-rc.2', '0.2.1-alpha.3', '0.2.1-rc.2', '0.3.0']) {
+      expect(evaluatePluginCompatibility(manifest, {}, runtime), runtime).toMatchObject({
+        runtimeVersion: runtime, exempted: false, requirements: { 'engines.dsh': engines.dsh },
+      })
+    }
+  })
+})
 
 describe('Harness 0.2 host integration', () => {
   it('uses real Harness cookies for every HTTP route and rejects unauthenticated upgrades', async () => {

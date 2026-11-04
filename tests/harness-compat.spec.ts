@@ -20,11 +20,15 @@ afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await
 describe('Harness plugin installation compatibility', () => {
   it('passes the official version gate on the supported runtime without exemptions', async () => {
     const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
-    expect(evaluatePluginCompatibility(manifest, {}, '0.2.1-rc.4')).toBeUndefined()
+    // Also validate the installed app-boot runtime, including the next-channel check.
+    expect(evaluatePluginCompatibility(manifest)).toBeUndefined()
     // Check peer ranges too: engines.dsh takes precedence in the official gate.
     const { engines, ...peerManifest } = manifest
-    expect(evaluatePluginCompatibility(peerManifest, {}, '0.2.1-rc.4')).toBeUndefined()
-    for (const runtime of ['0.1.1-rc.2', '0.2.0-rc.2', '0.2.1-alpha.3', '0.2.1-rc.2', '0.3.0']) {
+    for (const runtime of ['0.2.1-rc.5', '0.2.2-rc.1']) {
+      expect(evaluatePluginCompatibility(manifest, {}, runtime), runtime).toBeUndefined()
+      expect(evaluatePluginCompatibility(peerManifest, {}, runtime), runtime).toBeUndefined()
+    }
+    for (const runtime of ['0.1.1-rc.2', '0.2.0-rc.2', '0.2.1-alpha.3', '0.2.1-rc.2', '0.2.1-rc.4', '0.3.0']) {
       expect(evaluatePluginCompatibility(manifest, {}, runtime), runtime).toMatchObject({
         runtimeVersion: runtime, exempted: false, requirements: { 'engines.dsh': engines.dsh },
       })

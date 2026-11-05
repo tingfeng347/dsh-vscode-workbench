@@ -21,6 +21,10 @@ it('shows unresolved merge conflicts', async () => {
 })
 it('consumes the original path of a rename record without parsing it as another change', async () => {
   const { root, git } = await repository()
-  await git('mv', 'file with spaces.txt', '? renamed.txt')
-  expect((await gitStatus(root)).changes).toMatchObject([{ path: '? renamed.txt', originalPath: 'file with spaces.txt', index: 'R' }])
+  // A porcelain-looking original path detects a missing NUL-record consumption.
+  // Both names are valid on Windows as well as POSIX filesystems.
+  await git('mv', 'file with spaces.txt', '1 original file.txt')
+  await git('commit', '-m', 'prepare rename fixture')
+  await git('mv', '1 original file.txt', 'renamed with spaces.txt')
+  expect((await gitStatus(root)).changes).toMatchObject([{ path: 'renamed with spaces.txt', originalPath: '1 original file.txt', index: 'R' }])
 })

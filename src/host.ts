@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
-import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import type { HostContext } from './context.ts'
 import type { FileDocument, FileEntry, GitChange, GitCommit, GitCommitFile, GitDiff, GitStatus, SearchMatch, SearchRequest } from './types.ts'
@@ -83,14 +83,42 @@ export async function readDocument(cwd: string, path: string): Promise<FileDocum
   } finally { await handle.close() }
 }
 
+const pendingSaves = new Map<string, Promise<void>>()
+
 export async function saveDocument(cwd: string, path: string, content: string, expected: string): Promise<FileDocument> {
-  const { absolute } = await workspacePath(cwd, path)
-  const current = await readDocument(cwd, path)
-  if (current.revision !== expected) throw new WorkbenchError('revision-conflict', 'file changed on disk; reload before saving', 409)
-  const temp = join(dirname(absolute), `.${randomUUID()}.dsh-vscode.tmp`)
-  await writeFile(temp, content, { encoding: 'utf8', flag: 'wx' })
-  try { await rename(temp, absolute) } catch (error) { await rm(temp, { force: true }); throw error }
-  return readDocument(cwd, path)
+  const resolved = await workspacePath(cwd, path)
+  const absolute = await realpath(resolved.absolute)
+  const previous = pendingSaves.get(absolute) ?? Promise.resolve()
+  let release!: () => void
+  const pending = new Promise<void>(resolve => { release = resolve })
+  pendingSaves.set(absolute, pending)
+  await previous
+  let temp: string | undefined
+  try {
+    const checkRevision = async () => {
+      const checked = await workspacePath(cwd, path)
+      if (await realpath(checked.absolute) !== absolute || (await readDocument(cwd, path)).revision !== expected) {
+        throw new WorkbenchError('revision-conflict', 'file changed on disk; reload before saving', 409)
+      }
+    }
+    await checkRevision()
+    const info = await stat(absolute)
+    temp = join(dirname(absolute), `.${randomUUID()}.dsh-vscode.tmp`)
+    const handle = await open(temp, 'wx', info.mode & 0o777)
+    try {
+      await handle.writeFile(content, { encoding: 'utf8' })
+      await handle.chmod(info.mode & 0o777)
+    } finally { await handle.close() }
+    await checkRevision()
+    await rename(temp, absolute)
+    return await readDocument(cwd, path)
+  } finally {
+    try { if (temp !== undefined) await rm(temp, { force: true }) }
+    finally {
+      release()
+      if (pendingSaves.get(absolute) === pending) pendingSaves.delete(absolute)
+    }
+  }
 }
 
 export async function createEntry(cwd: string, path: string, kind: 'file' | 'directory'): Promise<void> {
@@ -120,8 +148,8 @@ export async function renameEntry(cwd: string, path: string, nextPath: string): 
 }
 
 export async function deleteEntry(cwd: string, path: string): Promise<void> {
-  if (path === '') throw new WorkbenchError('root-delete', 'cannot delete workspace root', 403)
-  const { absolute } = await workspacePath(cwd, path)
+  const { root, absolute } = await workspacePath(cwd, path)
+  if (absolute === root) throw new WorkbenchError('root-delete', 'cannot delete workspace root', 403)
   await rm(absolute, { recursive: true, force: false })
 }
 
@@ -220,14 +248,19 @@ export async function gitStatus(cwd: string): Promise<GitStatus> {
   if (result.code !== 0) throw new WorkbenchError('git-failed', result.stderr, 500)
   let branch = 'HEAD'; let ahead = 0; let behind = 0
   const changes: GitChange[] = []
-  for (const record of result.stdout.split('\0')) {
+  const records = result.stdout.split('\0')
+  for (let index = 0; index < records.length; index++) {
+    const record = records[index]!
     if (record.startsWith('# branch.head ')) branch = record.slice(14)
     else if (record.startsWith('# branch.ab ')) {
       const match = /\+(\d+) -(\d+)/.exec(record); ahead = Number(match?.[1] ?? 0); behind = Number(match?.[2] ?? 0)
     } else if (record.startsWith('? ')) changes.push({ path: record.slice(2), index: '?', worktree: '?', staged: false, untracked: true })
-    else if (record.startsWith('1 ') || record.startsWith('2 ')) {
-      const parts = record.split(' '); const xy = parts[1] ?? '..'; const path = parts.slice(record.startsWith('2 ') ? 9 : 8).join(' ')
-      changes.push({ path, index: xy[0] ?? '.', worktree: xy[1] ?? '.', staged: xy[0] !== '.', untracked: false })
+    else if (record.startsWith('1 ') || record.startsWith('2 ') || record.startsWith('u ')) {
+      const renamed = record.startsWith('2 ')
+      const parts = record.split(' '); const xy = parts[1] ?? '..'
+      const path = parts.slice(renamed ? 9 : record.startsWith('u ') ? 10 : 8).join(' ')
+      const originalPath = renamed ? records[++index] : undefined
+      changes.push({ path, ...(originalPath === undefined ? {} : { originalPath }), index: xy[0] ?? '.', worktree: xy[1] ?? '.', staged: xy[0] !== '.', untracked: false })
     }
   }
   return { repository, branch, ahead, behind, changes }

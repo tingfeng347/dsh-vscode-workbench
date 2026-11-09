@@ -74,6 +74,22 @@ npm i -g @deepseek-ai/dsh@0.2.1-rc.5
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
+通过 DSH 插件页或插件市场安装时，界面会把它加入 `dsh.profile.bundles` 并启用。用上面的 CLI 命令安装时只写入 `dependencies`，还需要在 `~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles` 中加入 `dsh-vscode-workbench`，然后重启 `dsh web`：
+
+```json
+{
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "dsh-vscode-workbench"
+      ]
+    }
+  }
+}
+```
+
 ### 首次安装终端支持
 
 终端使用 `node-pty`。如果安装日志提示其构建脚本被阻止，在 DSH 所在机器的 `~/.dsh/profiles/web/pnpm-workspace.yaml` 中合并以下配置，保留已有设置：

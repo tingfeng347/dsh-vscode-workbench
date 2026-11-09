@@ -6,7 +6,7 @@ import { DshConversationPanel, findDshConversationRoot } from '../src/client/Dsh
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
-afterEach(() => { document.body.replaceChildren() })
+afterEach(() => { document.body.replaceChildren(); document.body.removeAttribute('data-dvw-conversation-active') })
 
 it('attaches to the main conversation across the new content container and restores it on unload', async () => {
   document.body.innerHTML = '<div data-conversation-content><div data-conversation-scroll></div></div><div id="main" data-phase="active"><header></header><div data-conversation-content><div data-conversation-scroll></div></div></div><div id="plugin"></div>'
@@ -16,9 +16,11 @@ it('attaches to the main conversation across the new content container and resto
   await act(async () => { root.render(<DshConversationPanel visible width={420} statusHeight={24}/>) })
   expect(conversation.hasAttribute('data-dvw-conversation-panel')).toBe(true)
   expect(conversation.style.getPropertyValue('--dvw-chat-width')).toBe('420px')
+  expect(document.body.hasAttribute('data-dvw-conversation-active')).toBe(true)
   await act(async () => { root.unmount() })
   expect(conversation.hasAttribute('data-dvw-conversation-panel')).toBe(false)
   expect(conversation.style.getPropertyValue('--dvw-chat-width')).toBe('')
+  expect(document.body.hasAttribute('data-dvw-conversation-active')).toBe(false)
 })
 
 it('does not attach an embedded conversation outside the main phase container', () => {

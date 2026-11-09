@@ -11,6 +11,7 @@ import { DshConversationPanel, DshConversationTheme } from './DshConversationPan
 import { DshMark } from './DshMark.tsx'
 import { DocumentPreview, documentPreviewKind, type DocumentPreviewKind } from './documentPreview.tsx'
 import { toggleTerminal } from './shortcuts.ts'
+import { websocketUrl } from './websocket.ts'
 import { resetWorkspaceDocuments, WorkspaceRequestScope } from './workspaceState.ts'
 
 interface Tab extends FileDocument { instance?: symbol; dirty: boolean; draft: string; loaded?: boolean; line?: number; column?: number; external?: boolean; preview?: boolean; title?: string; diff?: GitDiff; diffMode?: 'inline' | 'split'; diffSourcePath?:string; imageUrl?:string; documentPreview?:DocumentPreviewKind; documentUrl?:string }
@@ -23,6 +24,12 @@ type ResizeDirection = 1 | -1
 /** Calculate a panel width from a horizontal pointer movement. */
 export function resizedPanelWidth(startWidth: number, startX: number, nextX: number, direction: ResizeDirection, min: number, max: number): number {
   return Math.max(min, Math.min(max, Math.round(startWidth + (nextX - startX) * direction)))
+}
+
+/** Retry a workspace lookup that raced the Host publishing its session after startup. */
+export function workspaceRetryDelay(error: unknown, attempt: number): number | undefined {
+  if (!(error instanceof ApiError) || error.code !== 'session-not-found' || attempt >= 10) return undefined
+  return Math.min(250 * (attempt + 1), 1000)
 }
 
 function PanelResizer({ className, label, width, min, max, defaultWidth, direction, onWidth }: { className: string; label: string; width: number; min: number; max: number; defaultWidth: number; direction: ResizeDirection; onWidth(width: number): void }) {
@@ -74,6 +81,10 @@ function PanelResizer({ className, label, width, min, max, defaultWidth, directi
 
 function unloadedTab(path:string):Tab{return {instance:Symbol(path),path,content:'',draft:'',revision:'',size:0,binary:false,tooLarge:false,dirty:false,loaded:false,preview:/\.md$/i.test(path)}}
 
+function WorkbenchTitlebar({ name }: { name?: string }) {
+  return <div className="dvw-titlebar"><strong>DSH Workbench</strong>{name !== undefined && <span>{name}</span>}</div>
+}
+
 /** Restore tab headers without reading their file contents. */
 export function restoreTabPaths(paths:string[]):Tab[]{return [...new Set(paths)].map(unloadedTab)}
 
@@ -100,7 +111,7 @@ function useDshDarkTheme(): boolean {
 
 function Tree({ sessionId, path, depth, expanded, selected, selectedDirectory, statuses, onToggle, onSelectDirectory, onOpen, onChange, onUpload, creating, onCreatingChange, onCreatingCancel, onCreatingSubmit }: TreeProps & { creating?: CreatingEntry; onCreatingChange(value: string): void; onCreatingCancel(): void; onCreatingSubmit(): void }) {
   const [rows, setRows] = useState<FileEntry[]>([]); const [error, setError] = useState<string>(); const [dropTarget, setDropTarget] = useState(false); const [context, setContext] = useState<{ entry: FileEntry; x: number; y: number }>(); const [renaming, setRenaming] = useState<{ path: string; value: string }>(); const [pendingDelete, setPendingDelete] = useState<FileEntry>()
-  const load = useCallback(() => { void api<FileEntry[]>('fs.list', { sessionId, path }).then(setRows).catch(error => setError(String(error))) }, [sessionId, path])
+  const load = useCallback(() => { void api<FileEntry[]>('fs.list', { sessionId, path }).then(value => { setRows(value); setError(undefined) }).catch(error => setError(String(error))) }, [sessionId, path])
   useEffect(load, [load])
   useEffect(() => {
     const handler = (event:Event) => { const paths=(event as CustomEvent<string[]>).detail; if(!Array.isArray(paths)||directoryAffected(path,paths))load() }; window.addEventListener('dvw-files-changed', handler); return () => window.removeEventListener('dvw-files-changed', handler)
@@ -294,6 +305,11 @@ export function Workbench({ service, sessionId, cwd }: { service: VscodeWorkbenc
   useEffect(()=>localStorage.setItem('dvw:dsh-chat-width',String(Math.round(chatWidth))),[chatWidth])
   useEffect(()=>localStorage.setItem('dvw:primary-side-visible',primarySideVisible?'open':'closed'),[primarySideVisible])
   useEffect(()=>localStorage.setItem('dvw:status-visible',statusVisible?'open':'closed'),[statusVisible])
+  useEffect(() => {
+    if (!snapshot.visible) return
+    document.body.setAttribute('data-dvw-workbench-active', '')
+    return () => document.body.removeAttribute('data-dvw-workbench-active')
+  }, [snapshot.visible])
   useEffect(()=>{if(!snapshot.visible)return;const onKey=(event:KeyboardEvent)=>{if(event.isComposing||!event.ctrlKey||!event.altKey||event.shiftKey||event.code!=='KeyB')return;event.preventDefault();setChatVisible(value=>!value)};window.addEventListener('keydown',onKey,true);return()=>window.removeEventListener('keydown',onKey,true)},[snapshot.visible])
   const openForWorkspace=(path:string,line?:number,column?:number)=>{const existing=tabsRef.current.find(tab=>tab.path===path);if(existing)setTabs(rows=>rows.map(tab=>tab.path===path?{...tab,line,column}:tab));else setTabs(rows=>[...rows,{...unloadedTab(path),line,column}]);setActive(path)}
   useEffect(() => {
@@ -303,27 +319,40 @@ export function Workbench({ service, sessionId, cwd }: { service: VscodeWorkbenc
     loadingTabs.current.clear(); setWorkspace(undefined); setTabs(cleared.tabs)
     tabsRef.current = cleared.tabs; setActive(cleared.active); setError(cleared.error)
     const controller = new AbortController()
-    void api<{ cwd: string; name: string }>('workspace', { sessionId }, controller.signal).then(value => {
-      if (!workspaceRequests.current.isCurrent(epoch)) return
-      setWorkspace(value)
-      let restored: Tab[] = []
-      let selected: string | undefined
-      try {
-        const parsed = JSON.parse(localStorage.getItem(`dvw:${value.cwd}`) ?? '{}') as { view?: WorkbenchView; paths?: string[]; active?: string; panelHeight?: number; sideWidth?: number }
-        if (parsed.view && service.getSnapshot().visible) service.show(parsed.view)
-        if (typeof parsed.panelHeight === 'number') setPanelHeight(parsed.panelHeight)
-        if (typeof parsed.sideWidth === 'number') setSideWidth(Math.max(210, Math.min(640, Math.round(parsed.sideWidth))))
-        restored = restoreTabPaths(parsed.paths ?? []); selected = parsed.active
-        const drafts: unknown = JSON.parse(localStorage.getItem(`dvw:drafts:${sessionId}:${value.cwd}`) ?? '[]')
-        if (Array.isArray(drafts)) for (const draft of drafts) {
-          if (!draft || typeof draft.path !== 'string' || typeof draft.content !== 'string' || typeof draft.draft !== 'string' || typeof draft.revision !== 'string' || draft.path.startsWith('diff:')) continue
-          const tab = { ...unloadedTab(draft.path), content: draft.content, draft: draft.draft, revision: draft.revision, dirty: draft.draft !== draft.content, loaded: true }
-          restored = [...restored.filter(row => row.path !== tab.path), tab]
+    const load = async () => {
+      for (let attempt = 0; ; attempt++) {
+        try {
+          const value = await api<{ cwd: string; name: string }>('workspace', { sessionId }, controller.signal)
+          if (!workspaceRequests.current.isCurrent(epoch)) return
+          setWorkspace(value)
+          let restored: Tab[] = []
+          let selected: string | undefined
+          try {
+            const parsed = JSON.parse(localStorage.getItem(`dvw:${value.cwd}`) ?? '{}') as { view?: WorkbenchView; paths?: string[]; active?: string; panelHeight?: number; sideWidth?: number }
+            if (parsed.view && service.getSnapshot().visible) service.show(parsed.view)
+            if (typeof parsed.panelHeight === 'number') setPanelHeight(parsed.panelHeight)
+            if (typeof parsed.sideWidth === 'number') setSideWidth(Math.max(210, Math.min(640, Math.round(parsed.sideWidth))))
+            restored = restoreTabPaths(parsed.paths ?? []); selected = parsed.active
+            const drafts: unknown = JSON.parse(localStorage.getItem(`dvw:drafts:${sessionId}:${value.cwd}`) ?? '[]')
+            if (Array.isArray(drafts)) for (const draft of drafts) {
+              if (!draft || typeof draft.path !== 'string' || typeof draft.content !== 'string' || typeof draft.draft !== 'string' || typeof draft.revision !== 'string' || draft.path.startsWith('diff:')) continue
+              const tab = { ...unloadedTab(draft.path), content: draft.content, draft: draft.draft, revision: draft.revision, dirty: draft.draft !== draft.content, loaded: true }
+              restored = [...restored.filter(row => row.path !== tab.path), tab]
+            }
+          } catch { /* Invalid saved state must not prevent opening the workspace. */ }
+          setTabs(restored)
+          setActive(restored.some(tab => tab.path === selected) ? selected : restored.at(-1)?.path)
+          return
+        } catch (error) {
+          if (controller.signal.aborted || !workspaceRequests.current.isCurrent(epoch)) return
+          const delay = workspaceRetryDelay(error, attempt)
+          if (delay === undefined) { setError(String(error)); return }
+          await new Promise(resolve => setTimeout(resolve, delay))
+          if (controller.signal.aborted || !workspaceRequests.current.isCurrent(epoch)) return
         }
-      } catch { /* Invalid saved state must not prevent opening the workspace. */ }
-      setTabs(restored)
-      setActive(restored.some(tab => tab.path === selected) ? selected : restored.at(-1)?.path)
-    }).catch(error => { if (!controller.signal.aborted && workspaceRequests.current.isCurrent(epoch)) setError(String(error)) })
+      }
+    }
+    void load()
     return () => { controller.abort(); loadingTabs.current.clear(); workspaceRequests.current.invalidate(epoch) }
   }, [sessionId, cwd])
   useEffect(() => {
@@ -349,7 +378,6 @@ export function Workbench({ service, sessionId, cwd }: { service: VscodeWorkbenc
     void api<FileDocument>('fs.read', { sessionId, path }).then(doc => {
       if (!current()) return
       if (doc.binary || doc.tooLarge) {
-        setError(doc.binary ? '二进制文件不能在文本编辑器中打开' : `文件超过 5 MiB：${path}`)
         setTabs(rows => rows.map(row => row.path === path ? { ...row, loaded: true, ...(row.dirty ? {} : { binary: doc.binary, tooLarge: doc.tooLarge }), external: true } : row)); return
       }
       setTabs(rows => rows.map(row => row.path !== path ? row : row.dirty
@@ -360,8 +388,9 @@ export function Workbench({ service, sessionId, cwd }: { service: VscodeWorkbenc
   }, [sessionId])
   useEffect(() => {
     if (!snapshot.visible || sessionId === undefined || workspace === undefined) return
-    const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
-    const ws = new WebSocket(`${protocol}://${location.host}/dsh-vscode/ws/files?sessionId=${encodeURIComponent(sessionId)}`)
+    const url = websocketUrl(`/dsh-vscode/ws/files?sessionId=${encodeURIComponent(sessionId)}`)
+    if (url === undefined) return
+    const ws = new WebSocket(url)
     let closed = false
     const refresh = (paths?: string[]) => {
       if (closed) return
@@ -399,27 +428,28 @@ export function Workbench({ service, sessionId, cwd }: { service: VscodeWorkbenc
     finally { savingTabs.current.delete(tab.path) }
   }
   const close=(tab:Tab)=>{if(tab.dirty&&!confirm(`${tab.path} 有未保存更改，确定关闭？`))return;loadingTabs.current.delete(tab.path);setTabs(rows=>rows.filter(row=>row.path!==tab.path));if(active===tab.path)setActive(tabs.filter(row=>row.path!==tab.path).at(-1)?.path)}
-  const closeAll=()=>{const dirty=tabs.filter(tab=>tab.dirty);if(dirty.length>0&&!confirm(`有 ${dirty.length} 个文件包含未保存更改，确定全部关闭？`))return;loadingTabs.current.clear();setTabs([]);setActive(undefined)}
+  const closeAll=()=>{const dirty=tabs.filter(tab=>tab.dirty);if(dirty.length>0&&!confirm(`有 ${dirty.length} 个文件包含未保存更改，确定全部关闭？`))return;loadingTabs.current.clear();setTabs([]);setActive(undefined);setError(undefined)}
   const activeTab=tabs.find(tab=>tab.path===active); const Panel=panels.find(panel=>panel.id===snapshot.bottomPanel)?.component; const terminalAvailable=panels.some(panel=>panel.id==='terminal')
   const selectView=(view:WorkbenchView)=>{if(snapshot.view===view&&primarySideVisible){setPrimarySideVisible(false);return}setPrimarySideVisible(true);service.show(view)}
   const selectHeading=(index:number)=>{if(activeTab===undefined)return;setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab));window.setTimeout(()=>window.dispatchEvent(new CustomEvent('dvw-markdown-heading',{detail:index})),50)}
   const suppressAttachmentDrop=(event:DragEvent)=>{if(!event.dataTransfer.types.includes('Files'))return;const target=event.target;const insideTree=target instanceof Element&&target.closest('.dvw-tree')!==null;if(!insideTree){event.preventDefault();event.stopPropagation()}}
   if(!snapshot.visible)return null
-  if(sessionId===undefined)return <div className="dvw-overlay" data-dvw-theme={theme==='dsh'?undefined:theme}><div className="dvw-empty" style={{gridColumn:'1/4'}}><div>请先选择或创建一个 DSH 会话。<br/><button onClick={()=>service.hide()}>返回 DSH</button></div></div></div>
+  if(sessionId===undefined)return <div className="dvw-overlay" data-dvw-theme={theme==='dsh'?undefined:theme}><WorkbenchTitlebar/><div className="dvw-empty" style={{gridColumn:'1/4'}}><div>请先选择或创建一个 DSH 会话。<br/><button onClick={()=>service.hide()}>返回 DSH</button></div></div></div>
   const markdown=activeTab!==undefined&&!activeTab.path.startsWith('diff:')&&/\.md$/i.test(activeTab.path)
   const diffMarkdown=activeTab?.diff!==undefined&&/\.md$/i.test(activeTab.diffSourcePath??'')
   const markdownPreview=markdown||(diffMarkdown&&activeTab?.preview===true)
   const headings=markdownPreview&&activeTab?markdownHeadings(activeTab.diff?.modified??activeTab.draft):[]
   return <div className="dvw-overlay" data-dvw-theme={theme==='dsh'?undefined:theme} data-dvw-chat={chatVisible||undefined} data-dvw-primary-side={primarySideVisible||undefined} data-dvw-status={statusVisible||undefined} style={{'--dvw-side-width':`${sideWidth}px`,'--dvw-chat-width':`${chatWidth}px`} as CSSProperties} role="dialog" aria-label="VS Code 工作台" onDragEnterCapture={suppressAttachmentDrop} onDragOverCapture={suppressAttachmentDrop} onDropCapture={suppressAttachmentDrop}>
+    <WorkbenchTitlebar name={workspace?.name}/>
     <DshConversationPanel visible={chatVisible&&!settingsOpen} width={chatWidth} statusHeight={statusVisible?24:0}/>
     <DshConversationTheme visible={chatVisible} colorScheme={colorScheme} followDsh={theme==='dsh'}/>
     {!chatVisible&&<button className="dvw-chat-toggle dvw-icon" title="显示 DSH 对话栏 (Ctrl+Alt+B)" onClick={()=>setChatVisible(true)}><DshMark/></button>}
     {chatVisible&&<aside className="dvw-chat"><PanelResizer className="dvw-chat-resizer" label="拖动调整 DSH 对话栏宽度" width={chatWidth} min={400} max={720} defaultWidth={420} direction={-1} onWidth={setChatWidth}/><header className="dvw-chat-head"><span><DshMark/> DSH</span><button className="dvw-icon" title="关闭 DSH 对话栏" onClick={()=>setChatVisible(false)}><Icon name="close"/></button></header><div className="dvw-chat-body"/></aside>}
     {settingsOpen&&<div className="dvw-settings-backdrop" role="presentation" onMouseDown={()=>setSettingsOpen(false)}><section className="dvw-settings" role="dialog" aria-modal="true" aria-label="工作台设置" onMouseDown={event=>event.stopPropagation()}><header><span><Icon name="settings"/> 工作台设置</span><button className="dvw-icon" title="关闭设置" onClick={()=>setSettingsOpen(false)}><Icon name="close"/></button></header><div className="dvw-settings-body"><section><h3>外观</h3><label>颜色主题</label><div className="dvw-settings-themes">{([['dsh','跟随 DSH'],['dark','深色'],['light','浅色']] as const).map(([value,label])=><button key={value} data-active={theme===value} onClick={()=>setTheme(value)}><span className={`dvw-theme-swatch ${value}`}/><span>{label}</span>{theme===value&&<Icon name="check"/>}</button>)}</div></section><section><h3>布局</h3><label className="dvw-setting-check"><input type="checkbox" checked={primarySideVisible} onChange={event=>setPrimarySideVisible(event.target.checked)}/><span>显示左侧视图</span></label><label className="dvw-setting-check"><input type="checkbox" checked={chatVisible} onChange={event=>setChatVisible(event.target.checked)}/><span>显示 DSH 对话栏</span></label><label className="dvw-setting-check"><input type="checkbox" checked={statusVisible} onChange={event=>setStatusVisible(event.target.checked)}/><span>显示底部状态栏</span></label><label className="dvw-setting-range"><span>左侧视图宽度</span><input type="range" min="210" max="640" step="1" value={Math.round(sideWidth)} onChange={event=>setSideWidth(Math.round(Number(event.target.value)))}/><output>{sideWidth}px</output></label><label className="dvw-setting-range"><span>DSH 对话栏宽度</span><input type="range" min="400" max="720" step="1" value={Math.round(chatWidth)} onChange={event=>setChatWidth(Math.max(400,Math.round(Number(event.target.value))))}/><output>{chatWidth}px</output></label></section></div></section></div>}
     <nav className="dvw-activity"><button className="dvw-act" data-active={primarySideVisible&&snapshot.view==='explorer'} title="资源管理器" onClick={()=>selectView('explorer')}><Icon name="files"/></button><button className="dvw-act" data-active={primarySideVisible&&snapshot.view==='search'} title="搜索" onClick={()=>selectView('search')}><Icon name="search"/></button><button className="dvw-act" data-active={primarySideVisible&&snapshot.view==='git'} title="源代码管理" onClick={()=>selectView('git')}><Icon name="source-control"/></button><button className="dvw-act" data-active={snapshot.bottomPanel==='terminal'} disabled={!terminalAvailable} title={terminalAvailable?(snapshot.bottomPanel==='terminal'?'隐藏终端':'显示终端'):'终端适配器未安装'} onClick={()=>toggleTerminal(service)}><Icon name="terminal"/></button><button className="dvw-act dsh" title="返回 DSH" onClick={()=>service.hide()}><Icon name="home"/></button><button className="dvw-act dvw-settings-button" data-active={settingsOpen} title="管理工作台设置" onClick={()=>setSettingsOpen(true)}><Icon name="settings"/></button></nav>
-    <aside className="dvw-side" data-side-width={sideWidth}>{snapshot.view==='explorer'&&<Explorer sessionId={sessionId} cwd={workspace?.cwd} selected={active} onOpen={path=>void open(path)}/>} {snapshot.view==='search'&&<Search sessionId={sessionId} onOpen={(path,line,column)=>void open(path,line,column)}/>} {snapshot.view==='git'&&<Git sessionId={sessionId} onDiff={(path,diff,title,diffSourcePath)=>{const key=`diff:${path}`;setTabs(rows=>[...rows.filter(row=>row.path!==key),{path:key,title,content:diff.diff,draft:diff.diff,revision:'',size:diff.diff.length,binary:false,tooLarge:false,dirty:false,diff,diffMode:'inline',diffSourcePath}]);setActive(key)}}/>}</aside>
+    <aside className="dvw-side" data-side-width={sideWidth}>{snapshot.view==='explorer'&&workspace!==undefined&&<Explorer sessionId={sessionId} cwd={workspace.cwd} selected={active} onOpen={path=>void open(path)}/>} {snapshot.view==='search'&&<Search sessionId={sessionId} onOpen={(path,line,column)=>void open(path,line,column)}/>} {snapshot.view==='git'&&<Git sessionId={sessionId} onDiff={(path,diff,title,diffSourcePath)=>{const key=`diff:${path}`;setTabs(rows=>[...rows.filter(row=>row.path!==key),{path:key,title,content:diff.diff,draft:diff.diff,revision:'',size:diff.diff.length,binary:false,tooLarge:false,dirty:false,diff,diffMode:'inline',diffSourcePath}]);setActive(key)}}/>}</aside>
     <PanelResizer className="dvw-side-resizer" label="拖动调整源码管理侧边栏宽度" width={sideWidth} min={210} max={640} defaultWidth={210} direction={1} onWidth={setSideWidth}/>
-    <main className="dvw-main"><div className="dvw-tabs"><div className="dvw-tab-list">{tabs.map(tab=><button className="dvw-tab" data-active={tab.path===active} key={tab.path} title={tab.diffSourcePath??tab.path} onClick={()=>setActive(tab.path)}><span className="dvw-tab-name">{tab.dirty?'● ':''}{tabLabel(tab)}</span><span onClick={event=>{event.stopPropagation();close(tab)}}><Icon name="close"/></span></button>)}</div>{tabs.length>0&&<div className="dvw-tab-actions"><button className="dvw-icon dvw-close-all" title="全部关闭" onClick={closeAll}><Icon name="close-all"/></button></div>}</div><div className="dvw-editor" data-outline={markdownPreview&&outlineVisible&&headings.length>0}>{error&&<div className="dvw-error"><button className="dvw-icon" onClick={()=>setError(undefined)}><Icon name="close"/></button>{error}</div>}{markdownPreview&&outlineVisible&&headings.length>0&&<MarkdownOutline headings={headings} onClose={()=>setOutlineVisible(false)} onHeading={selectHeading}/>} {markdown&&activeTab&&<div className="dvw-editor-toolbar"><button className="dvw-icon dvw-outline-toggle" data-active={outlineVisible} title={outlineVisible?'关闭 Markdown 大纲':'显示 Markdown 大纲'} onClick={()=>setOutlineVisible(value=>!value)}><Icon name="list-tree"/></button><button className="dvw-mode-button" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="code"/> 源码</button><button className="dvw-mode-button" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{activeTab?.diff&&<div className="dvw-editor-toolbar dvw-diff-toolbar">{diffMarkdown&&<div className="dvw-diff-preview-switch"><button className="dvw-mode-button" data-diff-view="diff" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="diff"/> 差异</button><button className="dvw-mode-button" data-diff-view="preview" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{!activeTab.preview&&<><button className="dvw-mode-button dvw-diff-mode-button" data-mode="inline" data-active={activeTab.diffMode!=='split'} title="内联视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'inline'}:tab))}><Icon name="diff-single"/> 内联</button><button className="dvw-mode-button dvw-diff-mode-button" data-mode="split" data-active={activeTab.diffMode==='split'} title="并排视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'split'}:tab))}><Icon name="diff-sidebyside"/> 并排</button></>}</div>}<div className="dvw-editor-body" data-toolbar={markdown||activeTab?.diff!==undefined}>{activeTab===undefined?<div className="dvw-empty"><div><strong>DSH Workbench</strong><br/>从资源管理器或搜索结果打开文件</div></div>:activeTab.diff?diffMarkdown&&activeTab.preview?<MarkdownPreview source={activeTab.diff.modified} sessionId={sessionId} path={activeTab.diffSourcePath??''}/>:<MonacoDiffEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} original={activeTab.diff.original} modified={activeTab.diff.modified} mode={activeTab.diffMode??'inline'} theme={colorScheme}/>:activeTab.imageUrl?<div className="dvw-image-preview"><img src={activeTab.imageUrl} alt={activeTab.path}/><span>{activeTab.path}</span></div>:activeTab.documentPreview&&activeTab.documentUrl?<DocumentPreview kind={activeTab.documentPreview} src={activeTab.documentUrl} path={activeTab.path}/>:markdown&&activeTab.preview?<MarkdownPreview source={activeTab.draft} sessionId={sessionId} path={activeTab.path}/>:activeTab.binary||activeTab.tooLarge?<div className="dvw-message">文件无法在文本编辑器中显示</div>:activeTab.loaded===false?<div className="dvw-message">正在加载文件…</div>:<MonacoEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} value={activeTab.draft} theme={colorScheme} line={activeTab.line} column={activeTab.column} onChange={draft=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,draft,dirty:draft!==tab.content}:tab))} onSave={()=>void save(activeTab)}/>}</div></div></main>
+    <main className="dvw-main"><div className="dvw-tabs"><div className="dvw-tab-list">{tabs.map(tab=><button className="dvw-tab" data-active={tab.path===active} key={tab.path} title={tab.diffSourcePath??tab.path} onClick={()=>setActive(tab.path)}><span className="dvw-tab-name">{tab.dirty?'● ':''}{tabLabel(tab)}</span><span onClick={event=>{event.stopPropagation();close(tab)}}><Icon name="close"/></span></button>)}</div>{tabs.length>0&&<div className="dvw-tab-actions"><button className="dvw-icon dvw-close-all" title="全部关闭" onClick={closeAll}><Icon name="close-all"/></button></div>}</div><div className="dvw-editor" data-outline={markdownPreview&&outlineVisible&&headings.length>0}>{error&&<div className="dvw-error"><button className="dvw-icon" onClick={()=>setError(undefined)}><Icon name="close"/></button>{error}</div>}{markdownPreview&&outlineVisible&&headings.length>0&&<MarkdownOutline headings={headings} onClose={()=>setOutlineVisible(false)} onHeading={selectHeading}/>} {markdown&&activeTab&&<div className="dvw-editor-toolbar"><button className="dvw-icon dvw-outline-toggle" data-active={outlineVisible} title={outlineVisible?'关闭 Markdown 大纲':'显示 Markdown 大纲'} onClick={()=>setOutlineVisible(value=>!value)}><Icon name="list-tree"/></button><button className="dvw-mode-button" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="code"/> 源码</button><button className="dvw-mode-button" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{activeTab?.diff&&<div className="dvw-editor-toolbar dvw-diff-toolbar">{diffMarkdown&&<div className="dvw-diff-preview-switch"><button className="dvw-mode-button" data-diff-view="diff" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="diff"/> 差异</button><button className="dvw-mode-button" data-diff-view="preview" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{!activeTab.preview&&<><button className="dvw-mode-button dvw-diff-mode-button" data-mode="inline" data-active={activeTab.diffMode!=='split'} title="内联视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'inline'}:tab))}><Icon name="diff-single"/> 内联</button><button className="dvw-mode-button dvw-diff-mode-button" data-mode="split" data-active={activeTab.diffMode==='split'} title="并排视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'split'}:tab))}><Icon name="diff-sidebyside"/> 并排</button></>}</div>}<div className="dvw-editor-body" data-toolbar={markdown||activeTab?.diff!==undefined}>{activeTab===undefined?<div className="dvw-empty"><div><strong>DSH Workbench</strong><br/>从资源管理器或搜索结果打开文件</div></div>:activeTab.diff?diffMarkdown&&activeTab.preview?<MarkdownPreview source={activeTab.diff.modified} sessionId={sessionId} path={activeTab.diffSourcePath??''}/>:<MonacoDiffEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} original={activeTab.diff.original} modified={activeTab.diff.modified} mode={activeTab.diffMode??'inline'} theme={colorScheme}/>:activeTab.imageUrl?<div className="dvw-image-preview"><img src={activeTab.imageUrl} alt={activeTab.path}/><span>{activeTab.path}</span></div>:activeTab.documentPreview&&activeTab.documentUrl?<DocumentPreview kind={activeTab.documentPreview} src={activeTab.documentUrl} path={activeTab.path}/>:markdown&&activeTab.preview?<MarkdownPreview source={activeTab.draft} sessionId={sessionId} path={activeTab.path}/>:activeTab.binary||activeTab.tooLarge?<div className="dvw-message">{activeTab.binary?'二进制文件不能在文本编辑器中打开':`文件超过 5 MiB：${activeTab.path}`}</div>:activeTab.loaded===false?<div className="dvw-message">正在加载文件…</div>:<MonacoEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} value={activeTab.draft} theme={colorScheme} line={activeTab.line} column={activeTab.column} onChange={draft=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,draft,dirty:draft!==tab.content}:tab))} onSave={()=>void save(activeTab)}/>}</div></div></main>
     {snapshot.bottomPanel&&<section className="dvw-bottom" style={{height:panelHeight}}><div style={{height:4,cursor:'ns-resize'}} onPointerDown={event=>{const startY=event.clientY,startHeight=panelHeight;const move=(e:PointerEvent)=>setPanelHeight(Math.max(120,Math.min(window.innerHeight-160,startHeight+startY-e.clientY)));const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/><div className="dvw-bottom-head"><button className="dvw-bottom-title">{panels.find(p=>p.id===snapshot.bottomPanel)?.title??snapshot.bottomPanel}</button>{snapshot.bottomPanel==='terminal'&&<button className="dvw-icon" title="新建终端" onClick={()=>window.dispatchEvent(new Event('dvw-terminal-new'))}><Icon name="add"/></button>}<button className="dvw-icon" style={{marginLeft:'auto'}} onClick={()=>service.toggleBottomPanel(snapshot.bottomPanel!)}><Icon name="close"/></button></div><div className="dvw-bottom-body">{Panel&&workspace&&<Panel sessionId={sessionId} cwd={workspace.cwd} visible colorScheme={colorScheme}/>}</div></section>}
     <footer className="dvw-status"><span><Icon name="git-branch"/> 工作区</span><span>{workspace?.cwd??cwd??''}</span>{activeTab?.external&&<span>磁盘文件已变化</span>}<button className="dvw-icon" style={{color:'white',marginLeft:'auto'}} onClick={()=>service.hide()}>返回 DSH</button></footer>
   </div>

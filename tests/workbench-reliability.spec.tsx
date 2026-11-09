@@ -35,13 +35,13 @@ async function mount(service = new WorkbenchController(), visible = true) {
   await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit"/>) })
   return service
 }
-async function setup() {
+async function setup(binary = false) {
   disk = 'disk'; revision = 'r1'; completeSave = undefined; state.editor = undefined
   localStorage.setItem('dvw:/tmp/audit', JSON.stringify({ paths: ['a.txt'], active: 'a.txt' }))
   vi.stubGlobal('WebSocket', FakeSocket)
   vi.stubGlobal('fetch', vi.fn(async (url: string, options: { body: string }) => {
     const method = url.split('/').at(-1)
-    const doc = () => ({ path: 'a.txt', content: disk, revision, size: disk.length, binary: false, tooLarge: false })
+    const doc = () => ({ path: 'a.txt', content: binary ? '' : disk, revision, size: binary ? 0 : disk.length, binary, tooLarge: false })
     let value: unknown
     if (method === 'workspace') value = { cwd: '/tmp/audit', name: 'audit' }
     else if (method === 'fs.list') value = []
@@ -127,4 +127,15 @@ it('does not reopen a hidden workbench when restoring its saved view', async () 
   service.hide()
   await mount(service, false)
   expect(service.getSnapshot().visible).toBe(false)
+})
+
+it('shows one binary file message instead of an overlapping editor error', async () => {
+  await setup(true)
+  expect(document.body.textContent).toContain('二进制文件不能在文本编辑器中打开')
+  expect(document.querySelector('.dvw-error')).toBeNull()
+  expect(document.querySelector('.dvw-message')?.textContent).toBe('二进制文件不能在文本编辑器中打开')
+  const closeAll = document.querySelector<HTMLButtonElement>('button[title="全部关闭"]')
+  expect(closeAll).not.toBeNull()
+  await act(async () => closeAll!.click())
+  expect(document.body.textContent).not.toContain('二进制文件不能在文本编辑器中打开')
 })

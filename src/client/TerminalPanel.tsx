@@ -20,17 +20,24 @@ function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspac
     const fit = new FitAddon()
     terminal.loadAddon(fit)
     terminal.open(root.current)
-    const connection = workspace.connect(id)
+    let connection
+    try { connection = workspace.connect(id) }
+    catch (exception) {
+      setError(exception instanceof Error ? exception.message : String(exception))
+      terminal.dispose()
+      return
+    }
     const output = connection.subscribe(value => {
       if (value.replay) { replaying.current = true; clearTimeout(replayGuard.current) }
       terminal.write(value.data, () => { if (value.replay) replayGuard.current = setTimeout(() => { replaying.current = false }, 250) })
     })
+    const connectionError = connection.subscribeError(setError)
     const input = terminal.onData(data => { if (!replaying.current || !isTerminalProtocolReply(data)) connection.write(data) })
     const resize = terminal.onResize(({ cols, rows }) => connection.resize(cols, rows))
     const observer = new ResizeObserver(() => { try { fit.fit() } catch { /* The panel can be hidden during layout changes. */ } })
     observer.observe(root.current)
     try { fit.fit(); terminal.focus() } catch (exception) { setError(exception instanceof Error ? exception.message : String(exception)) }
-    return () => { terminalRef.current = undefined; clearTimeout(replayGuard.current); observer.disconnect(); input.dispose(); resize.dispose(); output(); connection.close(); terminal.dispose() }
+    return () => { terminalRef.current = undefined; clearTimeout(replayGuard.current); observer.disconnect(); connectionError(); input.dispose(); resize.dispose(); output(); connection.close(); terminal.dispose() }
   }, [workspace, id])
   useEffect(() => { if (terminalRef.current !== undefined) terminalRef.current.options.theme = terminalTheme(colorScheme) }, [colorScheme])
   return error === undefined ? <div ref={root} className="dvw-terminal-host" /> : <div className="dvw-terminal-error">{error}</div>
@@ -49,11 +56,11 @@ export function TerminalPanel({ sessionId, colorScheme }: BottomPanelProps) {
   const [sideWidth, setSideWidth] = useState(220)
   useEffect(() => {
     let cancelled = false
-    void workspace.refresh().then(() => { if (!cancelled && workspace.getSnapshot().terminals.length === 0) void workspace.create().then(value => { if (!cancelled) setActive(value.id) }) })
+    void workspace.refresh().then(() => { if (!cancelled && workspace.getSnapshot().terminals.length === 0) void workspace.create().then(value => { if (!cancelled) setActive(value.id) }).catch(() => undefined) }).catch(() => undefined)
     return () => { cancelled = true }
   }, [workspace])
   useEffect(() => { if (snapshot.terminals.length > 0 && (!active || !snapshot.terminals.some(value => value.id === active))) setActive(snapshot.terminals[0]?.id) }, [snapshot.terminals, active])
-  useEffect(() => { const create = () => { void workspace.create().then(value => setActive(value.id)) }; window.addEventListener('dvw-terminal-new', create); return () => window.removeEventListener('dvw-terminal-new', create) }, [workspace])
+  useEffect(() => { const create = () => { void workspace.create().then(value => setActive(value.id)).catch(() => undefined) }; window.addEventListener('dvw-terminal-new', create); return () => window.removeEventListener('dvw-terminal-new', create) }, [workspace])
   useEffect(() => {
     if (context === undefined) return
     const close = () => setContext(undefined)
@@ -64,7 +71,7 @@ export function TerminalPanel({ sessionId, colorScheme }: BottomPanelProps) {
   }, [context])
   const closeTerminal = (id: string) => { setContext(undefined); setSplit(current => current?.filter(value => value !== id)); void workspace.close(id) }
   const saveRename = (id: string) => { const title = renaming?.id === id ? renaming.value.trim() : ''; setRenaming(undefined); if (title) void workspace.rename(id, title) }
-  const splitTerminal = (first = active) => { if (first === undefined) return; void workspace.create().then(value => { setSplit(current => [...(current?.includes(first) ? current : [first]), value.id]); setActive(value.id) }) }
+  const splitTerminal = (first = active) => { if (first === undefined) return; void workspace.create().then(value => { setSplit(current => [...(current?.includes(first) ? current : [first]), value.id]); setActive(value.id) }).catch(() => undefined) }
   const shown = (split ?? (active === undefined ? [] : [active])).filter(id => snapshot.terminals.some(value => value.id === id))
   const selectTerminal = (id: string) => { setActive(id); setSplit(current => current?.includes(id) ? current : [id]) }
   return <div className="dvw-terminal-root">

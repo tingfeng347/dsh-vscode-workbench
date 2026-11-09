@@ -1,10 +1,12 @@
 import type { TerminalInfo } from '../terminal.ts'
+import { websocketUrl } from './websocket.ts'
 
 export interface TerminalConnection {
   write(data: string): void
   resize(cols: number, rows: number): void
   close(): void
   subscribe(listener: (output: { sequence: number; data: string; replay?: boolean }) => void): () => void
+  subscribeError(listener: (message: string) => void): () => void
 }
 
 export interface TerminalWorkspaceSnapshot { terminals: readonly TerminalInfo[]; loading: boolean; error?: string }
@@ -32,12 +34,17 @@ async function request<T>(method: string, body: Record<string, unknown>): Promis
 class SocketConnection implements TerminalConnection {
   private readonly socket: WebSocket
   private readonly listeners = new Set<(output: { sequence: number; data: string; replay?: boolean }) => void>()
+  private readonly errorListeners = new Set<(message: string) => void>()
+  private closed = false
   private queue: string[] = []
 
   constructor(sessionId: string, id: string) {
-    const protocol = location.protocol === 'https:' ? 'wss' : 'ws'
-    this.socket = new WebSocket(`${protocol}://${location.host}/dsh-vscode-terminal/ws?sessionId=${encodeURIComponent(sessionId)}&id=${encodeURIComponent(id)}`)
+    const url = websocketUrl(`/dsh-vscode-terminal/ws?sessionId=${encodeURIComponent(sessionId)}&id=${encodeURIComponent(id)}`)
+    if (url === undefined) throw new Error('无法连接终端：桌面端没有发布本地 Host 地址')
+    this.socket = new WebSocket(url)
     this.socket.onopen = () => { for (const value of this.queue) this.socket.send(value); this.queue = [] }
+    this.socket.onerror = () => { for (const listener of this.errorListeners) listener('终端 WebSocket 连接失败') }
+    this.socket.onclose = () => { if (!this.closed) for (const listener of this.errorListeners) listener('终端 WebSocket 连接已断开') }
     this.socket.onmessage = event => {
       try {
         const value = JSON.parse(String(event.data)) as { type?: unknown; sequence?: unknown; data?: unknown }
@@ -50,8 +57,9 @@ class SocketConnection implements TerminalConnection {
   private send(value: unknown): void { const text = JSON.stringify(value); if (this.socket.readyState === WebSocket.OPEN) this.socket.send(text); else this.queue.push(text) }
   write(data: string): void { this.send({ type: 'input', data }) }
   resize(cols: number, rows: number): void { this.send({ type: 'resize', cols, rows }) }
-  close(): void { this.socket.close() }
+  close(): void { this.closed = true; this.socket.close() }
   subscribe(listener: (output: { sequence: number; data: string; replay?: boolean }) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener) }
+  subscribeError(listener: (message: string) => void): () => void { this.errorListeners.add(listener); return () => this.errorListeners.delete(listener) }
 }
 
 /** Identify automatic terminal-emulator replies that must not be echoed during replay. */
@@ -73,7 +81,10 @@ export class TerminalWorkspaceController implements TerminalWorkspace {
     catch (error) { this.set({ ...this.snapshot, loading: false, error: error instanceof Error ? error.message : String(error) }) }
   }
 
-  async create(title?: string): Promise<TerminalInfo> { const terminal = await request<TerminalInfo>('create', { sessionId: this.sessionId, ...(title === undefined ? {} : { title }) }); await this.refresh(); return terminal }
+  async create(title?: string): Promise<TerminalInfo> {
+    try { const terminal = await request<TerminalInfo>('create', { sessionId: this.sessionId, ...(title === undefined ? {} : { title }) }); await this.refresh(); return terminal }
+    catch (error) { this.set({ ...this.snapshot, loading: false, error: error instanceof Error ? error.message : String(error) }); throw error }
+  }
   async close(id: string): Promise<void> { await request('close', { sessionId: this.sessionId, id }); await this.refresh() }
   async rename(id: string, title: string): Promise<void> { await request('rename', { sessionId: this.sessionId, id, title }); await this.refresh() }
   connect(id: string): TerminalConnection { return new SocketConnection(this.sessionId, id) }

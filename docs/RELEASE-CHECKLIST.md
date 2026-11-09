@@ -1,0 +1,161 @@
+# 发布检查清单
+
+适用范围：`dsh-vscode-workbench` 的 npm 发布与 DSH 插件市场更新。以下命令均在本仓库根目录执行。
+
+## 1. 发布前确认
+
+- [ ] `git status` 只包含本次要发布的改动，没有误改 `dist/`、`node_modules/` 或本地 profile。
+- [ ] 确认 npm 上的最新版本：`npm view dsh-vscode-workbench version dist-tags`
+- [ ] 确认版本号需要递增；已发布版本不能重复发布。
+- [ ] 若修复了安装或运行时问题，确认旧版本 tarball 确实不含这些修复，避免“已修复但用户装不到”。
+
+当前已知状态（2026-11-09）：
+
+- npm `latest` 是 `0.1.11`（2026-11-04 发布）。
+- `0.1.11` 的 tarball 不含 `repairNodePtyHelper`、`__DSH_TRANSPORT__`、标题栏和侧栏隐藏等修复。
+- 工作区中的修复尚未提交、未升版本、未发布。
+
+## 2. 版本与文档
+
+- [ ] 修改 `package.json` 的 `version`（例如 `0.1.12`）。
+- [ ] 同步 README 中的版本说明和 Harness 兼容性表格（`README.md`、`README.en.md`）。
+- [ ] 检查 `engines.dsh` 与 `peerDependencies` 是否仍覆盖目标 Harness 版本。
+- [ ] 如果新增了安装前置条件，先更新 README，再发布。
+
+## 3. 本地验证
+
+```sh
+corepack pnpm typecheck
+corepack pnpm test -- --run
+corepack pnpm build
+git diff --check
+```
+
+- [ ] 类型检查通过。
+- [ ] 全部测试通过（本次基线：17 个测试文件、78 项测试）。
+- [ ] 构建通过；只有既有提示时可以接受。
+- [ ] `git diff --check` 没有空白错误。
+
+## 4. 打包检查
+
+```sh
+corepack pnpm pack:plugin
+tar -tzf dist/dsh-vscode-workbench-<version>.tgz | head -40
+```
+
+- [ ] tarball 只包含 `lib/`、`src/`、`cordis.patch.yml`、README 和 LICENSE。
+- [ ] `lib/client.js` 含本次新增标记，例如：
+
+```sh
+tar -xOf dist/dsh-vscode-workbench-<version>.tgz package/lib/client.js | grep -c dvw-titlebar
+tar -xOf dist/dsh-vscode-workbench-<version>.tgz package/lib/client.js | grep -c __DSH_TRANSPORT__
+tar -xOf dist/dsh-vscode-workbench-<version>.tgz package/lib/index.js | grep -c repairNodePtyHelper
+```
+
+三个计数都应大于 0。
+
+## 5. 干净安装验收
+
+使用独立的 `HOME`，不要复用或覆盖 `~/.dsh/profiles/desktop`。
+
+```sh
+export CLEAN_HOME=/tmp/dvw-clean-home
+mkdir -p "$CLEAN_HOME"
+HOME="$CLEAN_HOME" "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" \
+  plugin --profile web add /absolute/path/to/dsh-vscode-workbench-<version>.tgz
+```
+
+### 5.1 首次安装（不预置 allowBuilds）
+
+- [ ] 记录实际结果。若出现 `ERR_PNPM_IGNORED_BUILDS: Ignored build scripts: node-pty`，说明 pnpm 拦截了 `node-pty` 的构建脚本，安装会失败或回滚。
+- [ ] 在 `$CLEAN_HOME/.dsh/profiles/web/pnpm-workspace.yaml` 合并：
+
+```yaml
+allowBuilds:
+  node-pty: true
+```
+
+- [ ] 重新执行安装，确认成功。
+
+### 5.2 启用插件
+
+CLI 安装只写 `dependencies`，不会自动写 `dsh.profile.bundles`。在 `$CLEAN_HOME/.dsh/profiles/web/package.json` 中把 `dsh-vscode-workbench` 加入 `dsh.profile.bundles`：
+
+```json
+{
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "dsh-vscode-workbench"
+      ]
+    }
+  }
+}
+```
+
+通过 DSH 插件页或插件市场安装时，DSH 会在安装成功后自动完成这一步；手工 `dsh plugin add` 不会。
+
+### 5.3 启动并检查
+
+```sh
+HOME="$CLEAN_HOME" "/Applications/DeepSeek Harness.app/Contents/Resources/runtime/cli/bin/dsh" \
+  --profile web --no-open --port 0
+```
+
+- [ ] 服务成功启动并打印带 `token` 的地址。
+- [ ] 首页 HTML 的插件列表包含 `dsh-vscode-workbench/client.js`。
+- [ ] `/dsh-vscode/codicons/codicon.ttf` 返回 200。
+- [ ] `/dsh-vscode/api/unknown` 返回 405（说明 API 前缀已注册，而不是 404）。
+- [ ] `/dsh-vscode-terminal/api/list` 带合法 `sessionId` 时能返回列表。
+
+### 5.4 终端修复
+
+安装后先确认 node-pty 的 helper 权限：
+
+```sh
+ls -l "$CLEAN_HOME/.dsh/profiles/web/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper"
+```
+
+- [ ] 安装后可能是 `0644`（无执行位）。
+- [ ] 启动 DSH、插件加载后变为 `0755`（`TerminalManager` 构造时自动修复）。
+- [ ] 用干净 profile 里的 `node-pty` 直接 spawn `/bin/zsh`，能收到命令输出。
+- [ ] 在 DSH 工作台里新建终端，能出现 `zsh` 提示符并执行 `pwd`。
+
+## 6. 功能验收
+
+- [ ] 资源管理器能列出工作区文件；`session-not-found` 竞态会自动重试，不留下红字。
+- [ ] Monaco 编辑、保存、外部文件变化提示正常。
+- [ ] 打开二进制文件时只显示一条“二进制文件不能在文本编辑器中打开”，没有叠字。
+- [ ] 终端可新建、分屏、关闭；`spawn-helper` 丢失执行位时终端仍可启动。
+- [ ] 工作台激活时 DSH 原生右侧栏按钮和左上角切换按钮被隐藏；返回 DSH 后恢复。
+- [ ] macOS 顶部 48px 标题栏可见，交通灯不遮挡“资源管理器”等内容。
+- [ ] 拖动标题栏能移动窗口。
+- [ ] 对话栏宽度、侧栏宽度和终端高度可拖动。
+
+## 7. 发布
+
+```sh
+corepack pnpm publish --dry-run
+corepack pnpm publish
+```
+
+- [ ] 发布前确认 registry 是 `https://registry.npmjs.org`。
+- [ ] `--dry-run` 的文件列表与第 4 步一致。
+- [ ] 发布后执行 `npm view dsh-vscode-workbench version`，确认新版本成为 `latest`。
+- [ ] 打 tag 并推送：`git tag v<version>`、`git push origin main --tags`。
+- [ ] 在 GitHub Releases 写清修复内容和安装注意事项。
+
+## 8. 发布后验证
+
+- [ ] 在一台干净的机器或全新 `HOME` 上按 README 从 npm 安装，而不是本地 tarball。
+- [ ] 分别验证“插件市场安装自动启用”和“CLI 安装后手动加入 bundles”两条路径。
+- [ ] 确认插件市场/插件页显示新版本，并完成一次实际更新。
+- [ ] 记录仍未验证的平台（Windows、Linux、旧版 Harness）和限制。
+
+## 已知安装注意事项
+
+- `node-pty` 的构建脚本可能被 pnpm 拦截；需要 `allowBuilds: node-pty: true`。插件运行时会补 `spawn-helper` 执行位，但无法绕过 pnpm 在安装阶段的拦截。
+- CLI 安装不会自动修改 `dsh.profile.bundles`；只装依赖而不启用 bundle，插件不会加载。
+- 刚发布不足 24 小时的版本可能触发 pnpm 的安全等待期；等待后重试，或使用 DSH 的“立即更新”。

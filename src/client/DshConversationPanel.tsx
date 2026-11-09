@@ -24,10 +24,12 @@ export function DshConversationPanel({ visible, width, statusHeight }: { visible
       attached?.style.setProperty('--dvw-status-height', `${statusHeight}px`)
     }
     attach()
+    document.body.setAttribute('data-dvw-conversation-active', '')
     const observer = new MutationObserver(attach)
     observer.observe(document.body, { childList: true, subtree: true })
     return () => {
       observer.disconnect()
+      document.body.removeAttribute('data-dvw-conversation-active')
       attached?.removeAttribute('data-dvw-conversation-panel')
       attached?.style.removeProperty('--dvw-chat-width')
       attached?.style.removeProperty('--dvw-status-height')

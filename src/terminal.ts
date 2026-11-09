@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
-import { realpathSync } from 'node:fs'
-import { basename } from 'node:path'
+import { chmodSync, realpathSync, statSync } from 'node:fs'
+import { createRequire } from 'node:module'
+import { basename, dirname, join } from 'node:path'
 import type { IncomingMessage } from 'node:http'
 import type { Duplex } from 'node:stream'
 import * as pty from 'node-pty'
@@ -9,6 +10,8 @@ import { WebSocket, WebSocketServer } from 'ws'
 import type { HostContext } from './context.ts'
 import { cwdFor } from './host.ts'
 import { authorize, readBody, send, sendError } from './wire.ts'
+
+const require = createRequire(import.meta.url)
 
 export interface TerminalInfo { id: string; title: string; cwd: string; running: boolean; exitCode?: number; sequence: number }
 export interface TerminalOutput { sequence: number; data: string }
@@ -29,9 +32,31 @@ export function defaultTerminalShell(platform = process.platform, env = process.
   return { shell: env.SHELL || (platform === 'darwin' ? '/bin/zsh' : '/bin/bash'), args: ['-l'] }
 }
 
+/** Add execute bits when a registry package extracted a native helper without them. */
+export function ensureExecutable(path: string): boolean {
+  if (process.platform === 'win32') return true
+  try {
+    const mode = statSync(path).mode
+    if ((mode & 0o111) === 0) chmodSync(path, mode | 0o111)
+    return true
+  } catch {
+    return false
+  }
+}
+
+/** Repair node-pty's macOS/Linux helper, whose npm package currently loses its execute bit. */
+export function repairNodePtyHelper(): void {
+  if (process.platform === 'win32') return
+  const packageDirectory = dirname(require.resolve('node-pty/package.json'))
+  ensureExecutable(join(packageDirectory, 'build', 'Release', 'spawn-helper'))
+  ensureExecutable(join(packageDirectory, 'prebuilds', `${process.platform}-${process.arch}`, 'spawn-helper'))
+}
+
 /** Own interactive terminals by their canonical workspace directory. */
 export class TerminalManager {
   private readonly workspaces = new Map<string, Map<string, TerminalHandle>>()
+
+  constructor() { repairNodePtyHelper() }
 
   private workspace(cwd: string): string { return realpathSync(cwd) }
 

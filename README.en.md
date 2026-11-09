@@ -74,6 +74,22 @@ npm i -g @deepseek-ai/dsh@0.2.1-rc.5
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
+Installing from the DSH Plugins page or a marketplace also adds the package to `dsh.profile.bundles` and enables it. The CLI command above only writes `dependencies`, so add `dsh-vscode-workbench` to `dsh.profile.bundles` in `~/.dsh/profiles/web/package.json` and restart `dsh web`:
+
+```json
+{
+  "dsh": {
+    "profile": {
+      "bundles": [
+        "@deepseek-ai/dsh-base",
+        "@deepseek-ai/dsh-web-app",
+        "dsh-vscode-workbench"
+      ]
+    }
+  }
+}
+```
+
 ### First terminal installation
 
 The terminal uses `node-pty`. If installation reports a blocked build script, merge the following into `~/.dsh/profiles/web/pnpm-workspace.yaml` on the DSH host, preserving existing settings:

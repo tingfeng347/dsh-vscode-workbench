@@ -10,6 +10,7 @@ export const WORKBENCH_EDITOR_CHROME = {
   renderOverviewRuler: false,
   overviewRulerLanes: 0,
   hideCursorInOverviewRuler: true,
+  renderLineHighlightOnlyWhenFocus: true,
   scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
 } as const
 

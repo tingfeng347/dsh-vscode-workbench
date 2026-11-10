@@ -92,6 +92,7 @@ describe('workbench dark theme', () => {
     expect(workbench).toContain('setTimeout(() => onChange(draft), 180)')
     expect(workbench).toContain('fontSize={fontSize}')
     expect(read('src/client/MonacoEditor.tsx')).toContain('fontSize: props.fontSize ?? 14')
+    expect(read('src/client/MonacoEditor.tsx')).toContain('renderLineHighlightOnlyWhenFocus: true')
     expect(read('src/client/styles.ts')).toContain('font:13px/1.4')
   })
 

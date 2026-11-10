@@ -64,10 +64,10 @@ The workbench mounts through the official `sidebar.footer.action` and `shell.ove
 
 ## Installation
 
-Plugin 0.1.12 targets DeepSeek Harness `0.2.1-rc.5` (Cordis `4.0.5`). Update Harness before installing; see the table below for older plugin versions.
+Plugin 0.1.13 targets DeepSeek Harness `0.2.2-rc.1` (Cordis `4.1.0`). Update Harness before installing; see the table below for older plugin versions.
 
 ```bash
-npm i -g @deepseek-ai/dsh@0.2.1-rc.5
+npm i -g @deepseek-ai/dsh@0.2.2-rc.1
 ```
 
 ```bash
@@ -138,16 +138,17 @@ The plugin marketplace files this under the generic `plugin-side install failure
 
 | Plugin version | Required Harness |
 | --- | --- |
+| 0.1.13 | `0.2.2-rc.1` (Cordis `4.1.0`, default baseline); also checked with `0.2.1-rc.5` (Cordis `4.0.5`) |
 | 0.1.12 | `0.2.1-rc.5` (Cordis `4.0.5`, default baseline); also checked with `0.2.2-rc.1` (Cordis `4.1.0`, Node.js ≥24.9) |
 | 0.1.11 | `0.2.1-rc.5` (Cordis `4.0.5`, default baseline); also checked with `0.2.2-rc.1` (Cordis `4.1.0`, Node.js ≥24.9) |
 | 0.1.10 | `0.2.1-rc.4` (Cordis `4.0.5`, previous validation baseline) |
 | 0.1.9 | `0.2.1-alpha.3` (Cordis `4.0.5-alpha.2`, previous validation baseline) |
 | 0.1.8 | `0.1.1-rc.2` |
 
-No plugin version runs on Harness `0.2.0-rc.2`: 0.1.9 needs the `workingDirectory` service that first shipped in Harness `0.2.1-alpha.2`, while 0.1.8 only targets `0.1.1-rc.2`. Update Harness to `0.2.1-rc.5` before installing plugin 0.1.12, for example with a global npm install:
+No plugin version runs on Harness `0.2.0-rc.2`: 0.1.9 needs the `workingDirectory` service that first shipped in Harness `0.2.1-alpha.2`, while 0.1.8 only targets `0.1.1-rc.2`. Update Harness to `0.2.2-rc.1` before installing plugin 0.1.13, for example with a global npm install:
 
 ```bash
-npm i -g @deepseek-ai/dsh@0.2.1-rc.5
+npm i -g @deepseek-ai/dsh@0.2.2-rc.1
 ```
 
 `dsh plugin allow-version` only bypasses the version gate; it does not supply the missing host services, so the plugin still fails to load on `0.2.0-rc.2`. Update Harness instead.
@@ -159,6 +160,8 @@ Version 0.1.11 updates DSH development dependencies and peers to `0.2.1-rc.5`, k
 Both dependency environments pass type checking, 52 tests and the build, covering the official version gate, real Harness cookie authentication and session-directory switching regressions. Full DSH browser end-to-end validation has not been run. The next channel requires Node.js ≥24.9.
 
 Version 0.1.12 focuses on reliability and macOS usability. It preserves and restores unsaved workspace drafts, hardens concurrent saves and file operations, adds a draggable title bar with correct window clearance, and hides the native DSH sidebar chrome while the workbench is active. WebSocket URLs now follow the DSH transport, and terminal startup repairs the `spawn-helper` execute bits. PDF, DOCX, image and Markdown previews were verified in DSH Desktop.
+
+Version 0.1.13 fixes the overlapping header on Windows Desktop: DSH 0.2 reserves a 40px custom title bar at the top of the window and draws its App and Edit menus there. The workbench now honors `data-windows-titlebar`, starts below that bar, and no longer overlaps sidebar titles such as Source Control, while the title bar drag area remains usable. This release also moves the development and test baseline to Harness `0.2.2-rc.1` / Cordis `4.1.0` while keeping the compatibility range for `0.2.1-rc.5` / Cordis `4.0.5`; both environments pass type checking, 78 tests and the build.
 
 - Client contributions use `ui-renderer` slots and select the current session through `ui-session`'s `mainView` retain count, replacing the removed `dsh-client-runtime`.
 - Files, search, Git and new terminals use `workingDirectory.get(session)`. Workspace selection follows the working-directory projection; missing sessions return 404.

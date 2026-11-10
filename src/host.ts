@@ -227,10 +227,14 @@ async function gitObject(repository: string, spec: string): Promise<string> {
   return result.code === 0 ? result.stdout : ''
 }
 
-async function commitFiles(repository: string, hash: string): Promise<GitCommitFile[]> {
+async function commitParent(repository: string, hash: string): Promise<string | undefined> {
   const parent=await run('git',['rev-parse','--verify',`${hash}^1`],repository)
-  const result = parent.code===0
-    ? await run('git',['diff','--name-status','-z','-M',parent.stdout.trim(),hash,'--'],repository)
+  return parent.code===0?parent.stdout.trim():undefined
+}
+
+async function commitFiles(repository: string, hash: string, parent: string | undefined): Promise<GitCommitFile[]> {
+  const result = parent!==undefined
+    ? await run('git',['diff','--name-status','-z','-M',parent,hash,'--'],repository)
     : await run('git', ['diff-tree', '--root', '--no-commit-id', '--name-status', '-r', '-z', '-M', hash], repository)
   if (result.code !== 0) throw new WorkbenchError('git-failed', result.stderr || result.stdout, 409)
   const tokens = result.stdout.split('\0').filter(Boolean); const files: GitCommitFile[] = []
@@ -312,17 +316,19 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
       if (result.code !== 0) throw new WorkbenchError('git-failed', result.stderr || result.stdout, 409)
       return { diff: result.stdout, original: '', modified: result.stdout } satisfies GitDiff
     }
-    case 'commit.files': return commitFiles(repository, validateCommitHash(value))
+    case 'commit.files': { const hash=validateCommitHash(value); return commitFiles(repository, hash, await commitParent(repository, hash)) }
     case 'commit.file.diff': {
-      const hash=validateCommitHash(value);const target=validateGitPath(repository,path);const files=await commitFiles(repository,hash);const file=files.find(item=>item.path===target)
+      const hash=validateCommitHash(value);const target=validateGitPath(repository,path);const parent=await commitParent(repository,hash);const files=await commitFiles(repository,hash,parent);const file=files.find(item=>item.path===target)
       if (file===undefined) throw new WorkbenchError('not-found','file is not part of the commit',404)
-      const parent=await run('git',['rev-parse','--verify',`${hash}^1`],repository)
-      const shown=parent.code===0
-        ? await run('git',['diff','--no-ext-diff','--find-renames','--patch','--no-color',parent.stdout.trim(),hash,'--',file.previousPath??target,target],repository)
-        : await run('git',['show','--no-ext-diff','--find-renames','--format=','--patch','--no-color',hash,'--',file.previousPath??target,target],repository)
+      // Spawning git is slow on Windows, so the patch and both blobs are read concurrently.
+      const [shown,original,modified]=await Promise.all([
+        parent!==undefined
+          ? run('git',['diff','--no-ext-diff','--find-renames','--patch','--no-color',parent,hash,'--',file.previousPath??target,target],repository)
+          : run('git',['show','--no-ext-diff','--find-renames','--format=','--patch','--no-color',hash,'--',file.previousPath??target,target],repository),
+        file.status==='A'||parent===undefined?'':gitObject(repository,`${parent}:${file.previousPath??target}`),
+        file.status==='D'?'':gitObject(repository,`${hash}:${target}`),
+      ])
       if(shown.code!==0)throw new WorkbenchError('git-failed',shown.stderr||shown.stdout,409)
-      const original=file.status==='A'||parent.code!==0?'':await gitObject(repository,`${parent.stdout.trim()}:${file.previousPath??target}`)
-      const modified=file.status==='D'?'':await gitObject(repository,`${hash}:${target}`)
       return {diff:shown.stdout,original,modified} satisfies GitDiff
     }
     case 'diff': {

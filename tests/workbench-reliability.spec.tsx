@@ -10,7 +10,7 @@ type EditorProps = Parameters<typeof MonacoEditor>[0]
 const state = vi.hoisted(() => ({ editor: undefined as EditorProps | undefined }))
 // Monaco and the DSH conversation are external rendering integrations. Exercise
 // the workbench's real state and HTTP client with a controlled network boundary.
-vi.mock('../src/client/MonacoEditor.tsx', () => ({ MonacoEditor: (props: EditorProps) => { state.editor = props; return null }, MonacoDiffEditor: () => null }))
+vi.mock('../src/client/MonacoEditor.tsx', () => ({ MonacoEditor: (props: EditorProps) => { state.editor = props; return null }, MonacoDiffEditor: () => null, preloadMonaco: () => {}, retainEditorModels: () => {} }))
 vi.mock('../src/client/DshConversationPanel.tsx', () => ({ DshConversationPanel: () => null, DshConversationTheme: () => null }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 let root: Root | undefined

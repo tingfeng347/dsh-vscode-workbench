@@ -11,7 +11,8 @@
 
 当前已知状态（2026-11-10）：
 
-- `0.1.13` 修复 Windows Desktop 顶部 40px 自定义标题栏与工作台侧栏标题叠字的问题（`data-windows-titlebar` 留白），并把开发/测试基线升级到 Harness `0.2.2-rc.1`（Cordis `4.1.0`），保留 `0.2.1-rc.5`（Cordis `4.0.5`）兼容范围。
+- `0.1.14` 修复 Windows Desktop 顶部 40px 自定义标题栏与工作台侧栏标题叠字的问题（`data-windows-titlebar` 留白），把开发/测试基线升级到 Harness `0.2.2-rc.1`（Cordis `4.1.0`）；同时让文件监听跳过 `vendor`、`third_party`、`build`、`dist` 等大目录并支持设置追加排除项，监听失败不再崩溃；修复多标签布局与活动标签自动滚动，底部状态栏改为默认关闭。
+- `0.1.13` 只准备了版本号和文档，没有打 tag，npm 与 GitHub Release 均未发布；其 Windows 标题栏与基线升级内容包含在 `0.1.14`。
 - `0.1.12` 包含草稿恢复、保存与文件操作可靠性、macOS 标题栏与布局、终端启动、transport WebSocket 和侧栏遮挡修复。
 - `0.1.11` 的 tarball 不含 `repairNodePtyHelper`、`__DSH_TRANSPORT__`、标题栏和侧栏隐藏等修复。
 
@@ -32,7 +33,7 @@ git diff --check
 ```
 
 - [ ] 类型检查通过。
-- [ ] 全部测试通过（本次基线：17 个测试文件、78 项测试）。
+- [ ] 全部测试通过（本次基线：18 个测试文件、84 项测试）。
 - [ ] 构建通过；只有既有提示时可以接受。
 - [ ] `git diff --check` 没有空白错误。
 

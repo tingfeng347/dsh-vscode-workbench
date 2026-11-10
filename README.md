@@ -64,7 +64,7 @@
 
 ## 安装
 
-插件 0.1.13 适配 DeepSeek Harness `0.2.2-rc.1`（Cordis `4.1.0`）。请先更新 Harness，再安装插件；旧版对应关系见下表。
+插件 0.1.14 适配 DeepSeek Harness `0.2.2-rc.1`（Cordis `4.1.0`）。请先更新 Harness，再安装插件；旧版对应关系见下表。
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.1
@@ -138,14 +138,14 @@ dsh: nothing was installed.
 
 | 插件版本 | 需要的 Harness |
 | --- | --- |
-| 0.1.13 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
+| 0.1.14 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
 | 0.1.12 | `0.2.1-rc.5`（Cordis `4.0.5`，默认基线）；另验证 `0.2.2-rc.1`（Cordis `4.1.0`，Node.js ≥24.9） |
 | 0.1.11 | `0.2.1-rc.5`（Cordis `4.0.5`，默认基线）；另验证 `0.2.2-rc.1`（Cordis `4.1.0`，Node.js ≥24.9） |
 | 0.1.10 | `0.2.1-rc.4`（Cordis `4.0.5`，旧版验证基线） |
 | 0.1.9 | `0.2.1-alpha.3`（Cordis `4.0.5-alpha.2`，旧版验证基线） |
 | 0.1.8 | `0.1.1-rc.2` |
 
-Harness `0.2.0-rc.2` 上没有可用的插件版本：0.1.9 依赖 Harness `0.2.1-alpha.2` 才引入的 `workingDirectory` 服务，0.1.8 又只适配 `0.1.1-rc.2`。请先把 Harness 升级到 `0.2.2-rc.1` 再安装 0.1.13，例如 npm 全局安装时：
+Harness `0.2.0-rc.2` 上没有可用的插件版本：0.1.9 依赖 Harness `0.2.1-alpha.2` 才引入的 `workingDirectory` 服务，0.1.8 又只适配 `0.1.1-rc.2`。请先把 Harness 升级到 `0.2.2-rc.1` 再安装 0.1.14，例如 npm 全局安装时：
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.1
@@ -161,7 +161,9 @@ npm i -g @deepseek-ai/dsh@0.2.2-rc.1
 
 0.1.12 在此基础上集中修复可靠性与 macOS 使用问题：保留并恢复工作区草稿，加强并发保存和文件操作；补齐可拖动标题栏与窗口留白，修正活动工作台的 DSH 原生侧栏遮挡；WebSocket 地址跟随 DSH transport，终端启动时自动修复 `spawn-helper` 执行位。PDF、DOCX、图片和 Markdown 预览已在 DSH Desktop 中实际验证。
 
-0.1.13 修复 Windows Desktop 的顶部叠字：DSH 0.2 的 Windows 自定义标题栏会在窗口顶部预留 40px，并绘制「应用」「编辑」菜单；工作台现在识别 `data-windows-titlebar`，从标题栏下沿开始布局，不再与「源代码管理」等侧栏标题重叠，同时保留标题栏的拖动区域。该版本同时把开发与测试基线升级到 Harness `0.2.2-rc.1` / Cordis `4.1.0`，并在 `0.2.1-rc.5` / Cordis `4.0.5` 上保留兼容范围；两套环境均通过类型检查、78 项测试及构建。
+0.1.14 修复 Windows Desktop 的顶部叠字：DSH 0.2 的 Windows 自定义标题栏会在窗口顶部预留 40px，并绘制「应用」「编辑」菜单；工作台现在识别 `data-windows-titlebar`，从标题栏下沿开始布局，不再与「源代码管理」等侧栏标题重叠，同时保留标题栏的拖动区域。开发与测试基线同步升级到 Harness `0.2.2-rc.1` / Cordis `4.1.0`，并在 `0.2.1-rc.5` / Cordis `4.0.5` 上保留兼容范围。
+
+0.1.14 同时处理大仓库与多标签场景：文件监听默认跳过 `vendor`、`third_party`/`third_part`、`build`、`dist`、`out`、`target`、`.venv`、`__pycache__` 等大目录，并允许在工作台设置里追加排除项；监听资源耗尽时只停用自动刷新，不再让 DSH 因 inotify 上限崩溃。标签栏改为单行省略并隐藏原生滚动条，关闭全部按钮固定右侧，切换标签时自动滚入可视区域。底部状态栏默认隐藏，可在设置中重新开启。
 
 - 客户端通过 `ui-renderer` 提供的槽位服务注册界面，使用 `ui-session` 的 `mainView` 引用选择当前会话；不再依赖已移除的 `dsh-client-runtime`。
 - 文件、搜索、Git 和新建终端通过 `workingDirectory.get(session)` 使用会话当前目录，跟随工作目录投影切换；失效会话返回 404。

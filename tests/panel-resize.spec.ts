@@ -32,7 +32,7 @@ describe('resizedPanelWidth', () => {
     expect(styles).toContain('html[data-windows-titlebar] .dvw-overlay{top:var(--dvw-titlebar-height);padding-top:0}')
     expect(styles).toContain('-webkit-app-region:drag')
     expect(styles).toContain('padding-top:var(--dvw-titlebar-height)')
-    expect(styles).toContain('[data-dvw-conversation-panel]{position:fixed!important;top:calc(var(--dvw-titlebar-height) + 4px)!important')
+    expect(styles).toContain('[data-dvw-conversation-panel]{position:fixed!important;top:var(--dvw-titlebar-height)!important')
     expect(styles).toContain('body[data-dvw-conversation-active] [data-sidebar-right-expand]{display:none!important}')
     expect(styles).toContain('body[data-dvw-workbench-active] [data-shell-leading]{display:none!important}')
     expect(styles).toContain('body[data-dvw-workbench-active] [data-sidebar-toggle]{display:none!important}')

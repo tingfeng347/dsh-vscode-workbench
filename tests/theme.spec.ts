@@ -42,6 +42,9 @@ describe('workbench dark theme', () => {
     expect(workbench).toContain('<DshMark size={18}/>')
     expect(styles).toContain('border-radius:8px 8px 0 0')
     expect(read('src/client/MonacoEditor.tsx')).toContain("'vs/nls': { availableLanguages: { '*': 'zh-cn' } }")
+    expect(read('src/client/MonacoEditor.tsx')).toContain("'vs/nls.messages.zh-cn'")
+    expect(workbench).toContain('dvw-bottom-reveal')
+    expect(workbench).toContain('startHeight+startY-e.clientY<80')
     expect(workbench).toContain("onAuxClick={event=>{if(event.button===1){event.preventDefault();close(tab)}}}")
   })
 

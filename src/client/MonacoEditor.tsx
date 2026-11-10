@@ -73,10 +73,12 @@ export function loadMonaco(): Promise<Monaco> {
       const loader = window.require
       if (loader === undefined) return reject(new Error('Monaco AMD loader unavailable'))
       loader.config({ paths: { vs: '/dsh-vscode/monaco/vs' }, 'vs/nls': { availableLanguages: { '*': 'zh-cn' } } })
-      loader(['vs/editor/editor.main'], () => {
-        if (window.monaco === undefined) return reject(new Error('Monaco failed to initialize'))
-        defineWorkbenchThemes(window.monaco)
-        resolve(window.monaco)
+      loader(['vs/nls.messages.zh-cn'], () => {
+        loader(['vs/editor/editor.main'], () => {
+          if (window.monaco === undefined) return reject(new Error('Monaco failed to initialize'))
+          defineWorkbenchThemes(window.monaco)
+          resolve(window.monaco)
+        })
       })
     }
     if (window.require !== undefined) { start(); return }

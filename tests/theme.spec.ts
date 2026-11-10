@@ -43,6 +43,14 @@ describe('workbench dark theme', () => {
     expect(workbench).toContain("onAuxClick={event=>{if(event.button===1){event.preventDefault();close(tab)}}}")
   })
 
+  it('opens search results at the matched line with a highlight', () => {
+    const workbench = read('src/client/Workbench.tsx')
+    expect(workbench).toContain('props.onOpen(path,row.line,row.column,row.match||query)')
+    expect(workbench).toContain('highlight={activeTab.highlight}')
+    expect(read('src/client/MonacoEditor.tsx')).toContain("inlineClassName: 'dvw-search-hit'")
+    expect(read('src/client/styles.ts')).toContain('.dvw-search-hit{')
+  })
+
   it('uses VS Code light surfaces and separators', () => {
     const styles = read('src/client/styles.ts')
     expect(styles).toContain('--dvw-base:#f8f8f8')

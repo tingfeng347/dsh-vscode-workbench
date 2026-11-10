@@ -199,7 +199,7 @@ export async function searchWorkspace(cwd: string, request: SearchRequest, signa
     const event = JSON.parse(line) as { type: string; data?: { path?: { text?: string }; lines?: { text?: string }; line_number?: number; submatches?: Array<{ start: number; end: number; match?: { text?: string } }> } }
     if (event.type !== 'match' || event.data?.path?.text === undefined || event.data.lines?.text === undefined) continue
     for (const hit of event.data.submatches ?? []) {
-      matches.push({ path: event.data.path.text.replace(/^\.\//, ''), line: event.data.line_number ?? 1, column: hit.start + 1, preview: event.data.lines.text.trimEnd(), match: hit.match?.text ?? '' })
+      matches.push({ path: event.data.path.text.replace(/\\/g, '/').replace(/^\.\//, ''), line: event.data.line_number ?? 1, column: hit.start + 1, preview: event.data.lines.text.trimEnd(), match: hit.match?.text ?? '' })
       if (matches.length >= 2000) return { matches, limited: true }
     }
   }

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { searchHighlightRange } from './searchHighlight.ts'
 
 type Monaco = typeof import('monaco-editor')
 declare global { interface Window { require?: { (ids: string[], done: () => void): void; config(value: unknown): void }; monaco?: Monaco } }
@@ -93,9 +94,10 @@ export function MonacoDiffEditor(props: { uri: string; original: string; modifie
   return error===undefined?<div className="dvw-diff dvw-monaco-diff" data-mode={props.mode} data-render-side-by-side={props.mode==='split'} ref={root}/>:<div className="dvw-error">{error}</div>
 }
 
-export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' | 'light'; line?: number; column?: number; fontSize?: number; onChange(value: string): void; onSave(): void }) {
+export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' | 'light'; line?: number; column?: number; fontSize?: number; highlight?: string; onChange(value: string): void; onSave(): void }) {
   const root = useRef<HTMLDivElement>(null)
   const editor = useRef<import('monaco-editor').editor.IStandaloneCodeEditor>()
+  const decorations = useRef<import('monaco-editor').editor.IEditorDecorationsCollection>()
   const callbacks = useRef({ onChange: props.onChange, onSave: props.onSave })
   callbacks.current = { onChange: props.onChange, onSave: props.onSave }
   const [error, setError] = useState<string>()
@@ -120,5 +122,22 @@ export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' 
   }, [props.value])
   useEffect(() => { if (window.monaco !== undefined) window.monaco.editor.setTheme(props.theme === 'dark' ? DARK_THEME : 'vs') }, [props.theme])
   useEffect(() => { editor.current?.updateOptions({ fontSize: props.fontSize ?? 14 }) }, [props.fontSize])
+  useEffect(() => {
+    const instance = editor.current
+    const monaco = window.monaco
+    if (instance === undefined || monaco === undefined) return
+    const model = instance.getModel()
+    if (model === null || props.line === undefined) { decorations.current?.clear(); decorations.current = undefined; return }
+    const line = Math.max(1, Math.min(Math.round(props.line), model.getLineCount()))
+    const text = model.getLineContent(line)
+    const needle = props.highlight ?? ''
+    const { startColumn, endColumn } = searchHighlightRange(text, needle, props.column ?? 1)
+    const range = new monaco.Range(line, startColumn, line, endColumn)
+    instance.setSelection(range)
+    instance.revealLineInCenter(line)
+    instance.focus()
+    decorations.current?.clear()
+    decorations.current = needle === '' ? undefined : instance.createDecorationsCollection([{ range, options: { inlineClassName: 'dvw-search-hit' } }])
+  }, [props.line, props.column, props.highlight])
   return error === undefined ? <div ref={root} style={{ position: 'absolute', inset: 0 }} /> : <div className="dvw-error">{error}</div>
 }

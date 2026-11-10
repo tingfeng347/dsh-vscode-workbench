@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GitCommit } from '../src/types.ts'
-import { createdEntryPath, directoryAffected, graphRows, graphTrackPath, renamedPath, restoreTabPaths, tabLabel, uploadDestination } from '../src/client/Workbench.tsx'
+import { createdEntryPath, directoryAffected, graphRows, graphTrackPath, renamedPath, restoreTabPaths, tabLabel, tabScrollLeft, uploadDestination } from '../src/client/Workbench.tsx'
 import { markdownHeadings, markdownWorkspacePath } from '../src/client/MarkdownPreview.tsx'
 
 function commit(hash: string, parents: string[]): GitCommit {
@@ -43,6 +43,15 @@ describe('Markdown outline',()=>{it('extracts ordered heading levels',()=>{expec
 describe('Markdown workspace links',()=>{it('resolves relative links inside the current workspace',()=>{expect(markdownWorkspacePath('docs/README.en.md','../README.md')).toBe('README.md');expect(markdownWorkspacePath('README.en.md','README.md')).toBe('README.md');expect(markdownWorkspacePath('README.md','https://example.com')).toBeUndefined()})})
 
 describe('Editor tab labels',()=>{it('shows only the filename while paths remain distinct',()=>{expect(tabLabel({path:'Additional-Chapter/N8N_INSTALL_GUIDE.png'})).toBe('N8N_INSTALL_GUIDE.png');expect(tabLabel({path:'diff:commit:hash:docs/chapter7/README.md',diffSourcePath:'docs/chapter7/README.md'})).toBe('README.md');expect(tabLabel({path:'diff:anything',title:'nested/LICENSE.txt'})).toBe('LICENSE.txt')})})
+
+describe('Editor tab scrolling',()=>{
+  it('reveals a tab hidden past either edge of the strip',()=>{
+    const viewport={left:100,right:500}
+    expect(tabScrollLeft(40,viewport,{left:120,right:220})).toBe(40)
+    expect(tabScrollLeft(40,viewport,{left:80,right:180})).toBe(20)
+    expect(tabScrollLeft(40,viewport,{left:480,right:580})).toBe(120)
+  })
+})
 
 describe('Explorer upload destination',()=>{it('uses the selected directory and falls back to the workspace root',()=>{expect(uploadDestination('docs/assets')).toBe('docs/assets');expect(uploadDestination()).toBe('')})})
 

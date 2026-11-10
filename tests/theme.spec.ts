@@ -29,15 +29,18 @@ describe('workbench dark theme', () => {
     const workbench = read('src/client/Workbench.tsx')
     expect(workbench).toContain("title={chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)'}")
     expect(workbench).not.toContain('dvw-chat-toggle')
-    expect(read('src/client/styles.ts')).toContain('.dvw-tab-actions{flex:none;width:42px;display:grid;place-items:center;padding:0 6px;background:var(--dvw-surface-1)}')
+    expect(read('src/client/styles.ts')).toContain('.dvw-tab-actions{flex:none;width:42px;display:grid;place-items:center;padding:0 6px;background:var(--dvw-base)}')
   })
 
-  it('uses rounded tabs and larger activity icons', () => {
+  it('uses VS Code tabs, activity selection and middle-click close', () => {
     const styles = read('src/client/styles.ts')
+    const workbench = read('src/client/Workbench.tsx')
     expect(styles).toContain('.dvw-act .codicon{font-size:18px}')
-    expect(styles).toContain('.dvw-tab[data-active=true]{background:var(--dvw-tab-active)')
+    expect(styles).toContain('.dvw-act[data-active=true]::before{background:var(--dvw-tab-active)}')
+    expect(styles).toContain('.dvw-tab[data-active=true]{background:var(--dvw-surface-1)')
     expect(styles).toContain('--dvw-tab-active:#e8e8e8')
-    expect(read('src/client/Workbench.tsx')).toContain('<DshMark size={18}/>')
+    expect(workbench).toContain('<DshMark size={18}/>')
+    expect(workbench).toContain("onAuxClick={event=>{if(event.button===1){event.preventDefault();close(tab)}}}")
   })
 
   it('uses VS Code light surfaces and separators', () => {

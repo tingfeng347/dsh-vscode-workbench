@@ -29,7 +29,7 @@ describe('workbench dark theme', () => {
     const workbench = read('src/client/Workbench.tsx')
     expect(workbench).toContain("title={chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)'}")
     expect(workbench).not.toContain('dvw-chat-toggle')
-    expect(read('src/client/styles.ts')).toContain('.dvw-tab-actions{flex:none;width:42px;display:grid;place-items:center;padding:0 6px;background:var(--dvw-base)}')
+    expect(read('src/client/styles.ts')).toContain('.dvw-tab-actions{flex:none;width:42px;display:grid;place-items:center;padding:0 6px;background:transparent}')
   })
 
   it('uses VS Code tabs, activity selection and middle-click close', () => {
@@ -61,7 +61,7 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('.dvw-overlay[data-dvw-bottom-panel] .dvw-main{border-bottom:0;border-bottom-left-radius:0;border-bottom-right-radius:0}')
     expect(read('src/client/Workbench.tsx')).toContain('data-dvw-bottom-panel={snapshot.bottomPanel||undefined}')
     expect(styles).toContain('.dvw-bottom{grid-column:3;grid-row:2;height:260px;min-height:120px;border-top:1px solid var(--dvw-border);border-left:1px solid var(--dvw-border);border-right:1px solid var(--dvw-border);border-bottom:1px solid var(--dvw-border);border-bottom-left-radius:8px;border-bottom-right-radius:8px;margin-left:4px')
-    expect(styles).toContain('.dvw-tabs{height:35px;background:var(--dvw-base);border-bottom:1px solid var(--dvw-border)')
+    expect(styles).toContain('.dvw-tabs{height:35px;background:linear-gradient(to top,var(--dvw-border) 0 1px,var(--dvw-base) 1px 100%)')
     expect(styles).toContain('border-top:1px solid var(--dvw-border);border-bottom:1px solid var(--dvw-border);border-right:1px solid var(--dvw-border);border-top-right-radius:8px;border-bottom-right-radius:8px;margin-right:4px;margin-bottom:4px')
     expect(styles).toContain('[data-dvw-conversation-panel]{position:fixed!important;top:var(--dvw-titlebar-height)!important;right:4px!important')
     expect(styles).toContain('.dvw-tabs{height:35px')

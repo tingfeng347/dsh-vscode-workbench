@@ -25,6 +25,13 @@ describe('workbench dark theme', () => {
     expect(read('src/client/DshConversationPanel.tsx')).toContain("body.setAttribute('data-dvw-palette', colorScheme)")
   })
 
+  it('keeps the DSH chat toggle in the activity bar', () => {
+    const workbench = read('src/client/Workbench.tsx')
+    expect(workbench).toContain("title={chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)'}")
+    expect(workbench).not.toContain('dvw-chat-toggle')
+    expect(read('src/client/styles.ts')).toContain('.dvw-tab-actions{flex:none;width:42px;display:grid;place-items:center;padding:0 6px;background:var(--dvw-base)}')
+  })
+
   it('keeps the terminal and Monaco on the same dark surfaces', () => {
     expect(read('src/client/TerminalPanel.tsx')).toContain("background: '#191a1b'")
     const monaco = read('src/client/MonacoEditor.tsx')

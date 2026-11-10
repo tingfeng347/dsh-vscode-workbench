@@ -35,6 +35,7 @@ describe('workbench dark theme', () => {
     const styles = read('src/client/styles.ts')
     const workbench = read('src/client/Workbench.tsx')
     expect(styles).toContain('.dvw-act .codicon{font-size:18px}')
+    expect(styles).toContain('.dvw-activity{grid-row:1/3;background:var(--dvw-base);border:1px solid var(--dvw-border);border-radius:8px 0 0 8px;')
     expect(styles).toContain('.dvw-act[data-active=true]::before{background:var(--dvw-tab-active)}')
     expect(styles).toContain('.dvw-tab[data-active=true]{background:var(--dvw-surface-1)')
     expect(styles).toContain('--dvw-tab-active:#e8e8e8')

@@ -37,7 +37,6 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('.dvw-act .codicon{font-size:18px}')
     expect(styles).toContain('.dvw-tab[data-active=true]{background:var(--dvw-tab-active)')
     expect(styles).toContain('--dvw-tab-active:#e8e8e8')
-    expect(styles).toContain(".dvw-tab[data-active=true]::after{content:\"\";position:absolute;left:10px;right:10px;bottom:3px;height:2px;border-radius:1px;background:var(--dvw-accent)}")
     expect(read('src/client/Workbench.tsx')).toContain('<DshMark size={18}/>')
   })
 

@@ -25,10 +25,17 @@ export function DshConversationPanel({ visible, width, statusHeight }: { visible
     }
     attach()
     document.body.setAttribute('data-dvw-conversation-active', '')
-    const observer = new MutationObserver(attach)
+    // Monaco rebuilds its line DOM on every scroll frame; skip workbench-only
+    // mutations and coalesce the rest so the document-wide query runs at most once a frame.
+    let frame = 0
+    const observer = new MutationObserver(records => {
+      if (frame !== 0 || records.every(record => record.target instanceof Element && record.target.closest('.dvw-overlay') !== null)) return
+      frame = requestAnimationFrame(() => { frame = 0; attach() })
+    })
     observer.observe(document.body, { childList: true, subtree: true })
     return () => {
       observer.disconnect()
+      cancelAnimationFrame(frame)
       document.body.removeAttribute('data-dvw-conversation-active')
       attached?.removeAttribute('data-dvw-conversation-panel')
       attached?.style.removeProperty('--dvw-chat-width')

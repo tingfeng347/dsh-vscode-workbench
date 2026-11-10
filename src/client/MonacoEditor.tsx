@@ -97,28 +97,98 @@ export function MonacoDiffEditor(props: { uri: string; original: string; modifie
   return error===undefined?<div className="dvw-diff dvw-monaco-diff" data-mode={props.mode} data-render-side-by-side={props.mode==='split'} ref={root}/>:<div className="dvw-error">{error}</div>
 }
 
+/** Start downloading Monaco in the background so the first opened file does not wait for it. */
+export function preloadMonaco(): void {
+  void loadMonaco().catch(() => { /* The editor reports the failure when it mounts. */ })
+}
+
+function modelUri(monaco: Monaco, uri: string): import('monaco-editor').Uri {
+  return monaco.Uri.parse(`file:///${uri.replace(/^\/+/, '')}`)
+}
+
+/** Scroll and cursor positions per document, kept while its tab stays open. */
+const viewStates = new Map<string, import('monaco-editor').editor.ICodeEditorViewState>()
+/** The search hit last revealed per document, so only a new hit overrides the saved position. */
+const revealedHits = new Map<string, string>()
+const hitKey = (props: { line?: number; column?: number; highlight?: string }) => props.line === undefined ? '' : `${props.line}:${props.column ?? 1}:${props.highlight ?? ''}`
+
+/** Dispose the models of closed tabs so Monaco stops tracking their text. */
+export function retainEditorModels(uris: string[]): void {
+  const monaco = window.monaco
+  if (monaco === undefined) return
+  const keep = new Set(uris.map(uri => modelUri(monaco, uri).toString()))
+  for (const model of monaco.editor.getModels()) {
+    const key = model.uri.toString()
+    if (model.uri.scheme !== 'file' || keep.has(key) || model.isAttachedToEditor()) continue
+    viewStates.delete(key); revealedHits.delete(key); model.dispose()
+  }
+}
+
 export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' | 'light'; line?: number; column?: number; fontSize?: number; highlight?: string; onChange(value: string): void; onSave(): void }) {
   const root = useRef<HTMLDivElement>(null)
   const editor = useRef<import('monaco-editor').editor.IStandaloneCodeEditor>()
   const decorations = useRef<import('monaco-editor').editor.IEditorDecorationsCollection>()
-  const callbacks = useRef({ onChange: props.onChange, onSave: props.onSave })
-  callbacks.current = { onChange: props.onChange, onSave: props.onSave }
+  const latest = useRef(props)
+  latest.current = props
   const [error, setError] = useState<string>()
+  /** Select the requested search hit in the current model. */
+  const reveal = (monaco: Monaco, instance: import('monaco-editor').editor.IStandaloneCodeEditor) => {
+    const { line: target, column, highlight } = latest.current
+    const model = instance.getModel()
+    decorations.current?.clear(); decorations.current = undefined
+    if (model === null) return
+    revealedHits.set(model.uri.toString(), hitKey(latest.current))
+    if (target === undefined) return
+    const line = Math.max(1, Math.min(Math.round(target), model.getLineCount()))
+    const text = model.getLineContent(line)
+    const needle = highlight ?? ''
+    const { startColumn, endColumn } = searchHighlightRange(text, needle, column ?? 1)
+    const range = new monaco.Range(line, startColumn, line, endColumn)
+    instance.setSelection(range)
+    instance.revealLineInCenter(line)
+    instance.focus()
+    decorations.current = needle === '' ? undefined : instance.createDecorationsCollection([{ range, options: { inlineClassName: 'dvw-search-hit' } }])
+  }
+  /** Show the current tab's model in the shared editor, restoring where the user left it. */
+  const attach = (monaco: Monaco, instance: import('monaco-editor').editor.IStandaloneCodeEditor) => {
+    const { uri, value } = latest.current
+    const next = modelUri(monaco, uri)
+    const previous = instance.getModel()
+    if (previous?.uri.toString() === next.toString()) return
+    const state = instance.saveViewState()
+    if (previous !== null && state !== null) viewStates.set(previous.uri.toString(), state)
+    const model = monaco.editor.getModel(next) ?? monaco.editor.createModel(value, undefined, next)
+    if (model.getValue() !== value) model.setValue(value)
+    instance.setModel(model)
+    const saved = viewStates.get(next.toString())
+    if (saved !== undefined) instance.restoreViewState(saved)
+    if (saved === undefined || revealedHits.get(next.toString()) !== hitKey(latest.current)) reveal(monaco, instance)
+    else { decorations.current?.clear(); decorations.current = undefined }
+  }
+  // One editor instance serves every text tab: switching tabs swaps its model
+  // instead of rebuilding Monaco's DOM, workers and services.
   useEffect(() => {
-    let disposed = false; let model: import('monaco-editor').editor.ITextModel | undefined
+    let disposed = false
     void loadMonaco().then((monaco) => {
       if (disposed || root.current === null) return
-      const uri = monaco.Uri.parse(`file:///${props.uri.replace(/^\/+/, '')}`)
-      model = monaco.editor.getModel(uri) ?? monaco.editor.createModel(props.value, undefined, uri)
-      if (model.getValue() !== props.value) model.setValue(props.value)
-      const instance = monaco.editor.create(root.current, { model, automaticLayout: true, theme: props.theme === 'dark' ? DARK_THEME : 'vs', fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off' })
+      const props = latest.current
+      const instance = monaco.editor.create(root.current, { model: null, automaticLayout: true, theme: props.theme === 'dark' ? DARK_THEME : 'vs', fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off' })
       editor.current = instance
-      const change = instance.onDidChangeModelContent(() => callbacks.current.onChange(instance.getValue()))
-      instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => callbacks.current.onSave())
-      if (props.line !== undefined) { instance.setPosition({ lineNumber: props.line, column: props.column ?? 1 }); instance.revealLineInCenter(props.line); instance.focus() }
-      return () => { change.dispose() }
+      instance.onDidChangeModelContent(() => latest.current.onChange(instance.getValue()))
+      instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => latest.current.onSave())
+      attach(monaco, instance)
     }).catch(error => setError(error instanceof Error ? error.message : String(error)))
-    return () => { disposed = true; editor.current?.dispose(); editor.current = undefined }
+    return () => {
+      disposed = true
+      const instance = editor.current
+      const model = instance?.getModel(); const state = instance?.saveViewState()
+      if (model && state) viewStates.set(model.uri.toString(), state)
+      instance?.dispose(); editor.current = undefined
+    }
+  }, [])
+  useEffect(() => {
+    const instance = editor.current; const monaco = window.monaco
+    if (instance !== undefined && monaco !== undefined) attach(monaco, instance)
   }, [props.uri])
   useEffect(() => {
     const model = editor.current?.getModel(); if (model !== null && model !== undefined && model.getValue() !== props.value) model.setValue(props.value)
@@ -126,21 +196,9 @@ export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' 
   useEffect(() => { if (window.monaco !== undefined) window.monaco.editor.setTheme(props.theme === 'dark' ? DARK_THEME : 'vs') }, [props.theme])
   useEffect(() => { editor.current?.updateOptions({ fontSize: props.fontSize ?? 14 }) }, [props.fontSize])
   useEffect(() => {
-    const instance = editor.current
-    const monaco = window.monaco
-    if (instance === undefined || monaco === undefined) return
-    const model = instance.getModel()
-    if (model === null || props.line === undefined) { decorations.current?.clear(); decorations.current = undefined; return }
-    const line = Math.max(1, Math.min(Math.round(props.line), model.getLineCount()))
-    const text = model.getLineContent(line)
-    const needle = props.highlight ?? ''
-    const { startColumn, endColumn } = searchHighlightRange(text, needle, props.column ?? 1)
-    const range = new monaco.Range(line, startColumn, line, endColumn)
-    instance.setSelection(range)
-    instance.revealLineInCenter(line)
-    instance.focus()
-    decorations.current?.clear()
-    decorations.current = needle === '' ? undefined : instance.createDecorationsCollection([{ range, options: { inlineClassName: 'dvw-search-hit' } }])
-  }, [props.line, props.column, props.highlight])
+    const instance = editor.current; const monaco = window.monaco; const model = instance?.getModel()
+    if (instance === undefined || monaco === undefined || model === null || model === undefined) return
+    if (revealedHits.get(model.uri.toString()) !== hitKey(props)) reveal(monaco, instance)
+  }, [props.uri, props.line, props.column, props.highlight])
   return error === undefined ? <div ref={root} style={{ position: 'absolute', inset: 0 }} /> : <div className="dvw-error">{error}</div>
 }

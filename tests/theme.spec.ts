@@ -29,7 +29,15 @@ describe('workbench dark theme', () => {
     const workbench = read('src/client/Workbench.tsx')
     expect(workbench).toContain("title={chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)'}")
     expect(workbench).not.toContain('dvw-chat-toggle')
-    expect(read('src/client/styles.ts')).toContain('.dvw-tab-actions{flex:none;width:42px;display:grid;place-items:center;padding:0 6px;background:var(--dvw-base)}')
+    expect(read('src/client/styles.ts')).toContain('.dvw-tab-actions{flex:none;width:42px;display:grid;place-items:center;padding:0 6px;background:var(--dvw-surface-1)}')
+  })
+
+  it('uses rounded tabs and larger activity icons', () => {
+    const styles = read('src/client/styles.ts')
+    expect(styles).toContain('.dvw-act .codicon{font-size:24px}')
+    expect(styles).toContain('.dvw-tab[data-active=true]{background:var(--dvw-tab-active)')
+    expect(styles).toContain('--dvw-tab-active:#f0f0f0')
+    expect(read('src/client/Workbench.tsx')).toContain('<DshMark size={24}/>')
   })
 
   it('uses VS Code light surfaces and separators', () => {

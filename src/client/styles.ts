@@ -65,6 +65,9 @@ body[data-dvw-workbench-active] [data-sidebar-toggle]{display:none!important}
 .dvw-settings-themes{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.dvw-settings-themes button{height:56px;display:grid;grid-template-columns:28px 1fr 18px;align-items:center;gap:7px;padding:0 9px;border:1px solid var(--dvw-border);border-radius:7px;background:var(--dvw-base);color:var(--dvw-text);text-align:left;cursor:pointer}.dvw-settings-themes button:hover{background:var(--dvw-hover)}.dvw-settings-themes button[data-active=true]{border-color:var(--dvw-accent);background:color-mix(in srgb,var(--dvw-accent) 10%,var(--dvw-base))}
 .dvw-setting-check{height:36px;display:flex;align-items:center;gap:9px;border-bottom:1px solid var(--dvw-border-soft);cursor:pointer}.dvw-setting-check input{accent-color:var(--dvw-accent)}.dvw-setting-range{display:grid;grid-template-columns:145px 1fr 52px;align-items:center;gap:10px;min-height:42px}.dvw-setting-range input{accent-color:var(--dvw-accent)}.dvw-setting-range output{text-align:right;color:var(--dvw-text-3);font-variant-numeric:tabular-nums}
 @media(max-width:900px){.dvw-overlay[data-dvw-chat=true]{grid-template-columns:44px min(210px,var(--dvw-side-width)) minmax(0,1fr) min(400px,var(--dvw-chat-width))}[data-dvw-conversation-panel]{width:min(400px,var(--dvw-chat-width))!important}}
+.dvw-setting-textarea{width:100%;min-height:84px;resize:vertical;padding:8px 10px;border:1px solid var(--dvw-border);border-radius:6px;background:var(--dvw-base);color:var(--dvw-text);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.dvw-setting-textarea:focus{outline:none;border-color:var(--dvw-accent)}
+.dvw-setting-hint{margin:8px 0 0;color:var(--dvw-text-3);font-size:11px;line-height:1.5}
 `
 
 export function installStyles(): () => void {

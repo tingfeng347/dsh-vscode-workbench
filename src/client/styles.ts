@@ -37,11 +37,10 @@ body[data-ds-dark-theme] .dvw-overlay,.dvw-overlay[data-dvw-theme=dark]{color-sc
 .dvw-side-resizer{position:relative;transform:translateX(5px);z-index:22}
 .dvw-chat-resizer{position:fixed;top:var(--dvw-titlebar-height);right:calc(var(--dvw-chat-width) - 5px);z-index:22}
 .dvw-side-resizer::after,.dvw-chat-resizer::after{content:"";position:absolute;top:0;bottom:0;left:4px;width:2px;background:var(--dvw-border)}
-.dvw-chat-resizer::after{left:1px;width:6px}
 .dvw-side-resizer:hover,.dvw-side-resizer:focus-visible,.dvw-side-resizer[data-dragging=true],.dvw-chat-resizer:hover,.dvw-chat-resizer:focus-visible,.dvw-chat-resizer[data-dragging=true]{background:transparent}
 .dvw-side-resizer:hover::after,.dvw-side-resizer:focus-visible::after,.dvw-side-resizer[data-dragging=true]::after,.dvw-chat-resizer:hover::after,.dvw-chat-resizer:focus-visible::after,.dvw-chat-resizer[data-dragging=true]::after{background:var(--dvw-accent)}
 .dvw-chat{border-left-color:transparent!important}
-.dvw-side-resizer::after,.dvw-chat-resizer::after{background:transparent}.dvw-side-resizer::after{left:3px;width:3px}
+.dvw-side-resizer::after,.dvw-chat-resizer::after{background:transparent;left:3px;width:4px}
 .dvw-side-resizer:hover::after,.dvw-side-resizer:focus-visible::after,.dvw-side-resizer[data-dragging=true]::after,.dvw-chat-resizer:hover::after,.dvw-chat-resizer:focus-visible::after,.dvw-chat-resizer[data-dragging=true]::after{background:var(--dvw-accent)}
 [data-dvw-conversation-panel]{position:fixed!important;top:calc(var(--dvw-titlebar-height) + 4px)!important;right:4px!important;bottom:calc(var(--dvw-status-height,24px) + 4px)!important;left:auto!important;width:calc(var(--dvw-chat-width) - 8px)!important;height:auto!important;min-width:0!important;z-index:21!important;border:1px solid var(--dsw-alias-border-l2)!important;border-radius:8px!important;overflow:hidden!important;box-shadow:none!important}
 body[data-dvw-palette=dark] [data-dvw-conversation-panel]{--dsw-alias-bg-base:#191a1b;--dsw-specific-sidebar-fill:#191a1b;--dsw-alias-bg-layer-1:#202122;--dsw-alias-bg-layer-2:#252526;--dsw-alias-bg-layer-3:#2a2b2c;--dsw-alias-label-primary:#bfbfbf;--dsw-alias-label-secondary:#8c8c8c;--dsw-alias-label-tertiary:#6e6e6e;--dsw-alias-border-l2:#2a2b2c;--dsw-alias-border-l3:#303132;--dsw-alias-interactive-bg-hover:#ffffff12;--dsw-alias-interactive-bg-active:#ffffff1f}

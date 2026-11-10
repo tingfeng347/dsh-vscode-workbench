@@ -82,5 +82,6 @@ describe('workbench dark theme', () => {
     expect(monaco).toContain("'editor.background': '#121314'")
     expect(monaco).toContain("props.theme === 'dark' ? DARK_THEME : 'vs'")
     expect(monaco.match(/'vs-dark'/g)?.length ?? 0).toBe(1)
+    expect(read('src/client/styles.ts')).toContain('border-bottom:0;background:var(--dvw-base)}.dvw-terminal-actions')
   })
 })

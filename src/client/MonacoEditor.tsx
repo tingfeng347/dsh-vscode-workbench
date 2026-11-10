@@ -117,6 +117,6 @@ export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' 
   useEffect(() => {
     const model = editor.current?.getModel(); if (model !== null && model !== undefined && model.getValue() !== props.value) model.setValue(props.value)
   }, [props.value])
-  useEffect(() => { if (window.monaco !== undefined) window.monaco.editor.setTheme(props.theme === 'dark' ? 'vs-dark' : 'vs') }, [props.theme])
+  useEffect(() => { if (window.monaco !== undefined) window.monaco.editor.setTheme(props.theme === 'dark' ? DARK_THEME : 'vs') }, [props.theme])
   return error === undefined ? <div ref={root} style={{ position: 'absolute', inset: 0 }} /> : <div className="dvw-error">{error}</div>
 }

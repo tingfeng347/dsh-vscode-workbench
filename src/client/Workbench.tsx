@@ -474,7 +474,7 @@ export function Workbench({ service, sessionId, cwd }: { service: VscodeWorkbenc
   const diffMarkdown=activeTab?.diff!==undefined&&/\.md$/i.test(activeTab.diffSourcePath??'')
   const markdownPreview=markdown||(diffMarkdown&&activeTab?.preview===true)
   const headings=markdownPreview&&activeTab?markdownHeadings(activeTab.diff?.modified??activeTab.draft):[]
-  return <div className="dvw-overlay" data-dvw-theme={theme==='dsh'?undefined:theme} data-dvw-chat={chatVisible||undefined} data-dvw-primary-side={primarySideVisible||undefined} data-dvw-status={statusVisible||undefined} style={{'--dvw-side-width':`${sideWidth}px`,'--dvw-chat-width':`${chatWidth}px`} as CSSProperties} role="dialog" aria-label="VS Code 工作台" onDragEnterCapture={suppressAttachmentDrop} onDragOverCapture={suppressAttachmentDrop} onDropCapture={suppressAttachmentDrop}>
+  return <div className="dvw-overlay" data-dvw-theme={theme==='dsh'?undefined:theme} data-dvw-chat={chatVisible||undefined} data-dvw-primary-side={primarySideVisible||undefined} data-dvw-status={statusVisible||undefined} data-dvw-bottom-panel={snapshot.bottomPanel||undefined} style={{'--dvw-side-width':`${sideWidth}px`,'--dvw-chat-width':`${chatWidth}px`} as CSSProperties} role="dialog" aria-label="VS Code 工作台" onDragEnterCapture={suppressAttachmentDrop} onDragOverCapture={suppressAttachmentDrop} onDropCapture={suppressAttachmentDrop}>
     <WorkbenchTitlebar name={workspace?.name}/>
     <DshConversationPanel visible={chatVisible&&!settingsOpen} width={chatWidth} statusHeight={statusVisible?24:0}/>
     <DshConversationTheme visible={chatVisible} colorScheme={colorScheme} followDsh={theme==='dsh'}/>

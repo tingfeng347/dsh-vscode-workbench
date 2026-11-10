@@ -32,6 +32,15 @@ describe('workbench dark theme', () => {
     expect(read('src/client/styles.ts')).toContain('.dvw-tab-actions{flex:none;width:42px;display:grid;place-items:center;padding:0 6px;background:var(--dvw-base)}')
   })
 
+  it('uses VS Code light surfaces and separators', () => {
+    const styles = read('src/client/styles.ts')
+    expect(styles).toContain('--dvw-base:#f8f8f8')
+    expect(styles).toContain('--dvw-side:#f8f8f8')
+    expect(styles).toContain('--dvw-border:#e5e5e5')
+    expect(styles).toContain('border-left:1px solid var(--dvw-border);border-top:1px solid var(--dvw-border);border-top-left-radius:8px;border-bottom-left-radius:8px')
+    expect(styles).toContain('.dvw-bottom{grid-column:3;grid-row:2;height:260px;min-height:120px;border-top:1px solid var(--dvw-border);border-left:1px solid var(--dvw-border);border-top-left-radius:8px')
+  })
+
   it('keeps the terminal and Monaco on the same dark surfaces', () => {
     expect(read('src/client/TerminalPanel.tsx')).toContain("background: '#191a1b'")
     const monaco = read('src/client/MonacoEditor.tsx')

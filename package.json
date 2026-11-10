@@ -64,6 +64,7 @@
     "pack:plugin": "pnpm build && node scripts/clean.mjs dist && pnpm pack --pack-destination dist"
   },
   "dependencies": {
+    "@vscode-icons/vscode-icons-api": "^1.0.4",
     "@vscode/codicons": "^0.0.36",
     "@vscode/ripgrep": "^1.15.14",
     "@xterm/addon-fit": "^0.11.0",
@@ -75,6 +76,7 @@
     "monaco-editor": "^0.52.2",
     "node-pty": "^1.1.0",
     "pdfjs-dist": "4.10.38",
+    "vscode-icons-js": "^11.6.1",
     "ws": "^8.18.0"
   },
   "peerDependencies": {

@@ -360,3 +360,10 @@ export function monacoAsset(raw: string): { path: string; type: string } {
   const type = extname(path) === '.css' ? 'text/css' : extname(path) === '.js' ? 'text/javascript' : extname(path) === '.ttf' ? 'font/ttf' : 'application/octet-stream'
   return { path, type }
 }
+
+/** Resolve a vscode-icons SVG shipped by @vscode-icons/vscode-icons-api. */
+export function fileIconAsset(raw: string): { path: string; type: string } {
+  if (!/^[a-z0-9_-]+\.svg$/i.test(raw)) throw new WorkbenchError('asset-invalid', 'invalid file icon path', 403)
+  const packageRoot = dirname(require.resolve('@vscode-icons/vscode-icons-api/package.json'))
+  return { path: resolve(packageRoot, 'icons', raw), type: 'image/svg+xml' }
+}

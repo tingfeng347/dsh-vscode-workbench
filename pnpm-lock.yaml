@@ -8,6 +8,9 @@ importers:
 
   .:
     dependencies:
+      '@vscode-icons/vscode-icons-api':
+        specifier: ^1.0.4
+        version: 1.0.4
       '@vscode/codicons':
         specifier: ^0.0.36
         version: 0.0.36
@@ -41,6 +44,9 @@ importers:
       pdfjs-dist:
         specifier: 4.10.38
         version: 4.10.38
+      vscode-icons-js:
+        specifier: ^11.6.1
+        version: 11.6.1
       ws:
         specifier: ^8.18.0
         version: 8.21.3
@@ -953,6 +959,9 @@ packages:
   '@types/estree@1.0.9':
     resolution: {integrity: sha512-GhdPgy1el4/ImP05X05Uw4cw2/M93BCUmnEvWZNStlCzEKME4Fkk+YpoA5OiHNQmoS7Cafb8Xa3Pya8m1Qrzeg==}
 
+  '@types/jasmine@3.10.19':
+    resolution: {integrity: sha512-Bz6P2XoeIN13AhvVe0nS7+m2RfxVllETDjFQ/s6lyEwEfIVpPCc1Q8vPdFopFAOU5mzrU1zypXJ1xGDl5EVU9Q==}
+
   '@types/jsdom@28.0.3':
     resolution: {integrity: sha512-/HQ2uFoetFTXuye8vzIcHw2z6Fwi7Hi/qcgC+RoS9NCyewiqxhVGqlG+ViGB6lkax481R6dmhf1I7lIGlzJStQ==}
 
@@ -1007,6 +1016,10 @@ packages:
 
   '@vitest/utils@4.1.11':
     resolution: {integrity: sha512-zTCVGpyFsGWBhllOyKlTw/vnr6D9qxsfSDyfbyZmTyjHw5N/VuvzHpHoQjm2ZJzn4RJgx5w4r7V0er69CmLgPQ==}
+
+  '@vscode-icons/vscode-icons-api@1.0.4':
+    resolution: {integrity: sha512-OAc3vNUZQsbMj4NZgQ7Ptoj7i3ujXXDrIwD5AoUcNXt1mhzn9OD5Q97PVtPsPFSZLX3BJzZb9+CKce4kJfvfyQ==}
+    engines: {node: '>=22.18'}
 
   '@vscode/codicons@0.0.36':
     resolution: {integrity: sha512-wsNOvNMMJ2BY8rC2N2MNBG7yOowV3ov8KlvUE/AiVUlHKTfWsw3OgAOQduX7h0Un6GssKD3aoTVH+TF3DSQwKQ==}
@@ -1951,6 +1964,9 @@ packages:
       jsdom:
         optional: true
 
+  vscode-icons-js@11.6.1:
+    resolution: {integrity: sha512-rht18IFYv117UlqBn6o9j258SOtwhDBmtVrGwdoLPpSj6Z5LKQIzarQDd/tCRWneU68KEX25+nsh48tAoknKNw==}
+
   w3c-xmlserializer@5.0.0:
     resolution: {integrity: sha512-o8qghlI8NZHU1lLPrpi2+Uq7abh4GGPpYANlalzWxyWteJOCsr/P+oPBA49TOLu5FTZO4d3F9MnWJfiMo4BkmA==}
     engines: {node: '>=18'}
@@ -2771,6 +2787,8 @@ snapshots:
 
   '@types/estree@1.0.9': {}
 
+  '@types/jasmine@3.10.19': {}
+
   '@types/jsdom@28.0.3':
     dependencies:
       '@types/node': 24.13.3
@@ -2842,6 +2860,8 @@ snapshots:
       '@vitest/pretty-format': 4.1.11
       convert-source-map: 2.0.0
       tinyrainbow: 3.1.1
+
+  '@vscode-icons/vscode-icons-api@1.0.4': {}
 
   '@vscode/codicons@0.0.36': {}
 
@@ -3545,6 +3565,10 @@ snapshots:
       jsdom: 29.1.1
     transitivePeerDependencies:
       - msw
+
+  vscode-icons-js@11.6.1:
+    dependencies:
+      '@types/jasmine': 3.10.19
 
   w3c-xmlserializer@5.0.0:
     dependencies:

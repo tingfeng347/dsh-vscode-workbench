@@ -24,6 +24,8 @@ describe('resizedPanelWidth', () => {
     expect(styles).toContain('.dvw-chat-resizer::after{left:1px;width:6px}')
     expect(styles).toContain('.dvw-chat-resizer{position:fixed;top:var(--dvw-titlebar-height);right:calc(var(--dvw-chat-width) - 5px);z-index:22}')
     expect(styles).toContain('html[data-platform=darwin] .dvw-titlebar{')
+    expect(styles).toContain('html[data-windows-titlebar]{--dvw-titlebar-height:var(--dsh-frame-top-clearance,40px)}')
+    expect(styles).toContain('html[data-windows-titlebar] .dvw-overlay{top:var(--dvw-titlebar-height);padding-top:0}')
     expect(styles).toContain('-webkit-app-region:drag')
     expect(styles).toContain('padding-top:var(--dvw-titlebar-height)')
     expect(styles).toContain('[data-dvw-conversation-panel]{position:fixed!important;top:var(--dvw-titlebar-height)!important')

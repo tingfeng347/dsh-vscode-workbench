@@ -7,7 +7,7 @@ import { isTerminalProtocolReply, TerminalWorkspaceController } from './terminal
 
 function terminalTheme(colorScheme: 'dark' | 'light') { return colorScheme === 'dark' ? { background: '#191a1b', foreground: '#bfbfbf', cursor: '#bfbfbf', selectionBackground: '#264f78' } : { background: '#ffffff', foreground: '#1d2025', cursor: '#4b515b', selectionBackground: '#add6ff' } }
 
-function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspaceController; id: string; colorScheme: 'dark' | 'light' }) {
+function XtermView({ workspace, id, colorScheme, fontSize = 13 }: { workspace: TerminalWorkspaceController; id: string; colorScheme: 'dark' | 'light'; fontSize?: number }) {
   const root = useRef<HTMLDivElement>(null)
   const terminalRef = useRef<Terminal>()
   const replaying = useRef(false)
@@ -15,7 +15,7 @@ function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspac
   const [error, setError] = useState<string>()
   useEffect(() => {
     if (root.current === null) return
-    const terminal = new Terminal({ convertEol: false, cursorBlink: true, fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', fontSize: 13, theme: terminalTheme(colorScheme) })
+    const terminal = new Terminal({ convertEol: false, cursorBlink: true, fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', fontSize, theme: terminalTheme(colorScheme) })
     terminalRef.current = terminal
     const fit = new FitAddon()
     terminal.loadAddon(fit)
@@ -40,11 +40,12 @@ function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspac
     return () => { terminalRef.current = undefined; clearTimeout(replayGuard.current); observer.disconnect(); connectionError(); input.dispose(); resize.dispose(); output(); connection.close(); terminal.dispose() }
   }, [workspace, id])
   useEffect(() => { if (terminalRef.current !== undefined) terminalRef.current.options.theme = terminalTheme(colorScheme) }, [colorScheme])
+  useEffect(() => { if (terminalRef.current !== undefined) terminalRef.current.options.fontSize = fontSize }, [fontSize])
   return error === undefined ? <div ref={root} className="dvw-terminal-host" /> : <div className="dvw-terminal-error">{error}</div>
 }
 
 /** Render interactive terminal tabs in the workbench bottom panel. */
-export function TerminalPanel({ sessionId, colorScheme }: BottomPanelProps) {
+export function TerminalPanel({ sessionId, colorScheme, fontSize }: BottomPanelProps) {
   const workspaceRef = useRef<{ sessionId: string; value: TerminalWorkspaceController }>()
   if (workspaceRef.current?.sessionId !== sessionId) workspaceRef.current = { sessionId, value: new TerminalWorkspaceController(sessionId) }
   const workspace = workspaceRef.current.value
@@ -77,7 +78,7 @@ export function TerminalPanel({ sessionId, colorScheme }: BottomPanelProps) {
   return <div className="dvw-terminal-root">
     <div className="dvw-terminal-main">
       {snapshot.error !== undefined && <div className="dvw-terminal-error">{snapshot.error}</div>}
-      <div className="dvw-terminal-panes" data-split={shown.length > 1 || undefined}>{shown.map(id => <XtermView key={id} workspace={workspace} id={id} colorScheme={colorScheme} />)}</div>
+      <div className="dvw-terminal-panes" data-split={shown.length > 1 || undefined}>{shown.map(id => <XtermView key={id} workspace={workspace} id={id} colorScheme={colorScheme} fontSize={fontSize} />)}</div>
     </div>
     <div className="dvw-terminal-resizer" role="separator" aria-label="终端列表宽度" aria-orientation="vertical" onPointerDown={event => {
       if (event.button !== 0) return

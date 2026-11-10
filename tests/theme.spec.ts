@@ -49,6 +49,16 @@ describe('workbench dark theme', () => {
     expect(workbench).toContain("onAuxClick={event=>{if(event.button===1){event.preventDefault();close(tab)}}}")
   })
 
+  it('offers a branch picker in source control', () => {
+    const workbench = read('src/client/Workbench.tsx')
+    const styles = read('src/client/styles.ts')
+    expect(workbench).toContain('dvw-branch-menu')
+    expect(workbench).toContain("action:'branch.switch'")
+    expect(workbench).toContain("action:'branch.create'")
+    expect(workbench).toContain('新分支名称')
+    expect(styles).toContain('.dvw-branch-menu{')
+  })
+
   it('opens search results at the matched line with a highlight', () => {
     const workbench = read('src/client/Workbench.tsx')
     expect(workbench).toContain('props.onOpen(path,row.line,row.column,row.match||query)')

@@ -11,6 +11,7 @@
 
 当前已知状态（2026-11-10）：
 
+- `0.1.13` 修复 Windows Desktop 顶部 40px 自定义标题栏与工作台侧栏标题叠字的问题（`data-windows-titlebar` 留白），并把开发/测试基线升级到 Harness `0.2.2-rc.1`（Cordis `4.1.0`），保留 `0.2.1-rc.5`（Cordis `4.0.5`）兼容范围。
 - `0.1.12` 包含草稿恢复、保存与文件操作可靠性、macOS 标题栏与布局、终端启动、transport WebSocket 和侧栏遮挡修复。
 - `0.1.11` 的 tarball 不含 `repairNodePtyHelper`、`__DSH_TRANSPORT__`、标题栏和侧栏隐藏等修复。
 
@@ -130,6 +131,7 @@ ls -l "$CLEAN_HOME/.dsh/profiles/web/node_modules/node-pty/prebuilds/darwin-arm6
 - [ ] 终端可新建、分屏、关闭；`spawn-helper` 丢失执行位时终端仍可启动。
 - [ ] 工作台激活时 DSH 原生右侧栏按钮和左上角切换按钮被隐藏；返回 DSH 后恢复。
 - [ ] macOS 顶部 48px 标题栏可见，交通灯不遮挡“资源管理器”等内容。
+- [ ] Windows Desktop 顶部 40px 标题栏下不出现叠字；“应用”“编辑”菜单可用，标题栏可拖动。
 - [ ] 拖动标题栏能移动窗口。
 - [ ] 对话栏宽度、侧栏宽度和终端高度可拖动。
 

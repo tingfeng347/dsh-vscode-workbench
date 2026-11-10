@@ -12,7 +12,8 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('--dvw-side:#191a1b')
     expect(styles).toContain('--dvw-accent:#307e9f')
     expect(styles).toContain('.dvw-side{grid-column:2;grid-row:1/3;min-width:0;width:100%;background:var(--dvw-side)')
-    expect(styles).toContain('.dvw-overlay[data-dvw-theme=dark] .dvw-status{background:var(--dvw-base)')
+    expect(styles).toContain('.dvw-status{grid-column:1/4;grid-row:3;background:var(--dvw-base);color:var(--dvw-text);border-top:1px solid var(--dvw-border)')
+    expect(read('src/client/Workbench.tsx')).toContain("body.toggleAttribute('data-ds-dark-theme',theme==='dark')")
     expect(styles).toContain('body[data-dvw-palette=dark] [data-dvw-conversation-panel]')
   })
 

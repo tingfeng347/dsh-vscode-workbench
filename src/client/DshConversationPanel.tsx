@@ -38,7 +38,7 @@ export function DshConversationPanel({ visible, width, statusHeight }: { visible
   return null
 }
 
-/** Temporarily align the official DSH palette with a fixed workbench palette. */
+/** Temporarily align the official DSH panel palette with a fixed workbench palette. */
 export function DshConversationTheme({ visible, colorScheme, followDsh }: { visible: boolean; colorScheme: 'dark' | 'light'; followDsh: boolean }) {
   useLayoutEffect(() => {
     if (!visible) return
@@ -47,18 +47,8 @@ export function DshConversationTheme({ visible, colorScheme, followDsh }: { visi
       body.removeAttribute('data-dvw-palette')
       return
     }
-    const root = document.documentElement
-    const wasDark = body.hasAttribute('data-ds-dark-theme')
-    const previousColorScheme = root.style.colorScheme
-    body.toggleAttribute('data-ds-dark-theme', colorScheme === 'dark')
     body.setAttribute('data-dvw-palette', colorScheme)
-    root.style.colorScheme = colorScheme
-    return () => {
-      body.removeAttribute('data-dvw-palette')
-      body.toggleAttribute('data-ds-dark-theme', wasDark)
-      if (previousColorScheme === '') root.style.removeProperty('color-scheme')
-      else root.style.colorScheme = previousColorScheme
-    }
+    return () => body.removeAttribute('data-dvw-palette')
   }, [visible, colorScheme, followDsh])
   return null
 }

@@ -321,6 +321,7 @@ export function Workbench({ service, sessionId, cwd }: { service: VscodeWorkbenc
   const [theme,setTheme]=useState<WorkbenchTheme>(()=>{const saved=localStorage.getItem('dvw:theme');return saved==='dark'||saved==='light'?saved:'dsh'})
   const colorScheme: 'dark' | 'light' = theme === 'dsh' ? dshDark ? 'dark' : 'light' : theme
   useEffect(()=>localStorage.setItem('dvw:theme',theme),[theme])
+  useEffect(()=>{if(!snapshot.visible||theme==='dsh')return;const body=document.body;const root=document.documentElement;const wasDark=body.hasAttribute('data-ds-dark-theme');const previousColorScheme=root.style.colorScheme;body.toggleAttribute('data-ds-dark-theme',theme==='dark');root.style.colorScheme=theme;return()=>{body.toggleAttribute('data-ds-dark-theme',wasDark);if(previousColorScheme==='')root.style.removeProperty('color-scheme');else root.style.colorScheme=previousColorScheme}},[snapshot.visible,theme])
   useEffect(()=>localStorage.setItem('dvw:outline',outlineVisible?'open':'closed'),[outlineVisible])
   useEffect(()=>localStorage.setItem('dvw:dsh-chat-visible',chatVisible?'open':'closed'),[chatVisible])
   useEffect(()=>localStorage.setItem('dvw:dsh-chat-width',String(Math.round(chatWidth))),[chatWidth])

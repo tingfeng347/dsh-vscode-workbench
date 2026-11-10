@@ -18,6 +18,7 @@ describe('workbench dark theme', () => {
 
   it('offers the workbench from the sidebar panel list', () => {
     const index = read('src/client/index.tsx')
+    expect(index).toContain("export const inject = ['slots', 'layout']")
     expect(index).toContain("name: 'sidebar.panellist'")
     expect(index).toContain("label: () => 'VS Code 工作台'")
     expect(index).not.toContain('sidebar.footer.action')

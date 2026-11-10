@@ -37,14 +37,14 @@ function WorkbenchPanel({ service, restoreConversation }: { service: VscodeWorkb
   return null
 }
 
-export const inject = ['slots']
+export const inject = ['slots', 'layout']
 export function apply(ctx: ClientContext): void {
   const service = new WorkbenchController()
   ctx.effect(() => installStyles(), 'dsh-vscode-workbench: styles')
   ctx.effect(() => { const dispose = ctx.reflect.provide('vscodeWorkbench', service); return () => { void dispose() } }, 'dsh-vscode-workbench: service')
   ctx.effect(() => service.registerBottomPanel({ id: 'terminal', title: '终端', component: TerminalPanel }), 'dsh-vscode-workbench: terminal panel')
   ctx.effect(() => service.registerCommand({ id: 'terminal.new', run() { window.dispatchEvent(new Event('dvw-terminal-new')) } }), 'dsh-vscode-workbench: terminal command')
-  const restoreConversation = () => { ctx.layout.selectPanel(null) }
+  const restoreConversation = () => { ctx.layout?.selectPanel(null) }
   ctx.slots.inject('main', () => ctx.slots.inject('sidebar.panellist', () => {
     const disposeMain = ctx.slots.register({ name: 'main', key: WORKBENCH_PANEL_ID, inject: () => ({ service, restoreConversation }) }, WorkbenchPanel)
     const disposeIcon = ctx.slots.register({ name: 'sidebar.panellist', id: WORKBENCH_PANEL_ID, order: 60, label: () => 'VS Code 工作台' }, WorkbenchPanelIcon)

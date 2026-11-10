@@ -34,10 +34,10 @@ describe('workbench dark theme', () => {
 
   it('uses rounded tabs and larger activity icons', () => {
     const styles = read('src/client/styles.ts')
-    expect(styles).toContain('.dvw-act .codicon{font-size:24px}')
+    expect(styles).toContain('.dvw-act .codicon{font-size:18px}')
     expect(styles).toContain('.dvw-tab[data-active=true]{background:var(--dvw-tab-active)')
     expect(styles).toContain('--dvw-tab-active:#f0f0f0')
-    expect(read('src/client/Workbench.tsx')).toContain('<DshMark size={24}/>')
+    expect(read('src/client/Workbench.tsx')).toContain('<DshMark size={18}/>')
   })
 
   it('uses VS Code light surfaces and separators', () => {

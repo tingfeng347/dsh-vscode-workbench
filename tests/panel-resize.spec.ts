@@ -19,7 +19,7 @@ describe('resizedPanelWidth', () => {
   it('uses matching narrow visual lines with an accessible drag target', () => {
     const styles = readFileSync(new URL('../src/client/styles.ts', import.meta.url), 'utf8')
     expect(styles).toContain('.dvw-side-resizer,.dvw-chat-resizer{width:10px;cursor:ew-resize;touch-action:none;background:transparent}')
-    expect(styles).toContain('.dvw-side{border-right-color:transparent}.dvw-chat,[data-dvw-conversation-panel]{border-left-color:transparent!important}')
+    expect(styles).toContain('.dvw-chat{border-left-color:transparent!important}')
     expect(styles).toContain('.dvw-side-resizer::after,.dvw-chat-resizer::after{background:transparent}.dvw-side-resizer::after{left:3px;width:3px}')
     expect(styles).toContain('.dvw-chat-resizer::after{left:1px;width:6px}')
     expect(styles).toContain('.dvw-chat-resizer{position:fixed;top:var(--dvw-titlebar-height);right:calc(var(--dvw-chat-width) - 5px);z-index:22}')
@@ -28,7 +28,7 @@ describe('resizedPanelWidth', () => {
     expect(styles).toContain('html[data-windows-titlebar] .dvw-overlay{top:var(--dvw-titlebar-height);padding-top:0}')
     expect(styles).toContain('-webkit-app-region:drag')
     expect(styles).toContain('padding-top:var(--dvw-titlebar-height)')
-    expect(styles).toContain('[data-dvw-conversation-panel]{position:fixed!important;top:var(--dvw-titlebar-height)!important')
+    expect(styles).toContain('[data-dvw-conversation-panel]{position:fixed!important;top:calc(var(--dvw-titlebar-height) + 4px)!important')
     expect(styles).toContain('body[data-dvw-conversation-active] [data-sidebar-right-expand]{display:none!important}')
     expect(styles).toContain('body[data-dvw-workbench-active] [data-shell-leading]{display:none!important}')
     expect(styles).toContain('body[data-dvw-workbench-active] [data-sidebar-toggle]{display:none!important}')

@@ -64,7 +64,7 @@
 
 ## 安装
 
-插件 0.1.11 适配 DeepSeek Harness `0.2.1-rc.5`（Cordis `4.0.5`）。请先更新 Harness，再安装插件；旧版对应关系见下表。
+插件 0.1.12 适配 DeepSeek Harness `0.2.1-rc.5`（Cordis `4.0.5`）。请先更新 Harness，再安装插件；旧版对应关系见下表。
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.1-rc.5
@@ -138,12 +138,13 @@ dsh: nothing was installed.
 
 | 插件版本 | 需要的 Harness |
 | --- | --- |
+| 0.1.12 | `0.2.1-rc.5`（Cordis `4.0.5`，默认基线）；另验证 `0.2.2-rc.1`（Cordis `4.1.0`，Node.js ≥24.9） |
 | 0.1.11 | `0.2.1-rc.5`（Cordis `4.0.5`，默认基线）；另验证 `0.2.2-rc.1`（Cordis `4.1.0`，Node.js ≥24.9） |
 | 0.1.10 | `0.2.1-rc.4`（Cordis `4.0.5`，旧版验证基线） |
 | 0.1.9 | `0.2.1-alpha.3`（Cordis `4.0.5-alpha.2`，旧版验证基线） |
 | 0.1.8 | `0.1.1-rc.2` |
 
-Harness `0.2.0-rc.2` 上没有可用的插件版本：0.1.9 依赖 Harness `0.2.1-alpha.2` 才引入的 `workingDirectory` 服务，0.1.8 又只适配 `0.1.1-rc.2`。请先把 Harness 升级到 `0.2.1-rc.5` 再安装 0.1.11，例如 npm 全局安装时：
+Harness `0.2.0-rc.2` 上没有可用的插件版本：0.1.9 依赖 Harness `0.2.1-alpha.2` 才引入的 `workingDirectory` 服务，0.1.8 又只适配 `0.1.1-rc.2`。请先把 Harness 升级到 `0.2.1-rc.5` 再安装 0.1.12，例如 npm 全局安装时：
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.1-rc.5
@@ -156,6 +157,8 @@ npm i -g @deepseek-ai/dsh@0.2.1-rc.5
 0.1.11 将 DSH 开发依赖与 peerDependencies 同步至 `0.2.1-rc.5`，Cordis 保持 `4.0.5`，并显式声明 `engines.dsh`。同时显式声明 `0.2.2-rc.1` 的预发布依赖范围。安装版本闸门使用官方 `evaluatePluginCompatibility()` 验证，无需版本豁免。
 
 两套依赖环境均通过类型检查、52 项测试及构建，覆盖官方版本闸门、真实 Harness cookie 认证与会话目录切换回归；尚未完成完整 DSH 页面端到端验证。next 渠道需 Node.js ≥24.9。
+
+0.1.12 在此基础上集中修复可靠性与 macOS 使用问题：保留并恢复工作区草稿，加强并发保存和文件操作；补齐可拖动标题栏与窗口留白，修正活动工作台的 DSH 原生侧栏遮挡；WebSocket 地址跟随 DSH transport，终端启动时自动修复 `spawn-helper` 执行位。PDF、DOCX、图片和 Markdown 预览已在 DSH Desktop 中实际验证。
 
 - 客户端通过 `ui-renderer` 提供的槽位服务注册界面，使用 `ui-session` 的 `mainView` 引用选择当前会话；不再依赖已移除的 `dsh-client-runtime`。
 - 文件、搜索、Git 和新建终端通过 `workingDirectory.get(session)` 使用会话当前目录，跟随工作目录投影切换；失效会话返回 404。

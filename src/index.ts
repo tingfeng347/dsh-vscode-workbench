@@ -9,6 +9,7 @@ import type { HostContext } from './context.ts'
 import { codiconAsset, createEntry, cwdFor, deleteEntry, gitAction, gitStatus, listFiles, monacoAsset, pdfWorkerAsset, readDocument, renameEntry, saveDocument, searchWorkspace, uploadFile, workspacePreviewFile } from './host.ts'
 import { installTerminal } from './terminal.ts'
 import type { SearchRequest } from './types.ts'
+import { parseWatchIgnores, watchIgnore } from './watch-ignore.ts'
 import { readBinaryBody, readBody, send, sendError, stringField, authorize, WorkbenchError } from './wire.ts'
 
 export { WorkbenchError } from './wire.ts'
@@ -105,12 +106,18 @@ export function apply(ctx: HostContext): void {
     path: '/dsh-vscode/ws/files', handler(req, socket, head) {
       if (ctx.connection.requestRejection(req) !== undefined) { socket.destroy(); return }
       wss.handleUpgrade(req as IncomingMessage, socket as Duplex, head, (ws) => {
-        const sessionId = new URL(req.url ?? '/', 'http://dsh.local').searchParams.get('sessionId')
+        const search = new URL(req.url ?? '/', 'http://dsh.local').searchParams
+        const sessionId = search.get('sessionId')
         if (sessionId === null) { ws.close(1008, 'sessionId required'); return }
         let workspace: string
         try { workspace = cwdFor(ctx, sessionId) }
         catch { ws.close(1008, 'session workspace unavailable'); return }
-        const watcher = chokidar.watch(workspace, { ignoreInitial: true, ignored: /(^|[/\\])(\.git|node_modules|\.next|\.nuxt|\.turbo|\.vite|coverage)([/\\]|$)/, awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 25 } })
+        const watcher = chokidar.watch(workspace, { ignoreInitial: true, ignored: watchIgnore(workspace, parseWatchIgnores(search.get('ignore'))), awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 25 } })
+        watcher.on('error', error => {
+          console.warn('[dsh-vscode-workbench] file watcher stopped:', error)
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'files.watch-error', message: String(error) }))
+          void watcher.close()
+        })
         let paths = new Set<string>(); let timer: ReturnType<typeof setTimeout> | undefined
         watcher.on('all', (_event, path) => {
           const changed = isAbsolute(path) ? relative(workspace, path) : path

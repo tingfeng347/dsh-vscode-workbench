@@ -39,8 +39,8 @@
 - **Preview**: Markdown source, outline, relative links, and images; built-in PDF paging and zoom plus DOCX rendering, with DOC/ODT download support.
 - **Search and Git**: `@vscode/ripgrep` supports case, whole-word, regex, and path filters; Git covers stage, unstage, discard, commit, branches, diffs, commit files, and the graph.
 - **Terminal**: `node-pty` and xterm with up to eight sessions, rename, a right-side switcher, splits, ANSI output, and Ctrl+C.
-- **Layout and DSH**: the primary view, terminal panel, and DSH conversation sidebar can be shown and resized independently; settings manage theme and widths.
-- **Sync and restore**: workspace file changes stream to the UI, while reload restores views, tabs, expanded directories, panels, and layout.
+- **Layout and DSH**: the primary view, terminal panel, and DSH conversation sidebar can be shown and resized independently; settings manage theme, widths, and watcher exclusions.
+- **Sync and restore**: workspace file changes stream to the UI after skipping large trees such as `node_modules`, `vendor`, `third_party`, `build`, and `dist`, with extra exclusions configurable in settings; reload restores views, tabs, expanded directories, panels, and layout.
 
 The workbench mounts through the official `sidebar.footer.action` and `shell.overlay` extension points. It does not replace or disable `ui-layout`.
 

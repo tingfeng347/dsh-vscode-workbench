@@ -5,7 +5,7 @@ import { dirname, extname, isAbsolute, join, normalize, relative, resolve, sep }
 import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import type { HostContext } from './context.ts'
-import type { FileDocument, FileEntry, GitChange, GitCommit, GitCommitFile, GitDiff, GitStatus, SearchMatch, SearchRequest } from './types.ts'
+import type { FileDocument, FileEntry, GitBranch, GitChange, GitCommit, GitCommitFile, GitDiff, GitStatus, SearchMatch, SearchRequest } from './types.ts'
 import { WorkbenchError } from './wire.ts'
 
 const require = createRequire(import.meta.url)
@@ -291,6 +291,24 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
     case 'commit': args = ['commit', '-m', value ?? '']; break
     case 'branch.create': args = ['switch', '-c', value ?? '']; break
     case 'branch.switch': args = ['switch', value ?? '']; break
+    case 'branch.list': {
+      const refs = await run('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads'], repository)
+      if (refs.code !== 0) throw new WorkbenchError('git-failed', refs.stderr, 500)
+      const worktrees = await run('git', ['worktree', 'list', '--porcelain'], repository)
+      const used = new Map<string, string>()
+      if (worktrees.code === 0) {
+        const same = (a: string, b: string) => normalize(a) === normalize(b) || process.platform === 'win32' && normalize(a).toLowerCase() === normalize(b).toLowerCase()
+        let worktree = ''
+        for (const line of worktrees.stdout.split('\n')) {
+          if (line.startsWith('worktree ')) worktree = line.slice('worktree '.length).trim()
+          else if (line.startsWith('branch refs/heads/')) {
+            const name = line.slice('branch refs/heads/'.length).trim()
+            if (name !== '' && !same(worktree, repository)) used.set(name, worktree)
+          }
+        }
+      }
+      return refs.stdout.split('\n').filter(Boolean).map(name => ({ name, ...(used.has(name) ? { worktree: used.get(name) } : {}) })) satisfies GitBranch[]
+    }
     case 'branches': {
       const result = await run('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads'], repository)
       if (result.code !== 0) throw new WorkbenchError('git-failed', result.stderr, 500)

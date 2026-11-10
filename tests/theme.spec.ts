@@ -55,6 +55,8 @@ describe('workbench dark theme', () => {
     expect(workbench).toContain('dvw-branch-menu')
     expect(workbench).toContain("action:'branch.switch'")
     expect(workbench).toContain("action:'branch.create'")
+    expect(workbench).toContain("action:'branch.list'")
+    expect(workbench).toContain('dvw-branch-worktree')
     expect(workbench).toContain('新分支名称')
     expect(styles).toContain('.dvw-branch-menu{')
   })

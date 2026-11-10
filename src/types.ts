@@ -8,6 +8,8 @@ export interface SearchMatch { path: string; line: number; column: number; previ
 export interface SearchRequest { query: string; caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; include?: string; exclude?: string }
 /** One working tree change. */
 export interface GitChange { path: string; originalPath?: string; index: string; worktree: string; staged: boolean; untracked: boolean }
+/** One local branch and the linked worktree that has it checked out. */
+export interface GitBranch { name: string; worktree?: string }
 /** Local repository state. */
 export interface GitStatus { repository: string; branch: string; ahead: number; behind: number; changes: GitChange[] }
 /** One commit displayed by the source-control graph. */

@@ -61,8 +61,10 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('.dvw-bottom{grid-column:3;grid-row:2;height:260px;min-height:120px;border-top:1px solid var(--dvw-border);border-left:1px solid var(--dvw-border);border-right:1px solid var(--dvw-border);border-radius:8px;margin-left:4px')
     expect(styles).toContain('border-top-right-radius:8px;border-bottom-right-radius:8px;margin-right:4px')
     expect(styles).toContain('[data-dvw-conversation-panel]{position:fixed!important;top:calc(var(--dvw-titlebar-height) + 4px)!important;right:4px!important')
-    expect(styles).toContain('.dvw-tabs{height:33px')
-    expect(styles).toContain('.dvw-tab{position:relative;height:33px')
+    expect(styles).toContain('.dvw-tabs{height:35px')
+    expect(styles).toContain('.dvw-tab{position:relative;height:35px')
+    expect(styles).toContain('.dvw-tree-row{display:flex;align-items:center;height:22px;')
+    expect(styles).toContain('.dvw-overlay ::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--dvw-text) 20%,transparent);border:2px solid transparent;background-clip:padding-box;border-radius:6px}')
   })
 
   it('adjusts the editor font size without scaling the workbench chrome', () => {

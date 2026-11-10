@@ -49,14 +49,14 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('.dvw-bottom{grid-column:3;grid-row:2;height:260px;min-height:120px;border-top:1px solid var(--dvw-border);border-left:1px solid var(--dvw-border);border-top-left-radius:8px')
   })
 
-  it('adjusts the workbench, editor and terminal font size', () => {
+  it('adjusts the editor font size without scaling the workbench chrome', () => {
     const workbench = read('src/client/Workbench.tsx')
     expect(workbench).toContain("localStorage.setItem('dvw:font-size'")
-    expect(workbench).toContain('<span>字体大小</span>')
+    expect(workbench).toContain('<span>编辑器字体大小</span>')
+    expect(workbench).toContain('setTimeout(() => onChange(draft), 180)')
     expect(workbench).toContain('fontSize={fontSize}')
     expect(read('src/client/MonacoEditor.tsx')).toContain('fontSize: props.fontSize ?? 14')
-    expect(read('src/client/TerminalPanel.tsx')).toContain('terminalRef.current.options.fontSize = fontSize')
-    expect(read('src/client/styles.ts')).toContain('font:var(--dvw-font-size,13px)')
+    expect(read('src/client/styles.ts')).toContain('font:13px/1.4')
   })
 
   it('keeps the terminal and Monaco on the same dark surfaces', () => {

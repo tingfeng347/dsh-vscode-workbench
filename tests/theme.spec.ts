@@ -120,6 +120,7 @@ describe('workbench dark theme', () => {
 
   it('keeps the terminal and Monaco on the same dark surfaces', () => {
     expect(read('src/client/TerminalPanel.tsx')).toContain("background: '#191a1b'")
+    expect(read('src/client/TerminalPanel.tsx')).toContain('getComputedStyle(root.current).backgroundColor')
     const monaco = read('src/client/MonacoEditor.tsx')
     expect(monaco).toContain("DARK_THEME = 'dvw-dark'")
     expect(monaco).toContain("'editor.background': '#121314'")

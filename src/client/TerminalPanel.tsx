@@ -15,7 +15,8 @@ function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspac
   const [error, setError] = useState<string>()
   useEffect(() => {
     if (root.current === null) return
-    const terminal = new Terminal({ convertEol: false, cursorBlink: true, fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', fontSize: 13, theme: terminalTheme(colorScheme) })
+    const background = root.current === null ? undefined : getComputedStyle(root.current).backgroundColor
+    const terminal = new Terminal({ convertEol: false, cursorBlink: true, fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', fontSize: 13, theme: { ...terminalTheme(colorScheme), ...(background === undefined ? {} : { background }) } })
     terminalRef.current = terminal
     const fit = new FitAddon()
     terminal.loadAddon(fit)
@@ -39,7 +40,7 @@ function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspac
     try { fit.fit(); terminal.focus() } catch (exception) { setError(exception instanceof Error ? exception.message : String(exception)) }
     return () => { terminalRef.current = undefined; clearTimeout(replayGuard.current); observer.disconnect(); connectionError(); input.dispose(); resize.dispose(); output(); connection.close(); terminal.dispose() }
   }, [workspace, id])
-  useEffect(() => { if (terminalRef.current !== undefined) terminalRef.current.options.theme = terminalTheme(colorScheme) }, [colorScheme])
+  useEffect(() => { if (terminalRef.current === undefined) return; const background = root.current === null ? undefined : getComputedStyle(root.current).backgroundColor; terminalRef.current.options.theme = { ...terminalTheme(colorScheme), ...(background === undefined ? {} : { background }) } }, [colorScheme])
   return error === undefined ? <div ref={root} className="dvw-terminal-host" /> : <div className="dvw-terminal-error">{error}</div>
 }
 

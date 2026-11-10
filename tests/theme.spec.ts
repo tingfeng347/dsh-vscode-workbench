@@ -56,8 +56,10 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('--dvw-base:#f8f8f8')
     expect(styles).toContain('--dvw-side:#f8f8f8')
     expect(styles).toContain('--dvw-border:#e5e5e5')
-    expect(styles).toContain('border-left:1px solid var(--dvw-border);border-top:1px solid var(--dvw-border);border-top-left-radius:8px;border-bottom-left-radius:8px')
-    expect(styles).toContain('.dvw-bottom{grid-column:3;grid-row:2;height:260px;min-height:120px;border-top:1px solid var(--dvw-border);border-left:1px solid var(--dvw-border);border-top-left-radius:8px')
+    expect(styles).toContain('border-left:1px solid var(--dvw-border);border-top:1px solid var(--dvw-border);border-right:1px solid var(--dvw-border);border-radius:8px 8px 8px 8px')
+    expect(styles).toContain('.dvw-bottom{grid-column:3;grid-row:2;height:260px;min-height:120px;border-top:1px solid var(--dvw-border);border-left:1px solid var(--dvw-border);border-right:1px solid var(--dvw-border);border-top-left-radius:8px;border-top-right-radius:8px')
+    expect(styles).toContain('.dvw-tabs{height:33px')
+    expect(styles).toContain('.dvw-tab{position:relative;height:33px')
   })
 
   it('adjusts the editor font size without scaling the workbench chrome', () => {

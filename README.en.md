@@ -165,6 +165,8 @@ Version 0.1.14 fixes the overlapping header on Windows Desktop: DSH 0.2 reserves
 
 Version 0.1.14 also targets large repositories and crowded tab strips. The file watcher skips large trees such as `vendor`, `third_party`/`third_part`, `build`, `dist`, `out`, `target`, `.venv`, and `__pycache__` by default, with extra exclusions configurable in workbench settings; running out of watches now disables auto-refresh instead of crashing DSH at the inotify limit. Tabs stay on one line with ellipsis and no native scrollbar, the close-all action stays pinned to the right, and the active tab scrolls into view. The bottom status bar is hidden by default and can be re-enabled in settings.
 
+Version 0.1.15 unifies the dark palette: the activity bar, sidebar, tab strip, bottom panel and status bar share `#191a1b`, the editor uses `#121314`, inputs and overlays use `#202122` / `#252526`, and text and accents move to one VS Code-style scale (`#bfbfbf` / `#8c8c8c` / `#6e6e6e`, `#307e9f`). Monaco and the terminal use the same surfaces, and the dark status bar no longer switches to a separate blue background.
+
 - Client contributions use `ui-renderer` slots and select the current session through `ui-session`'s `mainView` retain count, replacing the removed `dsh-client-runtime`.
 - Files, search, Git and new terminals use `workingDirectory.get(session)`. Workspace selection follows the working-directory projection; missing sessions return 404.
 - HTTP and WebSocket routes share Harness authentication and Host/Origin checks through `connection.requestRejection()`. Terminals also require loopback access.

@@ -5,7 +5,7 @@ import { Icon } from './Icon.tsx'
 import type { BottomPanelProps } from './service.ts'
 import { isTerminalProtocolReply, TerminalWorkspaceController } from './terminal.ts'
 
-function terminalTheme(colorScheme: 'dark' | 'light') { return colorScheme === 'dark' ? { background: '#131417', foreground: '#f1f3f5', cursor: '#c2c6cc', selectionBackground: '#355d94' } : { background: '#ffffff', foreground: '#1d2025', cursor: '#4b515b', selectionBackground: '#add6ff' } }
+function terminalTheme(colorScheme: 'dark' | 'light') { return colorScheme === 'dark' ? { background: '#191a1b', foreground: '#bfbfbf', cursor: '#bfbfbf', selectionBackground: '#264f78' } : { background: '#ffffff', foreground: '#1d2025', cursor: '#4b515b', selectionBackground: '#add6ff' } }
 
 function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspaceController; id: string; colorScheme: 'dark' | 'light' }) {
   const root = useRef<HTMLDivElement>(null)

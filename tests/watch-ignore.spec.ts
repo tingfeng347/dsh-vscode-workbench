@@ -1,6 +1,8 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { DEFAULT_WATCH_IGNORES, isIgnoredPath, parseWatchIgnores, watchIgnore } from '../src/watch-ignore.ts'
+import { DEFAULT_WATCH_IGNORES, isIgnoredPath, parseGitIgnore, parseWatchIgnores, watchIgnore, workspaceWatchIgnores } from '../src/watch-ignore.ts'
 
 describe('Workspace watcher exclusions', () => {
   it('skips dependency, vendor and build trees by default', () => {
@@ -38,5 +40,26 @@ describe('Workspace watcher exclusions', () => {
     expect(ignored(join('/repo', 'third_part', 'libs', 'a.hpp'))).toBe(true)
     expect(ignored(join('/repo', 'src', 'main.ts'))).toBe(false)
     expect(ignored(join('/', 'elsewhere', 'vendor', 'a.js'))).toBe(false)
+  })
+})
+
+describe('Workspace .gitignore exclusions', () => {
+  it('turns literal gitignore rules into watch patterns', () => {
+    expect(parseGitIgnore('node_modules\n/generated/\n# comment\n!keep.txt\nthird_part/libs/boost\n*.log\nbuild\n')).toEqual(['node_modules', 'generated', 'third_part/libs/boost', 'build'])
+  })
+
+  it('reads the root .gitignore without asking the user', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dvw-ignore-'))
+    try {
+      await writeFile(join(root, '.gitignore'), 'dist\n.config/local\n')
+      expect(await workspaceWatchIgnores(root)).toEqual(['dist', '.config/local'])
+      expect(isIgnoredPath('.config/local/settings.json', await workspaceWatchIgnores(root))).toBe(true)
+      expect(isIgnoredPath('src/main.ts', await workspaceWatchIgnores(root))).toBe(false)
+    } finally { await rm(root, { recursive: true, force: true }) }
+  })
+
+  it('treats a missing .gitignore as no extra exclusions', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dvw-ignore-'))
+    try { expect(await workspaceWatchIgnores(root)).toEqual([]) } finally { await rm(root, { recursive: true, force: true }) }
   })
 })

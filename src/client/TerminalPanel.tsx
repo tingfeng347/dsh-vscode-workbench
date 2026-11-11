@@ -5,7 +5,9 @@ import { Icon } from './Icon.tsx'
 import type { BottomPanelProps } from './service.ts'
 import { isTerminalProtocolReply, TerminalWorkspaceController } from './terminal.ts'
 
-function terminalTheme(colorScheme: 'dark' | 'light') { return colorScheme === 'dark' ? { background: '#191a1b', foreground: '#bfbfbf', cursor: '#bfbfbf', selectionBackground: '#264f78' } : { background: '#ffffff', foreground: '#1d2025', cursor: '#4b515b', selectionBackground: '#add6ff' } }
+// VS Code Light+ ANSI palette: the default xterm colors (e.g. yellow #e5e510) vanish on a light background.
+const LIGHT_ANSI = { black: '#000000', red: '#cd3131', green: '#107c10', yellow: '#949800', blue: '#0451a5', magenta: '#bc05bc', cyan: '#0598bc', white: '#555555', brightBlack: '#666666', brightRed: '#cd3131', brightGreen: '#14ce14', brightYellow: '#b5ba00', brightBlue: '#0451a5', brightMagenta: '#bc05bc', brightCyan: '#0598bc', brightWhite: '#a5a5a5' }
+function terminalTheme(colorScheme: 'dark' | 'light') { return colorScheme === 'dark' ? { background: '#191a1b', foreground: '#bfbfbf', cursor: '#bfbfbf', selectionBackground: '#264f78' } : { background: '#ffffff', foreground: '#1d2025', cursor: '#4b515b', selectionBackground: '#add6ff', ...LIGHT_ANSI } }
 
 function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspaceController; id: string; colorScheme: 'dark' | 'light' }) {
   const root = useRef<HTMLDivElement>(null)
@@ -16,7 +18,7 @@ function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspac
   useEffect(() => {
     if (root.current === null) return
     const background = root.current === null ? undefined : getComputedStyle(root.current).backgroundColor
-    const terminal = new Terminal({ convertEol: false, cursorBlink: true, fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', fontSize: 13, theme: { ...terminalTheme(colorScheme), ...(background === undefined ? {} : { background }) } })
+    const terminal = new Terminal({ convertEol: false, cursorBlink: true, fontFamily: 'ui-monospace,SFMono-Regular,Menlo,Consolas,monospace', fontSize: 13, minimumContrastRatio: 4.5, theme: { ...terminalTheme(colorScheme), ...(background === undefined ? {} : { background }) } })
     terminalRef.current = terminal
     const fit = new FitAddon()
     terminal.loadAddon(fit)

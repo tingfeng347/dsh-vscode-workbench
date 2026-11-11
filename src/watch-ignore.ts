@@ -1,5 +1,6 @@
 /** Exclusion rules for the recursive workspace file watcher. */
-import { isAbsolute, relative, sep } from 'node:path'
+import { readFile } from 'node:fs/promises'
+import { isAbsolute, join, relative, sep } from 'node:path'
 
 /** Directory names skipped by default; large dependency and build trees exhaust inotify watches. */
 export const DEFAULT_WATCH_IGNORES = [
@@ -50,6 +51,26 @@ export function isIgnoredPath(relativePath: string, patterns: readonly string[])
     }
   }
   return false
+}
+
+/** Literal directory/path rules from a .gitignore; glob and negation rules are left to git itself. */
+export function parseGitIgnore(text: string): string[] {
+  const entries = new Set<string>()
+  for (const raw of text.split(/\r?\n/)) {
+    const line = raw.trim()
+    if (line === '' || line.startsWith('#') || line.startsWith('!') || /[*?[\]{}]/.test(line)) continue
+    const parts = segmentsOf(normalize(line).replace(/^\//, ''))
+    if (parts.length === 0 || parts.includes('..')) continue
+    entries.add(parts.slice(0, 8).join('/').slice(0, 200))
+    if (entries.size >= 200) break
+  }
+  return [...entries]
+}
+
+/** Ignore patterns derived from the workspace's root .gitignore, without asking the user to type exclusions. */
+export async function workspaceWatchIgnores(workspace: string): Promise<string[]> {
+  const text = await readFile(join(workspace, '.gitignore'), 'utf8').catch(() => '')
+  return parseGitIgnore(text)
 }
 
 /** Build a chokidar `ignored` predicate for one workspace and the user's extra exclusions. */

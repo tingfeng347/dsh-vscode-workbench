@@ -33,154 +33,33 @@
 - **Persistent workspace context**: restore tabs, tree, views, panels, and widths per workspace; terminals support multiple sessions, splits, and rename.
 - **Built for DSH**: reuse the DSH conversation surface on the right and manage theme and layout from workbench settings.
 
-## Features
-
-- **Files and editor**: lazy explorer with create, upload, drag-and-drop, rename, delete, and Git markers; Monaco tabs provide dirty state, atomic saves, and conflict notices.
-- **Preview**: Markdown opens in preview by default, with an optional source default in settings; supports source, outline, relative links, and images. Built-in PDF paging and zoom, plus Word, Excel worksheet tabs, and PowerPoint rendering, with DOC/ODT download support.
-- **Language intelligence**: install language servers per language; TypeScript / JavaScript ship with the plugin and can be enabled in settings, Python, PHP, Shell, YAML, JSON, CSS, HTML, and Dockerfile install in one click, and Go, Rust, C/C++, Java, C#, and Lua are detected; includes definition jumps, references, Peek, completion, signature help, and diagnostics.
-- **Search and Git**: `@vscode/ripgrep` supports case, whole-word, regex, and path filters; Git covers stage, unstage, discard, commit, branches, diffs, commit files, and the graph. The commit box can generate a Conventional Commits message from the current changes, which stays editable before committing.
-- **Terminal**: `node-pty` and xterm with up to eight sessions, rename, a right-side switcher, splits, ANSI output, and Ctrl+C.
-- **Layout and DSH**: the primary view, terminal panel, and DSH conversation sidebar can be shown and resized independently; settings manage theme, widths, and watcher exclusions.
-- **Sync and restore**: workspace file changes stream to the UI after skipping large trees such as `node_modules`, `vendor`, `third_party`, `build`, and `dist`, with extra exclusions configurable in settings; reload restores views, tabs, expanded directories, panels, and layout.
-
-The workbench mounts through the official `sidebar.footer.action` and `shell.overlay` extension points. It does not replace or disable `ui-layout`.
-
 ## Demo
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/explorer-0.2.0.png" width="800" alt="Explorer, Monaco editor, terminal, and DSH conversation">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/workbench-light.png" width="800" alt="Explorer, Monaco editor, terminal, and DSH conversation">
   <br><em>Explorer, Monaco editor, terminal, and DSH conversation</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control-0.2.0.png" width="800" alt="Source control and commit graph">
-  <br><em>Source control and commit graph</em>
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control-light.png" width="800" alt="Source control, AI commit message, and commit graph">
+  <br><em>Source control, AI commit message, and commit graph</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/language-0.2.0.png" width="800" alt="Language intelligence settings">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/settings-light.png" width="800" alt="Workbench settings">
   <br><em>Language intelligence and language server management</em>
 </p>
 
-
 ## Installation
 
-Plugin 0.2.2 targets DeepSeek Harness `0.2.2-rc.1` (Cordis `4.1.0`). Update Harness before installing; see the table below for older plugin versions.
+Plugin 0.2.3 targets DeepSeek Harness `0.2.2-rc.1` (Cordis `4.1.0`). Update Harness before installing:
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.1
-```
-
-```bash
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
-Installing from the DSH Plugins page or a marketplace also adds the package to `dsh.profile.bundles` and enables it. The CLI command above only writes `dependencies`, so add `dsh-vscode-workbench` to `dsh.profile.bundles` in `~/.dsh/profiles/web/package.json` and restart `dsh web`:
-
-```json
-{
-  "dsh": {
-    "profile": {
-      "bundles": [
-        "@deepseek-ai/dsh-base",
-        "@deepseek-ai/dsh-web-app",
-        "dsh-vscode-workbench"
-      ]
-    }
-  }
-}
-```
-
-### First terminal installation
-
-The terminal uses `node-pty`. If installation reports a blocked build script, merge the following into `~/.dsh/profiles/web/pnpm-workspace.yaml` on the DSH host, preserving existing settings:
-
-```yaml
-allowBuilds:
-  node-pty: true
-```
-
-Newer Harness releases may roll back failed installations, so run the install command again after configuring builds. If the plugin is installed but `node-pty` still cannot load, run:
-
-```bash
-cd ~/.dsh/profiles/web
-pnpm rebuild node-pty
-```
-
-pnpm can also delay versions published less than 24 hours ago. Retry after the waiting period, or use DSH's "Update now" action when it is offered.
-
-### Upgrading an existing installation
-
-The running plugin manager rejects installing over an existing package when HMR is active. Remove the old plugin before installing the new version. With the CLI:
-
-```bash
-dsh plugin --profile web remove dsh-vscode-workbench
-dsh plugin --profile web add dsh-vscode-workbench
-```
-
-Reopen the workbench afterwards; restart `dsh web` and refresh the page if needed.
-
-### Install fails: incompatible Harness
-
-If the install ends with only this line, Harness refused the plugin before installing anything — pnpm never ran and no file was written:
-
-```
-dsh: plugin command failed; diagnostics: ~/.dsh/profiles/<profile>/.plugin-manager/logs/operation-*/pnpm.log
-```
-
-Harness runs a compatibility preflight first: `engines.dsh` takes precedence; when absent, every `@deepseek-ai/dsh*` peerDependency must match the running Harness version. Prereleases participate in matching. A mismatch aborts installation. The diagnostic log holds the actual verdict:
-
-```
-dsh: installation rejected: Plugin dsh-vscode-workbench@<plugin version> is incompatible with dsh <Harness version>: peerDependencies {...}
-dsh: nothing was installed.
-```
-
-The plugin marketplace files this under the generic `plugin-side install failure`, so the auto-submitted issue body keeps only the `pnpm.log` path instead of that line.
-
-| Plugin version | Required Harness |
-| --- | --- |
-| 0.2.2 | `0.2.2-rc.1` (Cordis `4.1.0`, default baseline); also checked with `0.2.1-rc.5` (Cordis `4.0.5`) |
-| 0.2.1 | `0.2.2-rc.1` (Cordis `4.1.0`, default baseline); also checked with `0.2.1-rc.5` (Cordis `4.0.5`) |
-| 0.2.0 | `0.2.2-rc.1` (Cordis `4.1.0`, default baseline); also checked with `0.2.1-rc.5` (Cordis `4.0.5`) |
-| 0.1.14 | `0.2.2-rc.1` (Cordis `4.1.0`, default baseline); also checked with `0.2.1-rc.5` (Cordis `4.0.5`) |
-| 0.1.12 | `0.2.1-rc.5` (Cordis `4.0.5`, default baseline); also checked with `0.2.2-rc.1` (Cordis `4.1.0`, Node.js ≥24.9) |
-| 0.1.11 | `0.2.1-rc.5` (Cordis `4.0.5`, default baseline); also checked with `0.2.2-rc.1` (Cordis `4.1.0`, Node.js ≥24.9) |
-| 0.1.10 | `0.2.1-rc.4` (Cordis `4.0.5`, previous validation baseline) |
-| 0.1.9 | `0.2.1-alpha.3` (Cordis `4.0.5-alpha.2`, previous validation baseline) |
-| 0.1.8 | `0.1.1-rc.2` |
-
-No plugin version runs on Harness `0.2.0-rc.2`: 0.1.9 needs the `workingDirectory` service that first shipped in Harness `0.2.1-alpha.2`, while 0.1.8 only targets `0.1.1-rc.2`. Update Harness to `0.2.2-rc.1` before installing plugin 0.2.2, for example with a global npm install:
-
-```bash
-npm i -g @deepseek-ai/dsh@0.2.2-rc.1
-```
-
-`dsh plugin allow-version` only bypasses the version gate; it does not supply the missing host services, so the plugin still fails to load on `0.2.0-rc.2`. Update Harness instead.
-
-### Harness architecture integration
-
-Version 0.1.11 updates DSH development dependencies and peers to `0.2.1-rc.5`, keeps Cordis at `4.0.5`, and declares `engines.dsh` explicitly. It also explicitly declares prerelease dependency ranges for `0.2.2-rc.1`. The official `evaluatePluginCompatibility()` validates the installation gate without version exemptions.
-
-Both dependency environments pass type checking, 52 tests and the build, covering the official version gate, real Harness cookie authentication and session-directory switching regressions. Full DSH browser end-to-end validation has not been run. The next channel requires Node.js ≥24.9.
-
-Version 0.1.12 focuses on reliability and macOS usability. It preserves and restores unsaved workspace drafts, hardens concurrent saves and file operations, adds a draggable title bar with correct window clearance, and hides the native DSH sidebar chrome while the workbench is active. WebSocket URLs now follow the DSH transport, and terminal startup repairs the `spawn-helper` execute bits. PDF, DOCX, image and Markdown previews were verified in DSH Desktop.
-
-Version 0.1.14 fixes the overlapping header on Windows Desktop: DSH 0.2 reserves a 40px custom title bar at the top of the window and draws its App and Edit menus there. The workbench now honors `data-windows-titlebar`, starts below that bar, and no longer overlaps sidebar titles such as Source Control, while the title bar drag area remains usable. The development and test baseline moves to Harness `0.2.2-rc.1` / Cordis `4.1.0` while keeping the compatibility range for `0.2.1-rc.5` / Cordis `4.0.5`.
-
-Version 0.1.14 also targets large repositories and crowded tab strips. The file watcher skips large trees such as `vendor`, `third_party`/`third_part`, `build`, `dist`, `out`, `target`, `.venv`, and `__pycache__` by default, with extra exclusions configurable in workbench settings; running out of watches now disables auto-refresh instead of crashing DSH at the inotify limit. Tabs stay on one line with ellipsis and no native scrollbar, the close-all action stays pinned to the right, and the active tab scrolls into view. The bottom status bar is hidden by default and can be re-enabled in settings.
-
-Version 0.2.0 adds language intelligence: install a language server per language from settings (TypeScript/JavaScript ship with the plugin and can be enabled in settings; Pyright, Intelephense, Shell, YAML/JSON/CSS/HTML and Docker LS install with one click; gopls, rust-analyzer, clangd, Eclipse JDT LS, csharp-ls and LuaLS need a manual install), with go to definition, find references, Peek, completion, signature help and diagnostics. Opening a file for a language without a server no longer prompts; install it from workbench settings when needed. The editor previews PDF, Word (converted to PDF by LibreOffice), Excel (sheet tabs) and PowerPoint; the explorer supports dragging entries to move them, dragging files out to the desktop or another app, and dropping files on the editor to open them, while previewable Git changes open their preview directly; selected code or files can be added to the DSH conversation. The activity bar can be reordered by dragging and views hidden or restored from a right-click menu; a centered workspace switcher creates workspaces, enters existing ones and switches sessions inside one workspace without reloading the explorer. Watcher exclusions now come from `.gitignore`; a session that is not published yet no longer shows an error at startup; the light terminal uses VS Code's Light ANSI palette; Git changes use the explorer's colourful icons and the graph follows VS Code's rounded links and nodes.
-
-Version 0.2.1 retries terminal requests while a session is being published, so switching workspaces no longer leaves a failed terminal behind. It tightens the DSH conversation panel, composer and status bar at narrow widths and aligns the workbench with the macOS title bar. Go to definition now triggers Monaco's official command, so Ctrl+click navigates across files on macOS. The UI is closer to VS Code: larger, centered activity-bar icons, rounded tabs without separators, roomier explorer rows, and a DSH whale mark in the empty editor.
-
-Version 0.2.2 adds AI-generated commit messages: Source Control now turns the current changes into a Conventional Commits message with concise, standard or detailed output, and follows the recent commit language or uses Simplified Chinese or English. The generated message stays editable before committing. Settings use a category sidebar with grouped rows, and add Pure White and Eye Care themes; Eye Care also covers Monaco, the terminal and the DSH conversation panel. Markdown now opens in preview by default with a source-view setting, the activity bar can be freely reordered with the workspace switcher pinned on top, and language intelligence separates runtime and language-server installation so LSP actions stay unavailable until the runtime exists. Split diff mode now leaves scrolling to Monaco, fixing layout oscillation while dragging or scrolling.
-
-Version 0.1.15 unifies the dark palette: the activity bar, sidebar, tab strip, bottom panel and status bar share `#191a1b`, the editor uses `#121314`, inputs and overlays use `#202122` / `#252526`, and text and accents move to one VS Code-style scale (`#bfbfbf` / `#8c8c8c` / `#6e6e6e`, `#307e9f`). Monaco and the terminal use the same surfaces, and the dark status bar no longer switches to a separate blue background. The light theme follows VS Code Light: the sidebar and terminal use `#f9fafb`, the editor uses `#fff`, separators use `#e5e5e5`, and the sidebar/editor and editor/terminal boundaries get dividers with 8px rounded corners. The Follow DSH mode now follows DSH's light/dark scheme but uses the same palettes as the explicit Dark and Light options, so Follow DSH in dark mode matches the Dark theme exactly. Settings gain an editor font size slider (11–20px) that only affects the Monaco editor for the open file, with a debounced commit so dragging no longer reflows the whole workbench. Activity bar icons use a consistent 18px size with a rounded selected background instead of a left accent bar; the activity bar itself gets a border and 8px top-left/bottom-left corners while staying flush to the window edge. Tabs follow VS Code's top-rounded active tab with an 8px radius, are slightly shorter at 33px, and close on middle-click; the explorer's right edge, the editor group, the terminal and the DSH conversation panel are rounded cards backed by a dedicated gutter color, with their bottom edges flush to the status bar. List rows return to full-width square selection, while inputs, menus and terminal entries use VS Code's corner radii; the terminal tab sidebar shares the terminal surface color, and the xterm canvas reads the panel background so it is panel-gray instead of pure white in the light theme. Sidebar headers, the tab strip, the editor toolbar and panel headers share a 35px height, file/search/Git/terminal rows use 22px, inputs follow VS Code heights, and scrollbars use VS Code-style rounded sliders; the tab-strip bottom line appears only outside the active tab, which stays connected to the editor; the close-all button is gone and tabs use a VS Code context menu (Close, Close Others, Close to the Right, Close Saved, Close All). The editor group, tab strip and terminal gain their missing top/bottom hairline borders, and the activity bar no longer shows a stray scrollbar. The explorer, editor group, terminal and DSH conversation panel share the same outer borders, with the explorer bordered on top and bottom and all cards flush to the top bar and status bar. The editor and terminal form one continuous middle card: their side borders join without a break and only the outer corners are rounded; the editor card regains its bottom corners when the terminal panel is closed. All cards sit flush against the top bar with no remaining top gap; the empty tab strip is hidden when no file is open so the empty editor matches the editor background, and the terminal is a separate rounded card with a 4px gap from the editor. Both panel dividers share a 4px indicator; dragging the explorer or DSH conversation panel below its minimum width hides it, and the matching activity-bar icon restores it. Clicking a search result opens the file, jumps to the matched line and highlights the match in the editor; Markdown files switch to the source view automatically. Source Control now has a branch picker: it lists local branches, marks the current one, and can create and switch to a new branch by name; branches checked out in another worktree are marked and disabled to avoid a failed `git switch`, and a failed switch (for example when local changes would be overwritten) opens a centered error dialog instead of inline red text in the sidebar. Monaco preloads its Chinese language pack, so its built-in menus are Chinese (`zh-cn`); opening a file no longer highlights the first line until the editor is clicked. In the dark theme, hiding the DSH conversation panel keeps the DSH title bar dark instead of turning it white, and the workbench status bar uses VS Code dark/light surfaces instead of a fixed blue. The terminal panel can be dragged down to hide, and dragging up from the editor's bottom edge pulls it back out. The explorer and tab bar use the `vscode-icons` colorful file/folder icon pack, served on demand by the new `/dsh-vscode/file-icons` route. The DSH conversation panel follows the same surfaces in the fixed dark theme. The workbench entry moves into the DSH sidebar panel list next to Plugins and Scheduled Tasks instead of using a floating button, and the DSH conversation panel toggles from the whale icon in the activity bar.
-
-- Client contributions use `ui-renderer` slots and select the current session through `ui-session`'s `mainView` retain count, replacing the removed `dsh-client-runtime`.
-- Files, search, Git and new terminals use `workingDirectory.get(session)`. Workspace selection follows the working-directory projection; missing sessions return 404.
-- HTTP and WebSocket routes share Harness authentication and Host/Origin checks through `connection.requestRejection()`. Terminals also require loopback access.
-- The conversation panel locates the official `data-phase` container across the new `conversation.content` layout.
+Installing from the DSH Plugins page or a marketplace enables the plugin automatically. After a CLI install, add `dsh-vscode-workbench` to `dsh.profile.bundles` in `~/.dsh/profiles/web/package.json` and restart `dsh web`. The terminal depends on `node-pty`; see [Installation](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.en.md) for blocked build scripts, upgrades, and Harness compatibility failures.
 
 ## Shortcuts
 
@@ -208,6 +87,13 @@ pnpm build
 ```
 
 Requires Node.js `^22.19 || >=24`, pnpm 11.7, system Git, and the native build prerequisites for `node-pty` when no prebuild is available.
+
+## Docs
+
+- [Architecture](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/ARCHITECTURE.en.md): mounting, DSH services, and Harness compatibility.
+- [Installation](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.en.md): CLI and marketplace installs, terminal prerequisites, upgrades, and troubleshooting.
+- [Changelog](https://github.com/tingfeng347/dsh-vscode-workbench/releases): release notes.
+- [Release checklist](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/RELEASE-CHECKLIST.md): validation and packaging steps.
 
 ## License
 

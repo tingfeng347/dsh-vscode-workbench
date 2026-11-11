@@ -33,155 +33,33 @@
 - **可持续的工作上下文**：按工作区恢复标签、目录、视图、面板与栏宽；终端支持多会话、分屏与重命名。
 - **贴合 DSH**：右侧直接复用 DSH 对话能力，主题与布局集中在工作台设置中管理。
 
-## 功能
-
-- **文件与编辑器**：懒加载目录树、创建、上传、拖放、重命名、删除和 Git 状态；Monaco 多标签编辑支持脏状态、原子保存与冲突提示。
-- **预览**：Markdown 默认打开预览，也可在设置中改为默认源码；支持源码、大纲、相对链接和图片。内置 PDF 翻页缩放，以及 Word、Excel 工作表页签和 PowerPoint 渲染，DOC/ODT 可直接下载打开。
-- **语言智能**：按语言安装语言服务器；TypeScript / JavaScript 随插件提供、可在设置中启用，Python、PHP、Shell、YAML、JSON、CSS、HTML、Dockerfile 可一键安装，Go、Rust、C/C++、Java、C#、Lua 支持检测；提供定义跳转、引用查找、Peek、补全、签名帮助与诊断。
-- **搜索与 Git**：`@vscode/ripgrep` 支持大小写、全词、正则和路径筛选；Git 提供暂存、撤销、丢弃、提交、分支、差异、提交文件和提交图表。提交框支持一键生成 Conventional Commits 风格的提交信息，生成后仍可编辑再提交。
-- **终端**：基于 `node-pty` 与 xterm，支持最多 8 个会话、会话重命名、右侧切换、分屏、ANSI 输出和 Ctrl+C。
-- **布局与 DSH**：左侧视图、终端面板和右侧 DSH 对话栏可独立显示和调整；设置面板管理主题、各栏宽度和文件监听排除项。
-- **同步与恢复**：工作区文件变化实时推送，默认跳过 `node_modules`、`vendor`、`third_party`、`build`、`dist` 等大目录，可在设置里追加排除项；刷新后恢复活动视图、标签、目录展开、面板和布局。
-
-工作台通过官方 `sidebar.footer.action` 与 `shell.overlay` 扩展点挂载，不替换或卸载 `ui-layout`。
-
 ## 演示
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/explorer-0.2.0.png" width="800" alt="资源管理器、Monaco 编辑器、终端与 DSH 对话">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/workbench-light.png" width="800" alt="资源管理器、Monaco 编辑器、终端与 DSH 对话">
   <br><em>资源管理器、Monaco 编辑器、终端与 DSH 对话</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control-0.2.0.png" width="800" alt="源代码管理与提交图表">
-  <br><em>源代码管理与提交图表</em>
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control-light.png" width="800" alt="源代码管理、AI 提交信息与提交图表">
+  <br><em>源代码管理、AI 提交信息与提交图表</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/language-0.2.0.png" width="800" alt="语言智能设置">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/settings-light.png" width="800" alt="工作台设置">
   <br><em>语言智能与语言服务器管理</em>
 </p>
 
-
 ## 安装
 
-插件 0.2.2 适配 DeepSeek Harness `0.2.2-rc.1`（Cordis `4.1.0`）。请先更新 Harness，再安装插件；旧版对应关系见下表。
+插件 0.2.3 适配 DeepSeek Harness `0.2.2-rc.1`（Cordis `4.1.0`）。请先更新 Harness，再安装插件：
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.1
-```
-
-```bash
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
-通过 DSH 插件页或插件市场安装时，界面会把它加入 `dsh.profile.bundles` 并启用。用上面的 CLI 命令安装时只写入 `dependencies`，还需要在 `~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles` 中加入 `dsh-vscode-workbench`，然后重启 `dsh web`：
-
-```json
-{
-  "dsh": {
-    "profile": {
-      "bundles": [
-        "@deepseek-ai/dsh-base",
-        "@deepseek-ai/dsh-web-app",
-        "dsh-vscode-workbench"
-      ]
-    }
-  }
-}
-```
-
-### 首次安装终端支持
-
-终端使用 `node-pty`。如果安装日志提示其构建脚本被阻止，在 DSH 所在机器的 `~/.dsh/profiles/web/pnpm-workspace.yaml` 中合并以下配置，保留已有设置：
-
-```yaml
-allowBuilds:
-  node-pty: true
-```
-
-新版 Harness 可能回滚失败的安装，配置后应重新执行安装命令。若插件已安装但终端仍提示 `node-pty` 加载失败，可执行：
-
-```bash
-cd ~/.dsh/profiles/web
-pnpm rebuild node-pty
-```
-
-刚发布不足 24 小时的版本可能被 pnpm 的安全等待期拦截。等待后重试即可；DSH 提供“立即更新”时可直接选择它。
-
-### 从旧版升级
-
-运行中的插件管理器启用 HMR 时，不允许覆盖安装同名包。先在插件管理器中移除旧版，再安装新版；CLI 可使用：
-
-```bash
-dsh plugin --profile web remove dsh-vscode-workbench
-dsh plugin --profile web add dsh-vscode-workbench
-```
-
-完成后重新打开工作台，必要时重启 `dsh web` 并刷新页面。
-
-### 安装失败：Harness 版本不兼容
-
-如果安装只以这一行结束，说明 DSH 在安装前就拒绝了插件，pnpm 没有执行、也没有任何文件被写入：
-
-```
-dsh: plugin command failed; diagnostics: ~/.dsh/profiles/<profile>/.plugin-manager/logs/operation-*/pnpm.log
-```
-
-原因是 Harness 的兼容性预检：优先用插件的 `engines.dsh` 比对当前 Harness 版本；未声明时，检查所有 `@deepseek-ai/dsh*` peerDependencies。预发布版本也参与匹配，不满足就中止安装。诊断日志里能看到真正的结论：
-
-```
-dsh: installation rejected: Plugin dsh-vscode-workbench@<插件版本> is incompatible with dsh <Harness 版本>: peerDependencies {...}
-dsh: nothing was installed.
-```
-
-插件市场把这类失败归入通用的 `plugin-side install failure`，所以自动提交的 Issue 里不会带上上面这行，正文只剩 `pnpm.log` 的路径。
-
-| 插件版本 | 需要的 Harness |
-| --- | --- |
-| 0.2.2 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
-| 0.2.1 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
-| 0.2.0 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
-| 0.1.15 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
-| 0.1.14 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
-| 0.1.12 | `0.2.1-rc.5`（Cordis `4.0.5`，默认基线）；另验证 `0.2.2-rc.1`（Cordis `4.1.0`，Node.js ≥24.9） |
-| 0.1.11 | `0.2.1-rc.5`（Cordis `4.0.5`，默认基线）；另验证 `0.2.2-rc.1`（Cordis `4.1.0`，Node.js ≥24.9） |
-| 0.1.10 | `0.2.1-rc.4`（Cordis `4.0.5`，旧版验证基线） |
-| 0.1.9 | `0.2.1-alpha.3`（Cordis `4.0.5-alpha.2`，旧版验证基线） |
-| 0.1.8 | `0.1.1-rc.2` |
-
-Harness `0.2.0-rc.2` 上没有可用的插件版本：0.1.9 依赖 Harness `0.2.1-alpha.2` 才引入的 `workingDirectory` 服务，0.1.8 又只适配 `0.1.1-rc.2`。请先把 Harness 升级到 `0.2.2-rc.1` 再安装 0.2.2，例如 npm 全局安装时：
-
-```bash
-npm i -g @deepseek-ai/dsh@0.2.2-rc.1
-```
-
-`dsh plugin allow-version` 只跳过版本闸门，不会补上缺失的宿主服务，在 `0.2.0-rc.2` 上插件仍然加载不起来；请优先升级 Harness。
-
-### 新版架构适配
-
-0.1.11 将 DSH 开发依赖与 peerDependencies 同步至 `0.2.1-rc.5`，Cordis 保持 `4.0.5`，并显式声明 `engines.dsh`。同时显式声明 `0.2.2-rc.1` 的预发布依赖范围。安装版本闸门使用官方 `evaluatePluginCompatibility()` 验证，无需版本豁免。
-
-两套依赖环境均通过类型检查、52 项测试及构建，覆盖官方版本闸门、真实 Harness cookie 认证与会话目录切换回归；尚未完成完整 DSH 页面端到端验证。next 渠道需 Node.js ≥24.9。
-
-0.1.12 在此基础上集中修复可靠性与 macOS 使用问题：保留并恢复工作区草稿，加强并发保存和文件操作；补齐可拖动标题栏与窗口留白，修正活动工作台的 DSH 原生侧栏遮挡；WebSocket 地址跟随 DSH transport，终端启动时自动修复 `spawn-helper` 执行位。PDF、DOCX、图片和 Markdown 预览已在 DSH Desktop 中实际验证。
-
-0.1.14 修复 Windows Desktop 的顶部叠字：DSH 0.2 的 Windows 自定义标题栏会在窗口顶部预留 40px，并绘制「应用」「编辑」菜单；工作台现在识别 `data-windows-titlebar`，从标题栏下沿开始布局，不再与「源代码管理」等侧栏标题重叠，同时保留标题栏的拖动区域。开发与测试基线同步升级到 Harness `0.2.2-rc.1` / Cordis `4.1.0`，并在 `0.2.1-rc.5` / Cordis `4.0.5` 上保留兼容范围。
-
-0.1.14 同时处理大仓库与多标签场景：文件监听默认跳过 `vendor`、`third_party`/`third_part`、`build`、`dist`、`out`、`target`、`.venv`、`__pycache__` 等大目录，并允许在工作台设置里追加排除项；监听资源耗尽时只停用自动刷新，不再让 DSH 因 inotify 上限崩溃。标签栏改为单行省略并隐藏原生滚动条，关闭全部按钮固定右侧，切换标签时自动滚入可视区域。底部状态栏默认隐藏，可在设置中重新开启。
-
-0.2.0 新增语言智能：可在设置里按语言安装语言服务器（TypeScript / JavaScript 随插件提供、可在设置中启用，Python Pyright、PHP Intelephense、Shell、YAML / JSON / CSS / HTML、Dockerfile 可一键安装，Go gopls、Rust rust-analyzer、C / C++ clangd、Java Eclipse JDT LS、C# csharp-ls、LuaLS 需手动安装），提供转到定义、查找引用、Peek 多结果、智能补全、签名帮助与诊断；打开未安装语言的文件不再弹窗，需要时从工作台设置里安装。编辑器现在可直接预览 PDF、Word（LibreOffice 转 PDF）、Excel（工作表页签）和 PowerPoint；资源管理器支持拖动移动条目、拖到桌面或其他应用导出、拖到编辑器打开，Git 更改里的可预览文档会直接打开预览；选中代码或文件可一键添加到 DSH 对话。活动栏支持拖动排序和右键隐藏/恢复视图；新增居中的工作区切换窗口，可新建工作区、进入已有工作区并在同一工作区内切换会话，切换会话不再重载文件管理器。文件监听排除项改为自动读取 `.gitignore`；启动时会话尚未就绪不再显示错误；浅色终端改用 VS Code Light ANSI 色板；Git 更改列表使用资源管理器同款彩色图标，Git 图谱改为 VS Code 风格的圆角连线与节点。
-
-0.2.1 修复会话尚未发布时终端请求失败的问题，切换工作区会等待会话就绪并自动重试；收紧窄窗口下 DSH 对话栏、输入区和状态栏的对齐，并让工作台与 macOS 标题栏留白一致。Monaco 的转到定义改为触发官方命令，macOS 上的 Ctrl+点击现在可以跨文件跳转。界面进一步对齐 VS Code：活动栏图标增大并统一居中，标签栏改为无分隔线的圆弧标签，资源管理器行高与图标放大，空编辑器加入 DSH 鲸鱼标识。
-
-0.2.2 新增 AI 提交信息生成：源代码管理会根据当前变更生成 Conventional Commits 风格的提交信息，支持简洁、标准、详细三种详细程度，以及跟随最近提交、中文、English 三种语言选择，生成后仍可编辑再提交。设置面板改为左侧分类、右侧分组的布局，新增纯白与护眼主题，护眼主题同步覆盖工作台、Monaco、终端和右侧 DSH 对话栏。Markdown 默认打开预览并可在设置中改为源码；活动栏支持自由拖动排序，工作区切换固定顶部；语言智能区分语言运行时与 LSP 两个安装阶段，未安装语言时不再提供无效的 LSP 操作；并排差异视图将滚动交给 Monaco，修复拖拽或滚动时界面抖动。
-
-0.1.15 统一深色主题配色：活动栏、侧栏、标签栏、底部面板和状态栏统一为 `#191a1b`，编辑器为 `#121314`，输入框与浮层为 `#202122` / `#252526`，文本和强调色同步到同一套 VS Code 风格色板（`#bfbfbf` / `#8c8c8c` / `#6e6e6e`、`#307e9f`）；Monaco 与终端使用相同底色，深色状态栏不再单独使用蓝色背景。浅色主题同步 VS Code Light：侧栏和终端为 `#f9fafb`、编辑器为 `#fff`、分隔线为 `#e5e5e5`，并为侧栏与编辑器、编辑器与终端之间加入分隔线和 8px 圆角。「跟随 DSH」模式按 DSH 的明暗切换使用与「深色」「浅色」相同的色板，因此跟随 DSH 的深色外观与右侧「深色」完全一致。设置中新增「编辑器字体大小」（11–20px），只作用于右侧打开文件的 Monaco 编辑器，拖动时防抖提交，不再让整个工作台重新排版。活动栏图标统一为 18px，选中态改为 VS Code 的圆角背景并去掉左侧蓝条；左侧活动栏增加边框和左侧上下 8px 圆角，仍然贴满窗口左边；标签栏改为 VS Code 的顶部圆角活动标签并收紧到 33px，支持鼠标中键关闭；活动标签顶部圆角加大到 8px；标签栏底线只在非活动区域显示，活动标签直接与编辑器连通。资源管理器右侧、编辑器组、终端和 DSH 对话栏改为圆角卡片，间隙使用独立的 gutter 底色，卡片底部直接贴住状态栏。列表恢复整行方角，输入框、菜单和终端按 VS Code 的圆角尺寸调整；终端标签侧栏与终端主区统一使用相同底色，终端画布背景会读取面板的实际底色（浅色下为面板灰，而不是纯白）。侧栏头、标签栏、编辑工具栏和面板头统一为 35px，文件/搜索结果/Git/终端列表行统一为 22px，输入框高度对齐 VS Code，滚动条改为 VS Code 风格的圆角滑块；编辑器组、标签栏和终端补齐顶部/底部细线，活动栏隐藏多余滚动条。资源管理器、编辑器组、终端和 DSH 对话栏统一 4px 上下留白和外边框，资源管理器补齐上下边线；中间的编辑器与终端合并为一张连续卡片，左右边框不断开，只在最外层保留圆角；终端面板关闭时编辑器卡片会自动补全底部圆角。所有卡片顶部直接贴住标题栏，不再保留 4px 上缝隙；未打开文件时隐藏空标签栏，空编辑区与编辑器背景一致；终端作为独立圆角卡片，与编辑器之间保留 4px 空隙。左右分隔条统一为 4px 指示线；将资源管理器或 DSH 对话栏拖到最小宽度以下会自动隐藏，可通过活动栏对应图标恢复。搜索结果点击后会打开对应文件、跳到匹配行并在编辑器中高亮匹配词；Markdown 文件会自动切到源码视图。源代码管理的分支名改为下拉选择器：列出本地分支、标记当前分支，并可直接输入名称创建并切换新分支；已在其他 worktree 检出的分支会标记并禁用切换，避免 `git switch` 报错；切换失败（例如本地修改会被覆盖）会弹出居中的错误对话框，而不是在侧栏显示内联红字。右侧「全部关闭」按钮已移除，改为标签右键菜单（关闭、关闭其他、关闭右侧标签页、关闭已保存、全部关闭）；Monaco 编辑器显式预加载中文语言包，右键菜单等内置文案使用中文（`zh-cn`）；打开文件时不再默认高亮第一行，只有点击编辑器后才显示当前行高亮。深色主题下隐藏 DSH 对话栏时，工作台会继续保持 DSH 标题栏的深色，不再出现顶部变白；工作台底部状态栏改为 VS Code 风格的深/浅色底，不再固定为蓝色。终端面板可向下拖动隐藏；隐藏后从编辑器底部边缘向上拖动可重新拉出终端。资源管理器和标签栏改用 `vscode-icons` 彩色文件/文件夹图标包，图标由新增的 `/dsh-vscode/file-icons` 路由按需提供。DSH 对话栏在固定深色模式下也使用同一套底色。工作台入口移入 DSH 侧栏的面板列表（与「插件」「自动化任务」等并列），不再使用右下角悬浮按钮；DSH 对话栏的开关移到活动栏的鲸鱼图标，可随时打开或关闭。
-
-- 客户端通过 `ui-renderer` 提供的槽位服务注册界面，使用 `ui-session` 的 `mainView` 引用选择当前会话；不再依赖已移除的 `dsh-client-runtime`。
-- 文件、搜索、Git 和新建终端通过 `workingDirectory.get(session)` 使用会话当前目录，跟随工作目录投影切换；失效会话返回 404。
-- HTTP 与 WebSocket 接口使用 `connection.requestRejection()`，共享 Harness 登录认证及 Host/Origin 校验；终端额外保留 loopback 限制。
-- 对话栏按官方 `data-phase` 容器定位，支持新版 `conversation.content` 布局。
+通过 DSH 插件页或插件市场安装会自动启用。用 CLI 安装后还需在 `~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles` 中加入 `dsh-vscode-workbench`，再重启 `dsh web`。终端依赖 `node-pty`，首次安装如被构建策略拦截、升级旧版或遇到 Harness 版本不兼容，见[安装与升级](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.md)。
 
 ## 快捷键
 
@@ -211,6 +89,13 @@ pnpm build
 ```
 
 需要 Node.js `^22.19 || >=24`、pnpm 11.7、系统 Git，以及 `node-pty` 所需的本机构建环境（预编译产物不可用时）。
+
+## 文档
+
+- [架构适配](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/ARCHITECTURE.md)：挂载方式、DSH 服务接入与版本兼容范围。
+- [安装与升级](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.md)：CLI 与插件市场安装、终端依赖、旧版升级和排错。
+- [版本记录](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/CHANGELOG.md)：0.1.11 起的版本变化。
+- [发布检查](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/RELEASE-CHECKLIST.md)：发布前的验证与打包步骤。
 
 ## 许可证
 

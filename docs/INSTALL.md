@@ -1,6 +1,6 @@
 # 安装与升级
 
-插件 0.2.3 适配 DeepSeek Harness `0.2.2-rc.1`（Cordis `4.1.0`）。请先更新 Harness，再安装插件。架构接入与版本兼容表见[架构适配](ARCHITECTURE.md)。
+插件 0.2.4 适配 DeepSeek Harness `0.2.2-rc.1`（Cordis `4.1.0`）。请先更新 Harness，再安装插件。架构接入与版本兼容表见[架构适配](ARCHITECTURE.md)。
 
 ## 安装
 
@@ -78,6 +78,7 @@ dsh: nothing was installed.
 
 | 插件版本 | 需要的 Harness |
 | --- | --- |
+| 0.2.4 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
 | 0.2.3 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
 | 0.2.2 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
 | 0.2.1 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
@@ -90,7 +91,7 @@ dsh: nothing was installed.
 | 0.1.9 | `0.2.1-alpha.3`（Cordis `4.0.5-alpha.2`，旧版验证基线） |
 | 0.1.8 | `0.1.1-rc.2` |
 
-Harness `0.2.0-rc.2` 上没有可用的插件版本：0.1.9 依赖 Harness `0.2.1-alpha.2` 才引入的 `workingDirectory` 服务，0.1.8 又只适配 `0.1.1-rc.2`。请先把 Harness 升级到 `0.2.2-rc.1` 再安装 0.2.3，例如 npm 全局安装时：
+Harness `0.2.0-rc.2` 上没有可用的插件版本：0.1.9 依赖 Harness `0.2.1-alpha.2` 才引入的 `workingDirectory` 服务，0.1.8 又只适配 `0.1.1-rc.2`。请先把 Harness 升级到 `0.2.2-rc.1` 再安装 0.2.4，例如 npm 全局安装时：
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.1

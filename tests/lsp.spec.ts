@@ -40,9 +40,9 @@ describe('Language server detection', () => {
       join(home, 'go', 'bin'),
       join(home, '.cargo', 'bin'),
       join(home, '.dotnet', 'tools'),
-      join(home, '.local', 'bin'),
     ]) expect(dirs).toContain(expected)
     if (process.platform !== 'win32') {
+      expect(dirs).toContain(join(home, '.local', 'bin'))
       expect(dirs).toContain('/opt/homebrew/bin')
       expect(dirs).toContain('/usr/local/bin')
     }

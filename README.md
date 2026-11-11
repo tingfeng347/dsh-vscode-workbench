@@ -48,17 +48,17 @@
 ## 演示
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/explorer.png" width="800" alt="资源管理器、Monaco 编辑器、终端与 DSH 对话">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/explorer.png?v=0.2.0" width="800" alt="资源管理器、Monaco 编辑器、终端与 DSH 对话">
   <br><em>资源管理器、Monaco 编辑器、终端与 DSH 对话</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control.png" width="800" alt="源代码管理与提交图表">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control.png?v=0.2.0" width="800" alt="源代码管理与提交图表">
   <br><em>源代码管理与提交图表</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/language.png" width="800" alt="语言智能设置">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/language.png?v=0.2.0" width="800" alt="语言智能设置">
   <br><em>语言智能与语言服务器管理</em>
 </p>
 

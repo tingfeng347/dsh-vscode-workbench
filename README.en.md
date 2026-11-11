@@ -48,17 +48,17 @@ The workbench mounts through the official `sidebar.footer.action` and `shell.ove
 ## Demo
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/explorer.png" width="800" alt="Explorer, Monaco editor, terminal, and DSH conversation">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/explorer.png?v=0.2.0" width="800" alt="Explorer, Monaco editor, terminal, and DSH conversation">
   <br><em>Explorer, Monaco editor, terminal, and DSH conversation</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control.png" width="800" alt="Source control and commit graph">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control.png?v=0.2.0" width="800" alt="Source control and commit graph">
   <br><em>Source control and commit graph</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/language.png" width="800" alt="Language intelligence settings">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/language.png?v=0.2.0" width="800" alt="Language intelligence settings">
   <br><em>Language intelligence and language server management</em>
 </p>
 

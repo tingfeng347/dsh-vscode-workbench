@@ -27,8 +27,13 @@ async function request<T>(method: string, body: Record<string, unknown>, signal?
 }
 
 export async function api<T>(method: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
+  return withSessionRetry(() => request<T>(method, body, signal), signal)
+}
+
+/** Retry an operation while DSH is still publishing the selected session. */
+export async function withSessionRetry<T>(operation: () => Promise<T>, signal?: AbortSignal): Promise<T> {
   for (let attempt = 0; ; attempt++) {
-    try { return await request<T>(method, body, signal) }
+    try { return await operation() }
     catch (error) {
       const delay = sessionRetryDelay(error, attempt)
       if (delay === undefined) throw error

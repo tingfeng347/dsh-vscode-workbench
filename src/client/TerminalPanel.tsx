@@ -59,7 +59,7 @@ export function TerminalPanel({ sessionId, colorScheme }: BottomPanelProps) {
   const [sideWidth, setSideWidth] = useState(220)
   useEffect(() => {
     let cancelled = false
-    void workspace.refresh().then(() => { if (!cancelled && workspace.getSnapshot().terminals.length === 0) void workspace.create().then(value => { if (!cancelled) setActive(value.id) }).catch(() => undefined) }).catch(() => undefined)
+    void workspace.refresh().then(ready => { if (!cancelled && ready && workspace.getSnapshot().terminals.length === 0) void workspace.create().then(value => { if (!cancelled) setActive(value.id) }).catch(() => undefined) })
     return () => { cancelled = true }
   }, [workspace])
   useEffect(() => { if (snapshot.terminals.length > 0 && (!active || !snapshot.terminals.some(value => value.id === active))) setActive(snapshot.terminals[0]?.id) }, [snapshot.terminals, active])

@@ -1,4 +1,5 @@
 import type { TerminalInfo } from '../terminal.ts'
+import { ApiError, withSessionRetry } from './api.ts'
 import { websocketUrl } from './websocket.ts'
 
 export interface TerminalConnection {
@@ -13,7 +14,7 @@ export interface TerminalWorkspaceSnapshot { terminals: readonly TerminalInfo[];
 
 /** Browser client for the workbench's local terminal transport. */
 export interface TerminalWorkspace {
-  refresh(): Promise<void>
+  refresh(): Promise<boolean>
   create(title?: string): Promise<TerminalInfo>
   close(id: string): Promise<void>
   rename(id: string, title: string): Promise<void>
@@ -25,9 +26,9 @@ export interface TerminalWorkspace {
 async function request<T>(method: string, body: Record<string, unknown>): Promise<T> {
   const response = await fetch(`/dsh-vscode-terminal/api/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
   const text = await response.text()
-  let answer: { ok?: boolean; value?: T; error?: { message?: string } }
-  try { answer = JSON.parse(text) as { ok?: boolean; value?: T; error?: { message?: string } } } catch { throw new Error(`terminal request returned invalid JSON (${response.status})`) }
-  if (!response.ok || answer.ok !== true) throw new Error(answer.error?.message ?? 'terminal request failed')
+  let answer: { ok?: boolean; value?: T; error?: { code?: string; message?: string } }
+  try { answer = JSON.parse(text) as { ok?: boolean; value?: T; error?: { code?: string; message?: string } } } catch { throw new Error(`terminal request returned invalid JSON (${response.status})`) }
+  if (!response.ok || answer.ok !== true) throw new ApiError(answer.error?.code ?? 'terminal-request-failed', answer.error?.message ?? 'terminal request failed')
   return answer.value as T
 }
 
@@ -75,18 +76,23 @@ export class TerminalWorkspaceController implements TerminalWorkspace {
 
   constructor(private readonly sessionId: string) {}
 
-  async refresh(): Promise<void> {
+  async refresh(): Promise<boolean> {
     this.set({ ...this.snapshot, loading: true, error: undefined })
-    try { this.set({ terminals: await request<TerminalInfo[]>('list', { sessionId: this.sessionId }), loading: false }) }
-    catch (error) { this.set({ ...this.snapshot, loading: false, error: error instanceof Error ? error.message : String(error) }) }
+    try {
+      this.set({ terminals: await withSessionRetry(() => request<TerminalInfo[]>('list', { sessionId: this.sessionId })), loading: false })
+      return true
+    } catch (error) {
+      this.set({ ...this.snapshot, loading: false, error: error instanceof Error ? error.message : String(error) })
+      return false
+    }
   }
 
   async create(title?: string): Promise<TerminalInfo> {
-    try { const terminal = await request<TerminalInfo>('create', { sessionId: this.sessionId, ...(title === undefined ? {} : { title }) }); await this.refresh(); return terminal }
+    try { const terminal = await withSessionRetry(() => request<TerminalInfo>('create', { sessionId: this.sessionId, ...(title === undefined ? {} : { title }) })); await this.refresh(); return terminal }
     catch (error) { this.set({ ...this.snapshot, loading: false, error: error instanceof Error ? error.message : String(error) }); throw error }
   }
-  async close(id: string): Promise<void> { await request('close', { sessionId: this.sessionId, id }); await this.refresh() }
-  async rename(id: string, title: string): Promise<void> { await request('rename', { sessionId: this.sessionId, id, title }); await this.refresh() }
+  async close(id: string): Promise<void> { await withSessionRetry(() => request('close', { sessionId: this.sessionId, id })); await this.refresh() }
+  async rename(id: string, title: string): Promise<void> { await withSessionRetry(() => request('rename', { sessionId: this.sessionId, id, title })); await this.refresh() }
   connect(id: string): TerminalConnection { return new SocketConnection(this.sessionId, id) }
   getSnapshot(): TerminalWorkspaceSnapshot { return this.snapshot }
   subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener) }

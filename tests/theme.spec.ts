@@ -135,12 +135,12 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('.dvw-overlay ::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--dvw-text) 20%,transparent);border:2px solid transparent;background-clip:padding-box;border-radius:6px}')
   })
 
-  it('prompts to install a missing language service', () => {
+  it('leaves language service installation to settings', () => {
     const workbench = read('src/client/Workbench.tsx')
-    expect(workbench).toContain('<h2>语言未安装</h2>')
-    expect(workbench).toContain('以后再说')
-    expect(workbench).toContain("languageServerIdForPath(active)")
-    expect(workbench).toContain("changeLsp(prompt.id,'install')")
+    expect(workbench).not.toContain('<h2>语言未安装</h2>')
+    expect(workbench).not.toContain('以后再说')
+    expect(workbench).not.toContain('languageServerIdForPath(active)')
+    expect(workbench).toContain('<h3>语言智能</h3>')
   })
 
   it('lists TypeScript with the other languages in one block', () => {

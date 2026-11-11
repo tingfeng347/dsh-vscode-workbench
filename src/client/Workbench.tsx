@@ -617,6 +617,18 @@ export function Workbench({ service, sessionId, cwd, navigation }: { service: Vs
   useEffect(()=>{if(!snapshot.visible||sessionId===undefined||workspace===undefined)return;void refreshLsp()},[snapshot.visible,sessionId,workspace,refreshLsp])
   useEffect(()=>()=>{lspManager.current?.dispose()},[])
   useEffect(()=>{try{localStorage.setItem(TS_INTELLISENSE_KEY,tsIntellisense?'on':'off')}catch{}},[tsIntellisense])
+  // Definition and reference jumps land in workbench tabs for every language, including LSP servers
+  // that are independent of Monaco's built-in TypeScript index.
+  useEffect(()=>{
+    if(!snapshot.visible||sessionId===undefined||workspace===undefined)return
+    let cancelled=false;let disposable:{dispose():void}|undefined
+    void loadMonaco().then(monaco=>{
+      if(cancelled)return
+      const cwd=workspace.cwd
+      disposable=monaco.editor.registerEditorOpener({openCodeEditor:(_source,resource,selection)=>{const path=workspacePathFromModel(cwd,resource.toString());if(path===undefined)return false;const position=selection===undefined?undefined:'startLineNumber' in selection?{line:selection.startLineNumber,column:selection.startColumn}:{line:selection.lineNumber,column:selection.column};openPath(path,position?.line,position?.column);return true}})
+    })
+    return()=>{cancelled=true;disposable?.dispose()}
+  },[snapshot.visible,sessionId,workspace,openPath])
   useEffect(()=>{
     if(!snapshot.visible||sessionId===undefined||workspace===undefined)return
     // Not installed: never load Monaco just for this, only release an index a previous install built.
@@ -625,13 +637,12 @@ export function Workbench({ service, sessionId, cwd, navigation }: { service: Vs
     void loadMonaco().then(monaco=>{
       if(cancelled)return
       setTsIndex({state:'loading'})
-      disposables.push(monaco.editor.registerEditorOpener({openCodeEditor:(_source,resource,selection)=>{const path=workspacePathFromModel(cwd,resource.toString());if(path===undefined)return false;const position=selection===undefined?undefined:'startLineNumber' in selection?{line:selection.startLineNumber,column:selection.startColumn}:{line:selection.lineNumber,column:selection.column};openPath(path,position?.line,position?.column);return true}}))
       const changed=(event:Event)=>{const paths=(event as CustomEvent<string[]|undefined>).detail;if(Array.isArray(paths))void refreshIndexedFiles(monaco,sessionId,cwd,paths)}
       window.addEventListener('dvw-files-changed',changed);disposables.push({dispose:()=>window.removeEventListener('dvw-files-changed',changed)})
       void indexTypeScriptProject(monaco,sessionId,cwd).then(result=>{if(!cancelled)setTsIndex({state:'ready',...result})}).catch(error=>{if(!cancelled)setTsIndex({state:'error',error:error instanceof Error?error.message:String(error)})})
     })
     return()=>{cancelled=true;for(const disposable of disposables)disposable.dispose()}
-  },[snapshot.visible,sessionId,workspace,tsIntellisense,openPath])
+  },[snapshot.visible,sessionId,workspace,tsIntellisense])
   const openDiff=useCallback((path:string,diff:GitDiff,title?:string,diffSourcePath?:string)=>{const key=`diff:${path}`;const source=diffSourcePath??path;// Previewable documents open like VS Code's PDF/Office editors; history diffs keep the binary notice.
     if(isPreviewDocumentPath(source)&&!path.startsWith('commit:')){openPath(source);return}const binary=isBinaryDiffPath(source);setTabs(rows=>[...rows.filter(row=>row.path!==key),{path:key,title,content:diff.diff,draft:diff.diff,revision:'',size:diff.diff.length,binary,tooLarge:false,dirty:false,diff:binary?undefined:diff,diffMode:'inline',diffSourcePath:source}]);setActive(key)},[openPath])
   useEffect(()=>{const listener=(event:Event)=>void open((event as CustomEvent<string>).detail);window.addEventListener('dvw-open-workspace-path',listener);return()=>window.removeEventListener('dvw-open-workspace-path',listener)},[sessionId,tabs])

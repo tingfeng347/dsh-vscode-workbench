@@ -22,6 +22,20 @@ export const WORKBENCH_EDITOR_CHROME = {
   scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
 } as const
 
+/** macOS reports Control-click as a secondary click, so Monaco only navigates with Cmd-click there. */
+export function isMacPlatform(userAgent: string = navigator.userAgent): boolean {
+  return /Macintosh|Mac OS X/.test(userAgent)
+}
+
+/**
+ * Whether a mouse press should jump to the definition. On macOS, Control-click is a common
+ * Windows/Linux habit but arrives as a context-menu gesture (sometimes as a right-button
+ * press); treat it as Cmd-click instead.
+ */
+export function isMacDefinitionClick(event: { button: number; ctrlKey: boolean; metaKey: boolean }): boolean {
+  return (event.button === 0 || event.button === 2) && event.ctrlKey && !event.metaKey
+}
+
 /** Monaco theme aligned with the workbench dark palette. */
 export const DARK_THEME = 'dvw-dark'
 const DARK_RULES = [
@@ -156,6 +170,7 @@ export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' 
   const root = useRef<HTMLDivElement>(null)
   const editor = useRef<import('monaco-editor').editor.IStandaloneCodeEditor>()
   const decorations = useRef<import('monaco-editor').editor.IEditorDecorationsCollection>()
+  const cleanupListeners = useRef<(() => void) | undefined>(undefined)
   const latest = useRef(props)
   latest.current = props
   const [error, setError] = useState<string>()
@@ -205,10 +220,41 @@ export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' 
       instance.onDidChangeModelContent(() => latest.current.onChange(instance.getValue()))
       instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => latest.current.onSave())
       instance.addAction({ id: 'dvw.addToDsh', label: '添加到 DSH 对话', contextMenuGroupId: 'navigation', contextMenuOrder: 0, keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyK], run: () => latest.current.onAddToDsh?.(editorSelection(instance)) })
+      // Monaco maps go-to-definition to Cmd-click on macOS; also honor the usual Ctrl-click.
+      const mac = isMacPlatform()
+      let jumpedAt = -Infinity
+      const jumpToDefinition = (clientX: number, clientY: number): boolean => {
+        const position = instance.getTargetAtClientPoint(clientX, clientY)?.position
+        if (position === null || position === undefined) return false
+        jumpedAt = performance.now()
+        instance.setPosition(position); instance.focus()
+        // Definition navigation is registered as a command (Action2); getAction() cannot reach it.
+        instance.trigger('dvw.definitionClick', 'editor.action.revealDefinition', null)
+        return true
+      }
+      const onMouseDown = (event: MouseEvent) => {
+        if (!mac || !isMacDefinitionClick(event)) return
+        event.preventDefault(); event.stopPropagation()
+        jumpToDefinition(event.clientX, event.clientY)
+      }
+      // Chrome turns Control-click on macOS into a context menu; suppress it so the jump stands.
+      const onContextMenu = (event: MouseEvent) => {
+        if (!mac || !event.ctrlKey || event.metaKey) return
+        event.preventDefault(); event.stopPropagation()
+        // macOS may swallow the Control state in mousedown but keep it here; jump as a fallback.
+        if (performance.now() - jumpedAt > 500) jumpToDefinition(event.clientX, event.clientY)
+      }
+      root.current.addEventListener('mousedown', onMouseDown, true)
+      root.current.addEventListener('contextmenu', onContextMenu, true)
+      cleanupListeners.current = () => {
+        root.current?.removeEventListener('mousedown', onMouseDown, true)
+        root.current?.removeEventListener('contextmenu', onContextMenu, true)
+      }
       attach(monaco, instance)
     }).catch(error => setError(error instanceof Error ? error.message : String(error)))
     return () => {
       disposed = true
+      cleanupListeners.current?.(); cleanupListeners.current = undefined
       const instance = editor.current
       const model = instance?.getModel(); const state = instance?.saveViewState()
       if (model && state) viewStates.set(model.uri.toString(), state)

@@ -27,7 +27,7 @@
 ## 亮点
 
 - **一体化本地工作台**：资源管理器、Monaco 编辑器、搜索、Git、终端和 DSH 对话集中在一个 VS Code 风格界面。
-- **完整文件体验**：文本、Markdown、图片、PDF 和 Word 文档均可直接打开；目录支持拖放上传和常用文件操作。
+- **完整文件体验**：文本、Markdown、图片、PDF、Word、Excel 和 PowerPoint 文档均可直接打开；目录支持拖放上传和常用文件操作。
 - **可靠且实时**：原子保存与版本校验避免静默覆盖，WebSocket 会及时标记工作区的外部变更。
 - **可视化 Git 工作流**：覆盖状态、暂存、提交、分支、差异、提交文件与泳道式提交图。
 - **可持续的工作上下文**：按工作区恢复标签、目录、视图、面板与栏宽；终端支持多会话、分屏与重命名。
@@ -36,7 +36,8 @@
 ## 功能
 
 - **文件与编辑器**：懒加载目录树、创建、上传、拖放、重命名、删除和 Git 状态；Monaco 多标签编辑支持脏状态、原子保存与冲突提示。
-- **预览**：Markdown 支持源码、大纲、相对链接和图片；内置 PDF 翻页缩放与 DOCX 渲染，DOC/ODT 可直接下载打开。
+- **预览**：Markdown 支持源码、大纲、相对链接和图片；内置 PDF 翻页缩放，以及 Word、Excel 工作表页签和 PowerPoint 渲染，DOC/ODT 可直接下载打开。
+- **语言智能**：按语言安装语言服务器；TypeScript / JavaScript 随插件提供、可在设置中启用，Python、PHP、Shell、YAML、JSON、CSS、HTML、Dockerfile 可一键安装，Go、Rust、C/C++、Java、C#、Lua 支持检测；提供定义跳转、引用查找、Peek、补全、签名帮助与诊断。
 - **搜索与 Git**：`@vscode/ripgrep` 支持大小写、全词、正则和路径筛选；Git 提供暂存、撤销、丢弃、提交、分支、差异、提交文件和提交图表。
 - **终端**：基于 `node-pty` 与 xterm，支持最多 8 个会话、会话重命名、右侧切换、分屏、ANSI 输出和 Ctrl+C。
 - **布局与 DSH**：左侧视图、终端面板和右侧 DSH 对话栏可独立显示和调整；设置面板管理主题、各栏宽度和文件监听排除项。
@@ -47,8 +48,8 @@
 ## 演示
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/explorer.png" width="800" alt="资源管理器与 Monaco 编辑器">
-  <br><em>资源管理器与 Monaco 编辑器</em>
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/explorer.png" width="800" alt="资源管理器、Monaco 编辑器、终端与 DSH 对话">
+  <br><em>资源管理器、Monaco 编辑器、终端与 DSH 对话</em>
 </p>
 
 <p align="center">
@@ -57,8 +58,8 @@
 </p>
 
 <p align="center">
-  <img src="https://pic1.imgdb.cn/i/034GkZFU8ULHsWgFio93Lw.png" width="800" alt="终端">
-  <br><em>终端</em>
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/language.png" width="800" alt="语言智能设置">
+  <br><em>语言智能与语言服务器管理</em>
 </p>
 
 
@@ -167,7 +168,7 @@ npm i -g @deepseek-ai/dsh@0.2.2-rc.1
 
 0.1.14 同时处理大仓库与多标签场景：文件监听默认跳过 `vendor`、`third_party`/`third_part`、`build`、`dist`、`out`、`target`、`.venv`、`__pycache__` 等大目录，并允许在工作台设置里追加排除项；监听资源耗尽时只停用自动刷新，不再让 DSH 因 inotify 上限崩溃。标签栏改为单行省略并隐藏原生滚动条，关闭全部按钮固定右侧，切换标签时自动滚入可视区域。底部状态栏默认隐藏，可在设置中重新开启。
 
-0.2.0 新增语言智能：可在设置里按语言安装语言服务器（TypeScript / JavaScript 内置，Python Pyright、PHP Intelephense、Shell、YAML / JSON / CSS / HTML、Dockerfile 可一键安装，Go gopls、Rust rust-analyzer、C / C++ clangd、Java Eclipse JDT LS、C# csharp-ls、LuaLS 需手动安装），提供转到定义、查找引用、Peek 多结果、智能补全、签名帮助与诊断；打开未安装语言的文件会提示安装。编辑器现在可直接预览 PDF、Word（LibreOffice 转 PDF）、Excel（工作表页签）和 PowerPoint；资源管理器支持拖动移动条目、拖到桌面或其他应用导出、拖到编辑器打开，Git 更改里的可预览文档会直接打开预览；选中代码或文件可一键添加到 DSH 对话。活动栏支持拖动排序和右键隐藏/恢复视图；新增居中的工作区切换窗口，可新建工作区、进入已有工作区并在同一工作区内切换会话，切换会话不再重载文件管理器。文件监听排除项改为自动读取 `.gitignore`；启动时会话尚未就绪不再显示错误；浅色终端改用 VS Code Light ANSI 色板；Git 更改列表使用资源管理器同款彩色图标，Git 图谱改为 VS Code 风格的圆角连线与节点。
+0.2.0 新增语言智能：可在设置里按语言安装语言服务器（TypeScript / JavaScript 随插件提供、可在设置中启用，Python Pyright、PHP Intelephense、Shell、YAML / JSON / CSS / HTML、Dockerfile 可一键安装，Go gopls、Rust rust-analyzer、C / C++ clangd、Java Eclipse JDT LS、C# csharp-ls、LuaLS 需手动安装），提供转到定义、查找引用、Peek 多结果、智能补全、签名帮助与诊断；打开未安装语言的文件不再弹窗，需要时从工作台设置里安装。编辑器现在可直接预览 PDF、Word（LibreOffice 转 PDF）、Excel（工作表页签）和 PowerPoint；资源管理器支持拖动移动条目、拖到桌面或其他应用导出、拖到编辑器打开，Git 更改里的可预览文档会直接打开预览；选中代码或文件可一键添加到 DSH 对话。活动栏支持拖动排序和右键隐藏/恢复视图；新增居中的工作区切换窗口，可新建工作区、进入已有工作区并在同一工作区内切换会话，切换会话不再重载文件管理器。文件监听排除项改为自动读取 `.gitignore`；启动时会话尚未就绪不再显示错误；浅色终端改用 VS Code Light ANSI 色板；Git 更改列表使用资源管理器同款彩色图标，Git 图谱改为 VS Code 风格的圆角连线与节点。
 
 0.1.15 统一深色主题配色：活动栏、侧栏、标签栏、底部面板和状态栏统一为 `#191a1b`，编辑器为 `#121314`，输入框与浮层为 `#202122` / `#252526`，文本和强调色同步到同一套 VS Code 风格色板（`#bfbfbf` / `#8c8c8c` / `#6e6e6e`、`#307e9f`）；Monaco 与终端使用相同底色，深色状态栏不再单独使用蓝色背景。浅色主题同步 VS Code Light：侧栏和终端为 `#f9fafb`、编辑器为 `#fff`、分隔线为 `#e5e5e5`，并为侧栏与编辑器、编辑器与终端之间加入分隔线和 8px 圆角。「跟随 DSH」模式按 DSH 的明暗切换使用与「深色」「浅色」相同的色板，因此跟随 DSH 的深色外观与右侧「深色」完全一致。设置中新增「编辑器字体大小」（11–20px），只作用于右侧打开文件的 Monaco 编辑器，拖动时防抖提交，不再让整个工作台重新排版。活动栏图标统一为 18px，选中态改为 VS Code 的圆角背景并去掉左侧蓝条；左侧活动栏增加边框和左侧上下 8px 圆角，仍然贴满窗口左边；标签栏改为 VS Code 的顶部圆角活动标签并收紧到 33px，支持鼠标中键关闭；活动标签顶部圆角加大到 8px；标签栏底线只在非活动区域显示，活动标签直接与编辑器连通。资源管理器右侧、编辑器组、终端和 DSH 对话栏改为圆角卡片，间隙使用独立的 gutter 底色，卡片底部直接贴住状态栏。列表恢复整行方角，输入框、菜单和终端按 VS Code 的圆角尺寸调整；终端标签侧栏与终端主区统一使用相同底色，终端画布背景会读取面板的实际底色（浅色下为面板灰，而不是纯白）。侧栏头、标签栏、编辑工具栏和面板头统一为 35px，文件/搜索结果/Git/终端列表行统一为 22px，输入框高度对齐 VS Code，滚动条改为 VS Code 风格的圆角滑块；编辑器组、标签栏和终端补齐顶部/底部细线，活动栏隐藏多余滚动条。资源管理器、编辑器组、终端和 DSH 对话栏统一 4px 上下留白和外边框，资源管理器补齐上下边线；中间的编辑器与终端合并为一张连续卡片，左右边框不断开，只在最外层保留圆角；终端面板关闭时编辑器卡片会自动补全底部圆角。所有卡片顶部直接贴住标题栏，不再保留 4px 上缝隙；未打开文件时隐藏空标签栏，空编辑区与编辑器背景一致；终端作为独立圆角卡片，与编辑器之间保留 4px 空隙。左右分隔条统一为 4px 指示线；将资源管理器或 DSH 对话栏拖到最小宽度以下会自动隐藏，可通过活动栏对应图标恢复。搜索结果点击后会打开对应文件、跳到匹配行并在编辑器中高亮匹配词；Markdown 文件会自动切到源码视图。源代码管理的分支名改为下拉选择器：列出本地分支、标记当前分支，并可直接输入名称创建并切换新分支；已在其他 worktree 检出的分支会标记并禁用切换，避免 `git switch` 报错；切换失败（例如本地修改会被覆盖）会弹出居中的错误对话框，而不是在侧栏显示内联红字。右侧「全部关闭」按钮已移除，改为标签右键菜单（关闭、关闭其他、关闭右侧标签页、关闭已保存、全部关闭）；Monaco 编辑器显式预加载中文语言包，右键菜单等内置文案使用中文（`zh-cn`）；打开文件时不再默认高亮第一行，只有点击编辑器后才显示当前行高亮。深色主题下隐藏 DSH 对话栏时，工作台会继续保持 DSH 标题栏的深色，不再出现顶部变白；工作台底部状态栏改为 VS Code 风格的深/浅色底，不再固定为蓝色。终端面板可向下拖动隐藏；隐藏后从编辑器底部边缘向上拖动可重新拉出终端。资源管理器和标签栏改用 `vscode-icons` 彩色文件/文件夹图标包，图标由新增的 `/dsh-vscode/file-icons` 路由按需提供。DSH 对话栏在固定深色模式下也使用同一套底色。工作台入口移入 DSH 侧栏的面板列表（与「插件」「自动化任务」等并列），不再使用右下角悬浮按钮；DSH 对话栏的开关移到活动栏的鲸鱼图标，可随时打开或关闭。
 

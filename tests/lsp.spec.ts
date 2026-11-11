@@ -32,17 +32,20 @@ describe('Language server catalog', () => {
 
 describe('Language server detection', () => {
   it('searches PATH plus the usual per-user and Homebrew bin directories', () => {
+    const home = '/home/tester'
     const env = { PATH: ['/one', '/two'].join(delimiter) } as NodeJS.ProcessEnv
-    const dirs = lspSearchDirs(env, '/home/tester')
+    const dirs = lspSearchDirs(env, home)
     expect(dirs.slice(0, 2)).toEqual(['/one', '/two'])
     for (const expected of [
-      '/home/tester/go/bin',
-      '/home/tester/.cargo/bin',
-      '/home/tester/.dotnet/tools',
-      '/home/tester/.local/bin',
-      '/opt/homebrew/bin',
-      '/usr/local/bin',
+      join(home, 'go', 'bin'),
+      join(home, '.cargo', 'bin'),
+      join(home, '.dotnet', 'tools'),
+      join(home, '.local', 'bin'),
     ]) expect(dirs).toContain(expected)
+    if (process.platform !== 'win32') {
+      expect(dirs).toContain('/opt/homebrew/bin')
+      expect(dirs).toContain('/usr/local/bin')
+    }
     expect(new Set(dirs).size).toBe(dirs.length)
   })
 

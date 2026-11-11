@@ -71,25 +71,33 @@ async function exists(path: string): Promise<boolean> { return access(path).then
  */
 export function lspSearchDirs(env: NodeJS.ProcessEnv = process.env, home = homedir()): string[] {
   const fromPath = (env.PATH ?? env.Path ?? '').split(delimiter).filter(Boolean)
-  const extras = [
-    join(home, 'go', 'bin'),
-    join(home, '.cargo', 'bin'),
-    join(home, '.dotnet', 'tools'),
-    join(home, '.local', 'bin'),
-    join(home, 'bin'),
-    '/opt/homebrew/bin',
-    '/usr/local/bin',
-    '/usr/bin',
-    '/bin',
-    '/usr/sbin',
-    '/sbin',
-  ]
+  const extras = process.platform === 'win32'
+    ? [
+      join(home, 'go', 'bin'),
+      join(home, '.cargo', 'bin'),
+      join(home, '.dotnet', 'tools'),
+      join(home, 'bin'),
+    ]
+    : [
+      join(home, 'go', 'bin'),
+      join(home, '.cargo', 'bin'),
+      join(home, '.dotnet', 'tools'),
+      join(home, '.local', 'bin'),
+      join(home, 'bin'),
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+      '/usr/bin',
+      '/bin',
+      '/usr/sbin',
+      '/sbin',
+    ]
   return [...new Set([...fromPath, ...extras])]
 }
 
 async function executableIn(directory: string, command: string): Promise<string | undefined> {
+  // Windows has no executable bit: access(X_OK) accepts any file, so only accept real command extensions.
   const names = process.platform === 'win32'
-    ? [`${command}.exe`, `${command}.cmd`, `${command}.bat`, command]
+    ? [`${command}.exe`, `${command}.cmd`, `${command}.bat`, `${command}.com`]
     : [command]
   for (const name of names) {
     const file = join(directory, name)

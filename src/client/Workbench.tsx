@@ -697,7 +697,7 @@ export function Workbench({ service, sessionId, cwd, navigation }: { service: Vs
           {id:'search',label:'搜索',icon:<Icon name="search"/>,active:primarySideVisible&&snapshot.view==='search',onActivate:()=>selectView('search')},
           {id:'git',label:'源代码管理',icon:<Icon name="source-control"/>,active:primarySideVisible&&snapshot.view==='git',onActivate:()=>selectView('git')},
           {id:'terminal',label:terminalAvailable?(snapshot.bottomPanel==='terminal'?'隐藏终端':'显示终端'):'终端适配器未安装',icon:<Icon name="terminal"/>,active:snapshot.bottomPanel==='terminal',disabled:!terminalAvailable,onActivate:()=>toggleTerminal(service)},
-          {id:'chat',label:chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)',icon:<DshMark size={18}/>,active:chatVisible,onActivate:()=>setChatVisible(value=>!value)},
+          {id:'chat',label:chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)',icon:<DshMark size={22}/>,active:chatVisible,onActivate:()=>setChatVisible(value=>!value)},
         ]}
         fixed={[{id:'workspaces',label:'打开工作区 / 切换会话',icon:<Icon name="folder-opened"/>,active:false,onActivate:openSwitcher}]}
         bottom={[

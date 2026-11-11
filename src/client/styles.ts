@@ -1,3 +1,8 @@
+import { DSH_MARK_PATH, DSH_MARK_VIEWBOX } from './DshMark.tsx'
+
+/** The bundled DSH whale as a CSS mask, so the empty state stays in sync with the logo component. */
+const DSH_MARK_MASK = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${DSH_MARK_VIEWBOX}"><path d="${DSH_MARK_PATH}" fill="#000"/></svg>`)}")`
+
 const CSS = String.raw`
 @font-face{font-family:codicon;font-display:block;src:url('/dsh-vscode/codicons/codicon.ttf') format('truetype')}
 :root{--dvw-titlebar-height:0px}html[data-platform=darwin]{--dvw-titlebar-height:var(--dsh-frame-top-clearance,48px)}html[data-windows-titlebar]{--dvw-titlebar-height:var(--dsh-frame-top-clearance,40px)}
@@ -67,6 +72,28 @@ body[data-dvw-workbench-active] [data-sidebar-toggle]{display:none!important}
 .dvw-setting-textarea{width:100%;min-height:84px;resize:vertical;padding:8px 10px;border:1px solid var(--dvw-border);border-radius:6px;background:var(--dvw-base);color:var(--dvw-text);font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
 .dvw-setting-textarea:focus{outline:none;border-color:var(--dvw-accent)}
 .dvw-setting-extension{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--dvw-border);border-radius:7px;background:var(--dvw-base)}.dvw-setting-extension>div{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}.dvw-setting-extension span{color:var(--dvw-text-3);font-size:12px}.dvw-setting-extension button{height:26px;padding:0 14px;border:1px solid var(--dvw-border);border-radius:4px;background:transparent;color:var(--dvw-text);font:inherit;cursor:pointer}.dvw-setting-extension button:hover{background:var(--dvw-hover)}.dvw-setting-extension button.dvw-primary-button{border-color:var(--dvw-accent);background:var(--dvw-accent);color:#fff}.dvw-setting-hint{margin:8px 0 0;color:var(--dvw-text-3);font-size:11px;line-height:1.5}
+/* Slightly larger explorer rows for comfortable reading without shrinking the file list. */
+.dvw-tree-row{height:24px;font-size:13px}
+.dvw-chevron{width:18px}
+.dvw-file-icon{width:18px;height:18px}
+.dvw-tree-rename,.dvw-tree-create-input{height:22px}
+/* Branded empty state: a soft accent tile with the DSH whale. */
+.dvw-empty>div{position:relative}
+.dvw-empty>div::before{content:"";display:block;width:96px;height:96px;margin:0 auto 20px;border-radius:24px;background:color-mix(in srgb,var(--dvw-accent) 12%,var(--dvw-surface-1))}
+.dvw-empty>div::after{content:"";position:absolute;top:26px;left:50%;width:60px;height:44px;transform:translateX(-50%);background:var(--dvw-accent);-webkit-mask:${DSH_MARK_MASK} center/contain no-repeat;mask:${DSH_MARK_MASK} center/contain no-repeat}
+/* Activity bar glyphs sized like VS Code's 24px icons in a 48px slot. */
+.dvw-act::before{width:40px;height:40px;border-radius:8px}
+/* Host styles set the codicon base size later in the cascade, so the rail needs the extra weight. */
+.dvw-act .codicon,.dvw-activity-ghost .codicon{font-size:20px!important}
+/* Inline SVGs otherwise sit on the text baseline and drift against the font glyphs. */
+.dvw-act svg,.dvw-activity-ghost svg{display:block}
+/* VS Code-like tab shape: rounded shoulders on the active tab blending into the editor, no separators between tabs. */
+.dvw-tab{border-radius:10px 10px 0 0;border-right:0}
+.dvw-tabs{background:color-mix(in srgb,var(--dvw-text) 4%,var(--dvw-base))}
+.dvw-tab[data-active=true]{border-top:0;border-right-color:transparent}
+.dvw-tab[data-active=true]::before,.dvw-tab[data-active=true]::after{content:"";position:absolute;bottom:0;width:10px;height:10px;background:var(--dvw-surface-1);pointer-events:none}
+.dvw-tab[data-active=true]::before{left:-10px;-webkit-mask:radial-gradient(circle 10px at 0 0,transparent 9px,#000 9.6px);mask:radial-gradient(circle 10px at 0 0,transparent 9px,#000 9.6px)}
+.dvw-tab[data-active=true]::after{right:-10px;-webkit-mask:radial-gradient(circle 10px at 100% 0,transparent 9px,#000 9.6px);mask:radial-gradient(circle 10px at 100% 0,transparent 9px,#000 9.6px)}
 `
 
 export function installStyles(): () => void {

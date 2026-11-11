@@ -1,14 +1,16 @@
 import { useEffect, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Icon } from './Icon.tsx'
 import type { WorkspaceChoice } from './dshNavigation.ts'
 
 /** Centered switcher: existing workspaces, their sessions, and a new-workspace action. */
-export function WorkspaceSwitcher({ choices, activeSessionId, unavailable, busy, error, onCreate, onSwitch, onOpenWorkspace, onClose }: {
+export function WorkspaceSwitcher({ choices, activeSessionId, unavailable, busy, error, theme, onCreate, onSwitch, onOpenWorkspace, onClose }: {
   choices: WorkspaceChoice[]
   activeSessionId?: string
   unavailable: boolean
   busy: boolean
   error?: string
+  theme?: 'dark' | 'light' | 'white' | 'eyecare'
   onCreate(): void
   onSwitch(sessionId: string): void
   onOpenWorkspace(workspaceId: string): void
@@ -21,7 +23,8 @@ export function WorkspaceSwitcher({ choices, activeSessionId, unavailable, busy,
     window.addEventListener('keydown', escape)
     return () => window.removeEventListener('keydown', escape)
   }, [onClose])
-  return <div className="dvw-confirm-backdrop" role="presentation" onMouseDown={onClose}>
+  return createPortal(<div className="dvw-overlay dvw-workspace-layer" data-dvw-theme={theme}>
+    <div className="dvw-workspace-backdrop" role="presentation" onMouseDown={onClose}>
     <section className="dvw-workspace-switcher" role="dialog" aria-modal="true" aria-label="打开工作区" onMouseDown={event => event.stopPropagation()}>
       <header><h2>打开工作区</h2><button className="dvw-icon" title="关闭" onClick={onClose}><Icon name="close"/></button></header>
       <div className="dvw-workspace-list">
@@ -49,5 +52,6 @@ export function WorkspaceSwitcher({ choices, activeSessionId, unavailable, busy,
       {error !== undefined && <p className="dvw-workspace-error">{error}</p>}
       <footer><button className="dvw-primary-button" disabled={busy} onClick={onCreate}>{busy ? '正在打开…' : '新建工作区…'}</button><button onClick={onClose}>取消</button></footer>
     </section>
-  </div>
+    </div>
+  </div>, document.body)
 }

@@ -19,6 +19,13 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('body[data-dvw-palette=dark] [data-dvw-conversation-panel]')
   })
 
+  it('keeps only one explorer row highlighted at a time', () => {
+    const styles = read('src/client/styles.ts')
+    expect(styles).toContain(
+      '.dvw-tree:has(.dvw-tree-row:hover) .dvw-tree-row[data-selected=true]:not(:hover){background:transparent}'
+    )
+  })
+
   it('offers the workbench from the sidebar panel list', () => {
     const index = read('src/client/index.tsx')
     expect(index).toContain("export const inject = ['slots', 'layout']")
@@ -79,6 +86,17 @@ describe('workbench dark theme', () => {
     expect(workbench).toContain("api<{opened:boolean;workspace?:{id:string}}>('workspace.open'")
     expect(read('src/client/index.tsx')).toContain('createDshNavigation(')
     expect(read('src/index.ts')).toContain("ctx.inject(['directoryPicker', 'workspaceRegistry']")
+  })
+
+  it('matches the settings modal surface for the workspace switcher', () => {
+    const styles = read('src/client/styles.ts')
+    const switcher = read('src/client/WorkspaceSwitcher.tsx')
+    expect(switcher).toContain('createPortal(')
+    expect(switcher).toContain('className="dvw-workspace-backdrop"')
+    expect(switcher).toContain('className="dvw-overlay dvw-workspace-layer"')
+    expect(styles).toContain('.dvw-workspace-layer{position:fixed!important;inset:0!important;z-index:1000!important;')
+    expect(styles).toContain('.dvw-workspace-backdrop{position:absolute;inset:0;z-index:50;display:grid;place-items:center;padding:24px;background:rgba(0,0,0,.34);backdrop-filter:blur(3px)}')
+    expect(styles).toContain('.dvw-workspace-switcher{width:min(640px,calc(100vw - 48px));height:min(680px,calc(100vh - 48px));max-height:none;border-radius:18px;')
   })
 
   it('shows the explorer file icons in the Git change list', () => {

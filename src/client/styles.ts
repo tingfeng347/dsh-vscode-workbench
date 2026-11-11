@@ -75,6 +75,8 @@ body[data-dvw-workbench-active] [data-sidebar-toggle]{display:none!important}
 .dvw-setting-extension{display:flex;align-items:center;gap:12px;padding:10px 12px;border:1px solid var(--dvw-border);border-radius:7px;background:var(--dvw-base)}.dvw-setting-extension>div{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px}.dvw-setting-extension span{color:var(--dvw-text-3);font-size:12px}.dvw-setting-extension button{height:26px;padding:0 14px;border:1px solid var(--dvw-border);border-radius:4px;background:transparent;color:var(--dvw-text);font:inherit;cursor:pointer}.dvw-setting-extension button:hover{background:var(--dvw-hover)}.dvw-setting-extension button.dvw-primary-button{border-color:var(--dvw-accent);background:var(--dvw-accent);color:#fff}.dvw-setting-hint{margin:8px 0 0;color:var(--dvw-text-3);font-size:11px;line-height:1.5}
 /* Slightly larger explorer rows for comfortable reading without shrinking the file list. */
 .dvw-tree-row{height:24px;font-size:13px}
+/* Keep a single focus surface: hovering another row clears the selected row's fill. */
+.dvw-tree:has(.dvw-tree-row:hover) .dvw-tree-row[data-selected=true]:not(:hover){background:transparent}
 .dvw-chevron{width:18px}
 .dvw-file-icon{width:18px;height:18px}
 .dvw-tree-rename,.dvw-tree-create-input{height:22px}
@@ -172,6 +174,19 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-editor{min-width:0;overflow:hidden}
 .dvw-editor-body{min-width:0;overflow:hidden}
 .dvw-monaco-diff{height:auto;min-width:0;min-height:0;margin:0;padding:0;overflow:hidden;white-space:normal}
+/* Keep the workspace switcher in the same elevated surface family as workbench settings. */
+.dvw-workspace-layer{position:fixed!important;inset:0!important;z-index:1000!important;display:block!important;padding:0!important;background:transparent!important;overflow:hidden!important}
+.dvw-workspace-backdrop{position:absolute;inset:0;z-index:50;display:grid;place-items:center;padding:24px;background:rgba(0,0,0,.34);backdrop-filter:blur(3px)}
+.dvw-workspace-switcher{width:min(640px,calc(100vw - 48px));height:min(680px,calc(100vh - 48px));max-height:none;border-radius:18px;overflow:hidden;box-shadow:0 16px 50px rgba(0,0,0,.32)}
+.dvw-workspace-switcher>header{height:52px;padding:0 12px 0 20px;font-size:15px}
+.dvw-workspace-list{padding:10px}
+.dvw-workspace-row{border-radius:11px}
+.dvw-workspace-toggle{height:40px;padding:0 12px}
+.dvw-workspace-sessions{gap:3px;padding:4px 0 8px 32px}
+.dvw-workspace-session{height:34px;padding:0 12px;border-radius:11px}
+.dvw-workspace-switcher>footer{padding:12px 16px}
+.dvw-workspace-switcher>footer button{height:32px;border-radius:9px;padding:0 16px}
+.dvw-workspace-switcher .dvw-icon{border-radius:9px}
 @media(max-width:760px){.dvw-settings-body{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.dvw-settings-nav{grid-column:1;grid-row:1;flex-direction:row;border-right:0;border-bottom:1px solid var(--dvw-border-soft);padding:8px}.dvw-settings-nav button{flex:none}.dvw-settings-body>section{grid-column:1;grid-row:2;padding:16px 18px 24px}}
 `
 

@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from 'vitest'
+import { readFileSync } from 'node:fs'
 import { MARKDOWN_DEFAULT_VIEW_KEY, markdownDefaultView, restoreTabPaths } from '../src/client/Workbench.tsx'
 
 afterEach(() => localStorage.clear())
@@ -19,5 +20,13 @@ describe('Markdown default view', () => {
   it('ignores an unknown saved value', () => {
     localStorage.setItem(MARKDOWN_DEFAULT_VIEW_KEY, 'unexpected')
     expect(markdownDefaultView()).toBe('preview')
+  })
+
+  it('keeps the default-view control in the layout section', () => {
+    const workbench = readFileSync('src/client/Workbench.tsx', 'utf8')
+    const appearance = workbench.slice(workbench.indexOf('<h3>外观</h3>'), workbench.indexOf('<h3>布局</h3>'))
+    const layout = workbench.slice(workbench.indexOf('<h3>布局</h3>'), workbench.indexOf('<h3>提交信息</h3>'))
+    expect(appearance).not.toContain('Markdown 默认视图')
+    expect(layout).toContain('Markdown 默认视图')
   })
 })

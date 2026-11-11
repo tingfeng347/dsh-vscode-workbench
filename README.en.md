@@ -29,16 +29,16 @@
 - **One local workbench**: explorer, Monaco editor, search, Git, terminal, and DSH conversation in one VS Code-style interface.
 - **Complete file experience**: open text, Markdown, images, PDF, Word, Excel, and PowerPoint files directly; the tree supports drag-and-drop uploads and common file operations.
 - **Reliable and live**: atomic saves and revision checks prevent silent overwrites, while WebSocket updates flag external workspace changes.
-- **Visual Git workflow**: status, staging, commits, branches, diffs, commit files, and a swimlane commit graph.
+- **Visual Git workflow**: status, staging, commits, branches, diffs, commit files, a swimlane commit graph, and AI-generated commit messages from the current changes.
 - **Persistent workspace context**: restore tabs, tree, views, panels, and widths per workspace; terminals support multiple sessions, splits, and rename.
 - **Built for DSH**: reuse the DSH conversation surface on the right and manage theme and layout from workbench settings.
 
 ## Features
 
 - **Files and editor**: lazy explorer with create, upload, drag-and-drop, rename, delete, and Git markers; Monaco tabs provide dirty state, atomic saves, and conflict notices.
-- **Preview**: Markdown source, outline, relative links, and images; built-in PDF paging and zoom, plus Word, Excel worksheet tabs, and PowerPoint rendering, with DOC/ODT download support.
+- **Preview**: Markdown opens in preview by default, with an optional source default in settings; supports source, outline, relative links, and images. Built-in PDF paging and zoom, plus Word, Excel worksheet tabs, and PowerPoint rendering, with DOC/ODT download support.
 - **Language intelligence**: install language servers per language; TypeScript / JavaScript ship with the plugin and can be enabled in settings, Python, PHP, Shell, YAML, JSON, CSS, HTML, and Dockerfile install in one click, and Go, Rust, C/C++, Java, C#, and Lua are detected; includes definition jumps, references, Peek, completion, signature help, and diagnostics.
-- **Search and Git**: `@vscode/ripgrep` supports case, whole-word, regex, and path filters; Git covers stage, unstage, discard, commit, branches, diffs, commit files, and the graph.
+- **Search and Git**: `@vscode/ripgrep` supports case, whole-word, regex, and path filters; Git covers stage, unstage, discard, commit, branches, diffs, commit files, and the graph. The commit box can generate a Conventional Commits message from the current changes, which stays editable before committing.
 - **Terminal**: `node-pty` and xterm with up to eight sessions, rename, a right-side switcher, splits, ANSI output, and Ctrl+C.
 - **Layout and DSH**: the primary view, terminal panel, and DSH conversation sidebar can be shown and resized independently; settings manage theme, widths, and watcher exclusions.
 - **Sync and restore**: workspace file changes stream to the UI after skipping large trees such as `node_modules`, `vendor`, `third_party`, `build`, and `dist`, with extra exclusions configurable in settings; reload restores views, tabs, expanded directories, panels, and layout.

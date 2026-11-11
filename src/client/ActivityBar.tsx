@@ -29,7 +29,11 @@ export function toggleActivityHidden(hidden: readonly string[], id: string): str
   return hidden.includes(id) ? hidden.filter(value => value !== id) : [...hidden, id]
 }
 
-/** VS Code-style activity bar: pointer drag with a floating ghost and live reordering, right-click hide. */
+/**
+ * VS Code-style activity bar: every view can be dragged into a new slot while `fixed` actions stay pinned on
+ * top and `bottom` actions stay pinned at the foot. Reordering is computed from pointer position so it keeps
+ * working when the DOM shifts under a fast drag.
+ */
 export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderChange, onHiddenChange }: {
   views: ActivityView[]
   fixed: ActivityView[]
@@ -41,12 +45,18 @@ export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderC
 }) {
   const [menu, setMenu] = useState<{ x: number; y: number; target?: string }>()
   const drag = useRef<{ id: string; x: number; y: number; active: boolean }>()
+  const draggingRef = useRef(false)
   const nodes = useRef(new Map<string, HTMLButtonElement>())
   const flip = useRef<Map<string, number>>()
-  const suppressClick = useRef(false)
+  const didDrag = useRef(false)
   const [draggingId, setDraggingId] = useState<string>()
   const [ghost, setGhost] = useState<{ x: number; y: number }>()
   const [preview, setPreview] = useState<string[]>()
+  const previewRef = useRef<string[]>()
+  const orderRef = useRef(order)
+  const visibleRef = useRef<ActivityView[]>([])
+  previewRef.current = preview
+  orderRef.current = order
 
   useEffect(() => {
     if (menu === undefined) return
@@ -62,6 +72,8 @@ export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderC
     const before = flip.current
     flip.current = undefined
     if (before === undefined) return
+    // Reordering mid-drag must not animate: transformed rects would feed back into the next hit test.
+    if (draggingRef.current) return
     for (const [id, element] of nodes.current) {
       const previous = before.get(id)
       if (previous === undefined) continue
@@ -72,49 +84,77 @@ export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderC
   })
 
   const visible = views.filter(view => !hidden.includes(view.id))
+  visibleRef.current = visible
   const currentOrder = preview ?? order
   const ordered = currentOrder.flatMap(id => visible.filter(view => view.id === id))
   const toggled = (id: string) => onHiddenChange(toggleActivityHidden(hidden, id))
   const target = menu?.target === undefined ? undefined : views.find(view => view.id === menu.target)
 
   const capturePositions = () => { flip.current = new Map([...nodes.current].map(([id, element]) => [id, element.getBoundingClientRect().top])) }
-  const beginDrag = (event: ReactPointerEvent<HTMLButtonElement>, id: string) => {
-    if (event.button !== 0) return
-    drag.current = { id, x: event.clientX, y: event.clientY, active: false }
-    event.currentTarget.setPointerCapture?.(event.pointerId)
-  }
-  const moveDrag = (event: ReactPointerEvent<HTMLButtonElement>, id: string) => {
+  const moveDrag = (clientX: number, clientY: number) => {
     const state = drag.current
-    if (state === undefined || state.id !== id) return
+    if (state === undefined) return
     if (!state.active) {
-      if (Math.abs(event.clientX - state.x) + Math.abs(event.clientY - state.y) < 5) return
-      state.active = true; setDraggingId(id)
+      if (Math.abs(clientX - state.x) + Math.abs(clientY - state.y) < 5) return
+      state.active = true
+      draggingRef.current = true
+      setDraggingId(state.id)
     }
-    setGhost({ x: event.clientX, y: event.clientY })
-    const element = (document.elementFromPoint(event.clientX, event.clientY) as HTMLElement | null)?.closest<HTMLElement>('[data-act-id]')
-    if (element === null || element === undefined) return
-    const targetId = element.dataset.actId
-    if (targetId === undefined || targetId === id || !visible.some(view => view.id === targetId)) return
-    const rect = element.getBoundingClientRect()
-    const ids = currentOrder.filter(value => visible.some(view => view.id === value))
-    const index = ids.indexOf(targetId)
-    if (index < 0) return
-    const next = moveActivity(currentOrder, id, event.clientY > rect.top + rect.height / 2 ? ids[index + 1] : targetId)
-    if (next.join('|') === currentOrder.join('|')) return
+    setGhost({ x: clientX, y: clientY })
+    const base = previewRef.current ?? orderRef.current
+    const visibleIds = new Set(visibleRef.current.map(view => view.id))
+    const slots = base.filter(id => visibleIds.has(id) && id !== state.id)
+    let index = 0
+    for (const id of slots) {
+      const element = nodes.current.get(id)
+      if (element === undefined) continue
+      const rect = element.getBoundingClientRect()
+      if (clientY > rect.top + rect.height / 2) index += 1
+    }
+    const next = moveActivity(base, state.id, slots[index])
+    if (next.join('|') === base.join('|')) return
     capturePositions()
+    previewRef.current = next
     setPreview(next)
   }
-  const endDrag = (event: ReactPointerEvent<HTMLButtonElement>) => {
-    const state = drag.current; drag.current = undefined
+  const endDrag = () => {
+    const state = drag.current
+    drag.current = undefined
     if (state?.active) {
-      suppressClick.current = true
-      window.setTimeout(() => { suppressClick.current = false }, 0)
-      if (preview !== undefined) onOrderChange(preview)
+      didDrag.current = true
+      const next = previewRef.current
+      if (next !== undefined) onOrderChange(next)
     }
-    event.currentTarget.releasePointerCapture?.(event.pointerId)
+    draggingRef.current = false
+    previewRef.current = undefined
     setDraggingId(undefined); setGhost(undefined); setPreview(undefined)
   }
-  const cancelDrag = () => { drag.current = undefined; setDraggingId(undefined); setGhost(undefined); setPreview(undefined) }
+  const cancelDrag = () => {
+    drag.current = undefined
+    draggingRef.current = false
+    previewRef.current = undefined
+    setDraggingId(undefined); setGhost(undefined); setPreview(undefined)
+  }
+  const handlers = useRef({ moveDrag, endDrag, cancelDrag })
+  handlers.current = { moveDrag, endDrag, cancelDrag }
+  useEffect(() => {
+    const move = (event: PointerEvent) => handlers.current.moveDrag(event.clientX, event.clientY)
+    const up = () => handlers.current.endDrag()
+    const cancel = () => handlers.current.cancelDrag()
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', cancel)
+    return () => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', cancel)
+    }
+  }, [])
+  const beginDrag = (event: ReactPointerEvent<HTMLButtonElement>, id: string) => {
+    if (event.button !== 0) return
+    didDrag.current = false
+    drag.current = { id, x: event.clientX, y: event.clientY, active: false }
+  }
   const renderView = (view: ActivityView) => <button
     key={view.id}
     ref={element => { if (element === null) nodes.current.delete(view.id); else nodes.current.set(view.id, element) }}
@@ -125,17 +165,14 @@ export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderC
     disabled={view.disabled}
     title={view.label}
     onPointerDown={event => beginDrag(event, view.id)}
-    onPointerMove={event => moveDrag(event, view.id)}
-    onPointerUp={event => endDrag(event)}
-    onPointerCancel={cancelDrag}
-    onClick={() => { if (!suppressClick.current) view.onActivate() }}
+    onClick={() => { if (didDrag.current) { didDrag.current = false; return } view.onActivate() }}
     onContextMenu={event => { event.preventDefault(); event.stopPropagation(); setMenu({ x: event.clientX, y: event.clientY, target: view.id }) }}
   >{view.icon}</button>
 
   return <>
     <nav className="dvw-activity" onContextMenu={event => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY }) }}>
-      {ordered.length === 0 ? <span className="dvw-activity-empty" aria-hidden="true"/> : ordered.map(renderView)}
       {fixed.map(view => <button key={view.id} className="dvw-act" data-act-id={view.id} data-active={view.active} disabled={view.disabled} title={view.label} onClick={view.onActivate}>{view.icon}</button>)}
+      {ordered.length === 0 ? <span className="dvw-activity-empty" aria-hidden="true"/> : ordered.map(renderView)}
       <div className="dvw-activity-bottom">{bottom.map(view => <button key={view.id} className="dvw-act" data-act-id={view.id} data-active={view.active} disabled={view.disabled} title={view.label} onClick={view.onActivate}>{view.icon}</button>)}</div>
     </nav>
     {draggingId !== undefined && ghost !== undefined && <div className="dvw-activity-ghost" style={{ left: ghost.x, top: ghost.y }} aria-hidden="true">{views.find(view => view.id === draggingId)?.icon}</div>}

@@ -85,8 +85,43 @@ const DARK_COLORS = {
   'scrollbarSlider.hoverBackground': '#646464b3',
   'scrollbarSlider.activeBackground': '#bfbfbf66',
 }
+/** Eye-care palette: the editor shares the workbench's warm yellow surface. */
+export const EYE_THEME = 'dvw-eyecare'
+const EYE_COLORS = {
+  'editor.background': '#f7ebc8',
+  'editor.foreground': '#3b3324',
+  'editorLineNumber.foreground': '#92856a',
+  'editorLineNumber.activeForeground': '#5c4a2a',
+  'editor.selectionBackground': '#e6d294',
+  'editor.inactiveSelectionBackground': '#ecdcae',
+  'editor.lineHighlightBackground': '#efe1b4',
+  'editorCursor.foreground': '#6b5320',
+  'editorWidget.background': '#f7ebc8',
+  'editorWidget.border': '#e0cf9f',
+  'editorSuggestWidget.background': '#f7ebc8',
+  'editorSuggestWidget.border': '#e0cf9f',
+  'editorSuggestWidget.selectedBackground': '#f0e0ae',
+  'editorHoverWidget.background': '#f7ebc8',
+  'editorHoverWidget.border': '#e0cf9f',
+  'editorGutter.background': '#f7ebc8',
+  'diffEditor.insertedTextBackground': '#b7d7a8aa',
+  'diffEditor.removedTextBackground': '#e8b4ad88',
+  'diffEditor.border': '#e0cf9f',
+  'diffEditor.diagonalFill': '#eadcb6',
+  'scrollbarSlider.background': '#92856a55',
+  'scrollbarSlider.hoverBackground': '#92856a88',
+  'scrollbarSlider.activeBackground': '#5c4a2a66',
+}
+
+export type MonacoColorScheme = 'dark' | 'light' | 'white' | 'eyecare'
+
+export function monacoThemeFor(theme: MonacoColorScheme): string {
+  return theme === 'dark' ? DARK_THEME : theme === 'eyecare' ? EYE_THEME : 'vs'
+}
+
 function defineWorkbenchThemes(monaco: Monaco): void {
   monaco.editor.defineTheme(DARK_THEME, { base: 'vs-dark', inherit: true, rules: DARK_RULES, colors: DARK_COLORS })
+  monaco.editor.defineTheme(EYE_THEME, { base: 'vs', inherit: true, rules: [], colors: EYE_COLORS })
 }
 
 /**
@@ -119,13 +154,13 @@ export function loadMonaco(): Promise<Monaco> {
   return loading
 }
 
-export function MonacoDiffEditor(props: { uri: string; original: string; modified: string; mode: 'inline' | 'split'; theme: 'dark' | 'light'; fontSize?: number }) {
+export function MonacoDiffEditor(props: { uri: string; original: string; modified: string; mode: 'inline' | 'split'; theme: MonacoColorScheme; fontSize?: number }) {
   const root=useRef<HTMLDivElement>(null);const editor=useRef<import('monaco-editor').editor.IStandaloneDiffEditor>();const models=useRef<{original:import('monaco-editor').editor.ITextModel;modified:import('monaco-editor').editor.ITextModel}>();const [error,setError]=useState<string>()
-  useEffect(()=>{let disposed=false;void loadMonaco().then(monaco=>{if(disposed||root.current===null)return;const safe=props.uri.replace(/^\/+/, '');const original=monaco.editor.createModel(props.original,undefined,monaco.Uri.parse(`dvw-diff-original:///${safe}`));const modified=monaco.editor.createModel(props.modified,undefined,monaco.Uri.parse(`dvw-diff-modified:///${safe}`));models.current={original,modified};const instance=monaco.editor.createDiffEditor(root.current,{automaticLayout:true,readOnly:true,renderSideBySide:props.mode==='split',theme:props.theme==='dark'?DARK_THEME:'vs',fontSize:props.fontSize??14,...WORKBENCH_EDITOR_CHROME,originalEditable:false,ignoreTrimWhitespace:false});instance.setModel({original,modified});editor.current=instance}).catch(error=>setError(error instanceof Error?error.message:String(error)));return()=>{disposed=true;editor.current?.dispose();editor.current=undefined;models.current?.original.dispose();models.current?.modified.dispose();models.current=undefined}},[props.uri])
+  useEffect(()=>{let disposed=false;void loadMonaco().then(monaco=>{if(disposed||root.current===null)return;const safe=props.uri.replace(/^\/+/, '');const original=monaco.editor.createModel(props.original,undefined,monaco.Uri.parse(`dvw-diff-original:///${safe}`));const modified=monaco.editor.createModel(props.modified,undefined,monaco.Uri.parse(`dvw-diff-modified:///${safe}`));models.current={original,modified};const instance=monaco.editor.createDiffEditor(root.current,{automaticLayout:true,readOnly:true,renderSideBySide:props.mode==='split',theme:monacoThemeFor(props.theme),fontSize:props.fontSize??14,...WORKBENCH_EDITOR_CHROME,originalEditable:false,ignoreTrimWhitespace:false});instance.setModel({original,modified});editor.current=instance}).catch(error=>setError(error instanceof Error?error.message:String(error)));return()=>{disposed=true;editor.current?.dispose();editor.current=undefined;models.current?.original.dispose();models.current?.modified.dispose();models.current=undefined}},[props.uri])
   useEffect(()=>{const value=models.current;if(value===undefined)return;if(value.original.getValue()!==props.original)value.original.setValue(props.original);if(value.modified.getValue()!==props.modified)value.modified.setValue(props.modified)},[props.original,props.modified])
   useEffect(()=>{editor.current?.updateOptions({renderSideBySide:props.mode==='split'})},[props.mode])
   useEffect(()=>{editor.current?.updateOptions({fontSize:props.fontSize??14})},[props.fontSize])
-  useEffect(()=>{if(window.monaco!==undefined)window.monaco.editor.setTheme(props.theme==='dark'?DARK_THEME:'vs')},[props.theme])
+  useEffect(()=>{if(window.monaco!==undefined)window.monaco.editor.setTheme(monacoThemeFor(props.theme))},[props.theme])
   return error===undefined?<div className="dvw-diff dvw-monaco-diff" data-mode={props.mode} data-render-side-by-side={props.mode==='split'} ref={root}/>:<div className="dvw-error">{error}</div>
 }
 
@@ -166,7 +201,7 @@ function editorSelection(instance: import('monaco-editor').editor.IStandaloneCod
   return { text: model.getValueInRange(range), startLine: range.startLineNumber, endLine }
 }
 
-export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' | 'light'; line?: number; column?: number; fontSize?: number; highlight?: string; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
+export function MonacoEditor(props: { uri: string; value: string; theme: MonacoColorScheme; line?: number; column?: number; fontSize?: number; highlight?: string; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
   const root = useRef<HTMLDivElement>(null)
   const editor = useRef<import('monaco-editor').editor.IStandaloneCodeEditor>()
   const decorations = useRef<import('monaco-editor').editor.IEditorDecorationsCollection>()
@@ -215,7 +250,7 @@ export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' 
     void loadMonaco().then((monaco) => {
       if (disposed || root.current === null) return
       const props = latest.current
-      const instance = monaco.editor.create(root.current, { model: null, automaticLayout: true, theme: props.theme === 'dark' ? DARK_THEME : 'vs', fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off' })
+      const instance = monaco.editor.create(root.current, { model: null, automaticLayout: true, theme: monacoThemeFor(props.theme), fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off' })
       editor.current = instance
       instance.onDidChangeModelContent(() => latest.current.onChange(instance.getValue()))
       instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => latest.current.onSave())
@@ -268,7 +303,7 @@ export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' 
   useEffect(() => {
     const model = editor.current?.getModel(); if (model !== null && model !== undefined && model.getValue() !== props.value) model.setValue(props.value)
   }, [props.value])
-  useEffect(() => { if (window.monaco !== undefined) window.monaco.editor.setTheme(props.theme === 'dark' ? DARK_THEME : 'vs') }, [props.theme])
+  useEffect(() => { if (window.monaco !== undefined) window.monaco.editor.setTheme(monacoThemeFor(props.theme)) }, [props.theme])
   useEffect(() => { editor.current?.updateOptions({ fontSize: props.fontSize ?? 14 }) }, [props.fontSize])
   useEffect(() => {
     const instance = editor.current; const monaco = window.monaco; const model = instance?.getModel()

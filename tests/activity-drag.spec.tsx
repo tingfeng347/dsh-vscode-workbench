@@ -9,6 +9,14 @@ afterEach(() => { document.body.replaceChildren(); vi.restoreAllMocks() })
 
 const views = ['explorer', 'search', 'git'].map(id => ({ id, label: id, icon: null, active: false, onActivate() {} }))
 
+/** jsdom has no layout, so pin each activity button to a 48px slot in DOM order. */
+const layout = (buttons: HTMLButtonElement[]) => {
+  buttons.forEach((button, index) => {
+    const top = index * 48
+    vi.spyOn(button, 'getBoundingClientRect').mockReturnValue({ top, height: 48, bottom: top + 48, left: 0, right: 48, width: 48, x: 0, y: top, toJSON() {} } as DOMRect)
+  })
+}
+
 describe('Activity bar pointer dragging', () => {
   it('moves the dragged view to the pointer drop position', async () => {
     const onOrderChange = vi.fn()
@@ -19,18 +27,68 @@ describe('Activity bar pointer dragging', () => {
       root.render(<ActivityBar views={views} fixed={[]} order={['explorer', 'search', 'git']} hidden={[]} onOrderChange={onOrderChange} onHiddenChange={() => {}}/>)
     })
     const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-act-id]'))
-    const [first, second] = buttons
-    Object.defineProperty(document, 'elementFromPoint', { value: () => second, configurable: true })
-    vi.spyOn(second!, 'getBoundingClientRect').mockReturnValue({ top: 0, height: 48, bottom: 48, left: 0, right: 48, width: 48, x: 0, y: 0, toJSON() {} } as DOMRect)
+    layout(buttons)
+    const first = buttons[0]!
     const pointer = (type: string, y: number) => new MouseEvent(type, { bubbles: true, button: 0, clientX: 5, clientY: y })
     await act(async () => {
       first!.dispatchEvent(pointer('pointerdown', 5))
-      first!.dispatchEvent(pointer('pointermove', 40))
+      first!.dispatchEvent(pointer('pointermove', 80))
     })
     await act(async () => {
-      first!.dispatchEvent(pointer('pointerup', 40))
+      first!.dispatchEvent(pointer('pointerup', 80))
     })
     expect(onOrderChange).toHaveBeenCalledWith(['search', 'explorer', 'git'])
+    await act(async () => { root.unmount() })
+  })
+
+  it('drops a view at the end when the pointer passes the last slot', async () => {
+    const onOrderChange = vi.fn()
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(<ActivityBar views={views} fixed={[]} order={['explorer', 'search', 'git']} hidden={[]} onOrderChange={onOrderChange} onHiddenChange={() => {}}/>)
+    })
+    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-act-id]'))
+    layout(buttons)
+    const pointer = (type: string, y: number) => new MouseEvent(type, { bubbles: true, button: 0, clientX: 5, clientY: y })
+    await act(async () => {
+      buttons[0]!.dispatchEvent(pointer('pointerdown', 5))
+      buttons[0]!.dispatchEvent(pointer('pointermove', 140))
+    })
+    await act(async () => { buttons[0]!.dispatchEvent(pointer('pointerup', 140)) })
+    expect(onOrderChange).toHaveBeenCalledWith(['search', 'git', 'explorer'])
+    await act(async () => { root.unmount() })
+  })
+
+  it('commits the reorder even when the pointer is released outside the button', async () => {
+    const onOrderChange = vi.fn()
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(<ActivityBar views={views} fixed={[]} order={['explorer', 'search', 'git']} hidden={[]} onOrderChange={onOrderChange} onHiddenChange={() => {}}/>)
+    })
+    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-act-id]'))
+    layout(buttons)
+    await act(async () => {
+      buttons[0]!.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 5, clientY: 5 }))
+      window.dispatchEvent(new MouseEvent('pointermove', { bubbles: true, button: 0, clientX: 5, clientY: 140 }))
+      window.dispatchEvent(new MouseEvent('pointerup', { bubbles: true, button: 0, clientX: 5, clientY: 140 }))
+    })
+    expect(onOrderChange).toHaveBeenCalledWith(['search', 'git', 'explorer'])
+    await act(async () => { root.unmount() })
+  })
+
+  it('keeps fixed actions above the draggable views', async () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(<ActivityBar views={views} fixed={[{ id: 'workspaces', label: 'workspaces', icon: null, active: false, onActivate() {} }]} order={['explorer', 'search', 'git']} hidden={[]} onOrderChange={() => {}} onHiddenChange={() => {}}/>)
+    })
+    const ids = Array.from(container.querySelectorAll<HTMLElement>('[data-act-id]')).map(element => element.dataset.actId)
+    expect(ids).toEqual(['workspaces', 'explorer', 'search', 'git'])
     await act(async () => { root.unmount() })
   })
 

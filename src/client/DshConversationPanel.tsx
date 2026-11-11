@@ -46,7 +46,7 @@ export function DshConversationPanel({ visible, width, statusHeight }: { visible
 }
 
 /** Temporarily align the official DSH panel palette with a fixed workbench palette. */
-export function DshConversationTheme({ visible, colorScheme, followDsh }: { visible: boolean; colorScheme: 'dark' | 'light'; followDsh: boolean }) {
+export function DshConversationTheme({ visible, colorScheme, followDsh }: { visible: boolean; colorScheme: 'dark' | 'light' | 'white' | 'eyecare'; followDsh: boolean }) {
   useLayoutEffect(() => {
     if (!visible) return
     const body = document.body

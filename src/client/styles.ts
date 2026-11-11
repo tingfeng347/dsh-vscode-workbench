@@ -168,6 +168,10 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-settings .dvw-setting-segment{border-radius:10px;padding:3px}
 .dvw-settings .dvw-setting-segment button{border-radius:7px}
 .dvw-settings .dvw-icon{border-radius:9px}
+/* Monaco owns diff scrolling; an outer scroller changes the width as scrollbars appear and makes split mode oscillate. */
+.dvw-editor{min-width:0;overflow:hidden}
+.dvw-editor-body{min-width:0;overflow:hidden}
+.dvw-monaco-diff{height:auto;min-width:0;min-height:0;margin:0;padding:0;overflow:hidden;white-space:normal}
 @media(max-width:760px){.dvw-settings-body{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.dvw-settings-nav{grid-column:1;grid-row:1;flex-direction:row;border-right:0;border-bottom:1px solid var(--dvw-border-soft);padding:8px}.dvw-settings-nav button{flex:none}.dvw-settings-body>section{grid-column:1;grid-row:2;padding:16px 18px 24px}}
 `
 

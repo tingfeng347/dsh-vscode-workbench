@@ -1,6 +1,30 @@
 import { useEffect, useRef, useState } from 'react'
+import { api } from './api.ts'
 
-export type DocumentPreviewKind = 'pdf' | 'docx' | 'download'
+type XlsxModule = typeof import('xlsx')
+let xlsxLoading: Promise<XlsxModule> | undefined
+
+/** Load SheetJS from the host-hosted browser build; bundling it drags Node builtins into the client. */
+export function loadXlsx(): Promise<XlsxModule> {
+  xlsxLoading ??= new Promise<XlsxModule>((resolve, reject) => {
+    const existing = (window as Window & { XLSX?: XlsxModule }).XLSX
+    if (existing !== undefined) { resolve(existing); return }
+    const script = document.createElement('script')
+    script.src = '/dsh-vscode/xlsx.js'
+    script.onload = () => {
+      const value = (window as Window & { XLSX?: XlsxModule }).XLSX
+      if (value === undefined) reject(new Error('SheetJS 加载失败')); else resolve(value)
+    }
+    script.onerror = () => reject(new Error('SheetJS 加载失败'))
+    document.head.append(script)
+  })
+  return xlsxLoading
+}
+
+export type DocumentPreviewKind = 'pdf' | 'office' | 'sheet' | 'download'
+
+const SHEET_EXTENSIONS = new Set(['xlsx', 'xlsm', 'xls', 'ods'])
+const OFFICE_EXTENSIONS = new Set(['doc', 'docx', 'ppt', 'pptx', 'odt', 'odp', 'rtf'])
 
 const MIN_PDF_SCALE = 0.5
 const MAX_PDF_SCALE = 3
@@ -14,9 +38,49 @@ export function clampPdfScale(scale: number): number {
 export function documentPreviewKind(path: string): DocumentPreviewKind | undefined {
   const extension = path.split('.').at(-1)?.toLowerCase()
   if (extension === 'pdf') return 'pdf'
-  if (extension === 'docx') return 'docx'
-  if (extension === 'doc' || extension === 'odt') return 'download'
+  if (extension !== undefined && SHEET_EXTENSIONS.has(extension)) return 'sheet'
+  if (extension !== undefined && OFFICE_EXTENSIONS.has(extension)) return 'office'
   return undefined
+}
+
+/** Convert one worksheet matrix into display rows, keeping large books responsive. */
+export function sheetTable(rows: readonly unknown[][], limits: { rows: number; columns: number } = { rows: 500, columns: 50 }): string[][] {
+  return rows.slice(0, limits.rows).map(row => (Array.isArray(row) ? row.slice(0, limits.columns) : []).map(cell => cell === null || cell === undefined ? '' : String(cell)))
+}
+
+function SheetsPreview({ src, path }: { src: string; path: string }) {
+  const [book, setBook] = useState<{ names: string[]; tables: Record<string, string[][]> }>()
+  const [active, setActive] = useState('')
+  const [error, setError] = useState<string>()
+  useEffect(() => {
+    const controller = new AbortController()
+    setBook(undefined); setError(undefined)
+    void (async () => {
+      try {
+        const response = await fetch(src, { signal: controller.signal })
+        if (!response.ok) throw new Error(`无法读取文件 (${response.status})`)
+        const buffer = await response.arrayBuffer()
+        const xlsx = await loadXlsx()
+        if (controller.signal.aborted) return
+        const workbook = xlsx.read(buffer, { type: 'array' })
+        const tables: Record<string, string[][]> = {}
+        for (const name of workbook.SheetNames) {
+          tables[name] = sheetTable(xlsx.utils.sheet_to_json<unknown[]>(workbook.Sheets[name]!, { header: 1, defval: '', blankrows: false, raw: false }))
+        }
+        setBook({ names: workbook.SheetNames, tables })
+        setActive(workbook.SheetNames[0] ?? '')
+      } catch (cause) {
+        if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause))
+      }
+    })()
+    return () => controller.abort()
+  }, [src])
+  if (error !== undefined) return <div className="dvw-document-error">无法预览表格：{error}</div>
+  const rows = book?.tables[active] ?? []
+  return <section className="dvw-sheet-preview" aria-label={`${path} 表格预览`}>
+    {(book?.names.length ?? 0) > 1 && <div className="dvw-sheet-tabs">{book!.names.map(name => <button key={name} data-active={name === active} onClick={() => setActive(name)}>{name}</button>)}</div>}
+    <div className="dvw-sheet-scroll">{book === undefined ? <div className="dvw-message">正在加载表格…</div> : rows.length === 0 ? <div className="dvw-message">此工作表为空</div> : <table className="dvw-sheet-table"><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, column) => <td key={column} title={cell}>{cell}</td>)}</tr>)}</tbody></table>}</div>
+  </section>
 }
 
 function DocxPreview({ src }: { src: string }) {
@@ -114,9 +178,32 @@ function PdfPreview({ src, path }: { src: string; path: string }) {
   </section>
 }
 
-/** Render an in-workbench preview for PDF and Word documents. */
+/** Session carried by the shared file URL, used for the converter status probe. */
+function sessionOfDocumentUrl(src: string): string | undefined {
+  try { return new URL(src, location.href).searchParams.get('sessionId') ?? undefined } catch { return undefined }
+}
+
+/** Word and PowerPoint open as a PDF converted on the host, matching DSH's own preview. */
+function OfficePreview({ src, path }: { src: string; path: string }) {
+  const [status, setStatus] = useState<{ available: boolean; hint?: string }>()
+  useEffect(() => {
+    const sessionId = sessionOfDocumentUrl(src)
+    if (sessionId === undefined) { setStatus({ available: false }); return }
+    let cancelled = false
+    void api<{ available: boolean; hint?: string }>('office.status', { sessionId }).then(value => { if (!cancelled) setStatus(value) }).catch(() => { if (!cancelled) setStatus({ available: false }) })
+    return () => { cancelled = true }
+  }, [src])
+  if (status === undefined) return <div className="dvw-message">正在准备 Office 预览…</div>
+  if (status.available) return <PdfPreview src={src.replace('/dsh-vscode/file?', '/dsh-vscode/office?')} path={path}/>
+  // Without LibreOffice, newer formats still render in the browser; legacy binaries fall back to a download.
+  const extension = path.split('.').at(-1)?.toLowerCase()
+  if (extension === 'docx') return <DocxPreview src={src}/>
+  return <div className="dvw-document-download"><strong>需要 LibreOffice 才能预览此格式</strong><span>{status.hint}</span><a href={src} target="_blank" rel="noreferrer">下载 {path}</a></div>
+}
+
 export function DocumentPreview({ kind, src, path }: { kind: DocumentPreviewKind; src: string; path: string }) {
   if (kind === 'pdf') return <PdfPreview src={src} path={path}/>
-  if (kind === 'docx') return <DocxPreview src={src}/>
+  if (kind === 'office') return <OfficePreview src={src} path={path}/>
+  if (kind === 'sheet') return <SheetsPreview src={src} path={path}/>
   return <div className="dvw-document-download"><strong>此格式无法在浏览器中可靠渲染</strong><a href={src} target="_blank" rel="noreferrer">打开 {path}</a></div>
 }

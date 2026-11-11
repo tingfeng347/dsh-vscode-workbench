@@ -5,6 +5,7 @@ import { basename, dirname, extname, isAbsolute, join, normalize, relative, reso
 import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import type { HostContext } from './context.ts'
+import { prioritizeCommitPatch, type CommitContext } from './commit-message.ts'
 import type { FileDocument, FileEntry, GitBranch, GitChange, GitCommit, GitCommitFile, GitDiff, GitStatus, SearchMatch, SearchRequest } from './types.ts'
 import { WorkbenchError } from './wire.ts'
 
@@ -318,6 +319,31 @@ export async function gitStatus(cwd: string): Promise<GitStatus> {
   return { repository, branch, ahead, behind, changes }
 }
 
+/** Collect the staged (or working-tree) changes and recent subjects used to draft a commit message. */
+export async function gitCommitContext(cwd: string, limit = 64_000): Promise<CommitContext> {
+  const status = await gitStatus(cwd)
+  if (status.changes.length === 0) throw new WorkbenchError('no-changes', '没有可提交的更改。', 409)
+  const files = status.changes.map(change => change.untracked ? `${change.path} (新增)` : change.path)
+  const recentResult = await run('git', ['log', '-n', '5', '--pretty=format:%s'], status.repository)
+  const recent = recentResult.code === 0 ? recentResult.stdout.split('\n').map(subject => subject.trim()).filter(Boolean) : []
+  const staged = await run('git', ['diff', '-U0', '--cached', '--no-ext-diff', '--no-color', '--'], status.repository)
+  if (staged.code !== 0) throw new WorkbenchError('git-failed', staged.stderr || staged.stdout, 409)
+  let patch = staged.stdout
+  if (patch.trim() === '') {
+    const tracked = await run('git', ['diff', '-U0', '--no-ext-diff', '--no-color', '--'], status.repository)
+    if (tracked.code !== 0) throw new WorkbenchError('git-failed', tracked.stderr || tracked.stdout, 409)
+    patch = tracked.stdout
+    const nullFile = process.platform === 'win32' ? 'NUL' : '/dev/null'
+    for (const change of status.changes.filter(item => item.untracked).slice(0, 20)) {
+      const diff = await run('git', ['diff', '-U0', '--no-index', '--no-color', '--', nullFile, change.path], status.repository)
+      if (diff.stdout.trim() !== '') patch += `\n${diff.stdout.slice(0, 4_000)}`
+      if (patch.length >= limit * 2) break
+    }
+  }
+  const bounded = prioritizeCommitPatch(patch, limit)
+  return { repository: status.repository, branch: status.branch, files, recent, patch: bounded.patch, truncated: bounded.truncated }
+}
+
 export async function gitAction(cwd: string, action: string, path?: string, value?: string): Promise<unknown> {
   const repository = await gitRoot(cwd)
   let args: string[]
@@ -341,6 +367,27 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
       return gitStatus(cwd)
     }
     case 'commit': args = ['commit', '-m', value ?? '']; break
+    case 'commit.amend': args = ['commit', '--amend', '-m', value ?? '']; break
+    case 'push': {
+      let pushed = await run('git', ['push'], repository)
+      if (pushed.code !== 0 && /no upstream branch|has no upstream/i.test(pushed.stderr)) {
+        const branch = (await gitStatus(cwd)).branch
+        pushed = await run('git', ['push', '--set-upstream', 'origin', branch], repository)
+      }
+      if (pushed.code !== 0) throw new WorkbenchError('git-failed', pushed.stderr || pushed.stdout, 409)
+      return gitStatus(cwd)
+    }
+    case 'sync': {
+      const pulled = await run('git', ['pull', '--rebase'], repository)
+      if (pulled.code !== 0) throw new WorkbenchError('git-failed', pulled.stderr || pulled.stdout, 409)
+      let pushed = await run('git', ['push'], repository)
+      if (pushed.code !== 0 && /no upstream branch|has no upstream/i.test(pushed.stderr)) {
+        const branch = (await gitStatus(cwd)).branch
+        pushed = await run('git', ['push', '--set-upstream', 'origin', branch], repository)
+      }
+      if (pushed.code !== 0) throw new WorkbenchError('git-failed', pushed.stderr || pushed.stdout, 409)
+      return gitStatus(cwd)
+    }
     case 'branch.create': args = ['switch', '-c', value ?? '']; break
     case 'branch.switch': args = ['switch', value ?? '']; break
     case 'branch.list': {

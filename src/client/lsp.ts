@@ -11,6 +11,9 @@ export interface LspServerStatus {
   installable: boolean
   installed: boolean
   hint?: string
+  command?: string
+  /** Manual servers report the language toolchain next to the server so the two are not confused. */
+  language?: { name: string; installed: boolean }
 }
 
 interface Pending { resolve(value: unknown): void; reject(error: unknown): void }

@@ -8,7 +8,9 @@ import { spawn } from 'node:child_process'
 import chokidar from 'chokidar'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { HostContext } from './context.ts'
-import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, searchWorkspace, uploadFile, workspacePreviewFile } from './host.ts'
+import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
+import { generateCommitMessage, normalizeCommitPreferences } from './commit-message.ts'
+import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitCommitContext, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, searchWorkspace, uploadFile, workspacePreviewFile } from './host.ts'
 import { installLsp, lspStatuses, resolveLsp, uninstallLsp, pipeLanguageServer } from './lsp.ts'
 import { officePdf, officeStatus } from './office.ts'
 import { installTerminal } from './terminal.ts'
@@ -44,6 +46,21 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     case 'search': return searchWorkspace(cwd, body as unknown as SearchRequest, signal)
     case 'git.status': return gitStatus(cwd)
     case 'git.action': return gitAction(cwd, stringField(body, 'action'), typeof body.path === 'string' ? body.path : undefined, typeof body.value === 'string' ? body.value : undefined)
+    case 'git.commitMessage': {
+      const session = ctx.sessions.get(sessionId)
+      const config = session?.requestHeader()?.config
+      if (config === undefined) throw new WorkbenchError('model-unavailable', '当前会话还没有模型配置，请先发送一条消息后再生成提交信息。', 409)
+      const llm: LlmRuntime | undefined = ctx.get('llm')
+      if (llm === undefined) throw new WorkbenchError('llm-unavailable', 'DSH 的模型服务当前不可用。', 503)
+      const context = await gitCommitContext(cwd)
+      const preferences = normalizeCommitPreferences(body.detail, body.language)
+      try {
+        return { message: await generateCommitMessage(llm, config, context, signal, preferences) }
+      } catch (error) {
+        if (error instanceof WorkbenchError) throw error
+        throw new WorkbenchError('llm-failed', error instanceof Error ? error.message : String(error), 502)
+      }
+    }
     default: throw new WorkbenchError('not-found', `unknown workbench API method ${method}`, 404)
   }
 }

@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { LSP_SERVERS, frameLsp, lspFrameParser, lspRoot } from '../src/lsp.ts'
+import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { delimiter, join } from 'node:path'
+import { LSP_SERVERS, findExecutable, frameLsp, lspFrameParser, lspRoot, lspSearchDirs, lspStatuses } from '../src/lsp.ts'
 
 describe('Language server catalog', () => {
   it('covers the common languages with one server each', () => {
@@ -17,8 +20,59 @@ describe('Language server catalog', () => {
     for (const id of ['go', 'rust', 'cpp', 'java', 'csharp', 'lua']) {
       const server = LSP_SERVERS.find(candidate => candidate.id === id)!
       expect(server.install.kind).toBe('system')
-      if (server.install.kind === 'system') expect(server.install.hint.length).toBeGreaterThan(0)
+      if (server.install.kind === 'system') {
+        expect(server.install.hint.length).toBeGreaterThan(0)
+        // The toolchain is tracked separately so the UI can say "Go 未安装" next to "gopls 未安装".
+        expect(server.language!.name.length).toBeGreaterThan(0)
+        expect(server.language!.commands.length).toBeGreaterThan(0)
+      }
     }
+  })
+})
+
+describe('Language server detection', () => {
+  it('searches PATH plus the usual per-user and Homebrew bin directories', () => {
+    const env = { PATH: ['/one', '/two'].join(delimiter) } as NodeJS.ProcessEnv
+    const dirs = lspSearchDirs(env, '/home/tester')
+    expect(dirs.slice(0, 2)).toEqual(['/one', '/two'])
+    for (const expected of [
+      '/home/tester/go/bin',
+      '/home/tester/.cargo/bin',
+      '/home/tester/.dotnet/tools',
+      '/home/tester/.local/bin',
+      '/opt/homebrew/bin',
+      '/usr/local/bin',
+    ]) expect(dirs).toContain(expected)
+    expect(new Set(dirs).size).toBe(dirs.length)
+  })
+
+  it('only reports executables it can actually run', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dvw-lsp-'))
+    try {
+      const executable = join(root, process.platform === 'win32' ? 'gopls.exe' : 'gopls')
+      await writeFile(executable, process.platform === 'win32' ? '' : '#!/bin/sh\n')
+      if (process.platform !== 'win32') await chmod(executable, 0o755)
+      expect(await findExecutable('gopls', [join(root, 'missing'), root])).toBe(executable)
+
+      const plain = join(root, 'not-executable')
+      await writeFile(plain, '')
+      if (process.platform !== 'win32') await chmod(plain, 0o644)
+      expect(await findExecutable('not-executable', [root])).toBeUndefined()
+    } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps the language toolchain and the language server as separate facts', async () => {
+    const statuses = await lspStatuses()
+    const go = statuses.find(status => status.id === 'go')!
+    expect(go.command).toBe('gopls')
+    expect(go.language).toEqual({ name: 'Go', installed: expect.any(Boolean) })
+    expect(typeof go.installed).toBe('boolean')
+    // Python's server is installed by the plugin, but the interpreter gate still comes first.
+    expect(statuses.find(status => status.id === 'python')!.language).toEqual({ name: 'Python', installed: expect.any(Boolean) })
+    // Data formats have no toolchain stage at all.
+    expect(statuses.find(status => status.id === 'yaml')!.language).toBeUndefined()
   })
 })
 

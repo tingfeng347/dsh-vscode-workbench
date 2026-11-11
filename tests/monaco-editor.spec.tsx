@@ -35,7 +35,7 @@ const monaco = {
         setModel(model: FakeModel | null) { if (editor.model) editor.model.attached = false; editor.model = model; if (model) model.attached = true; editor.scroll = 0 },
         saveViewState: () => ({ scroll: editor.scroll }), restoreViewState(state: { scroll: number }) { editor.scroll = state.scroll },
         setSelection(range: unknown) { editor.selection = range }, revealLineInCenter(line: number) { editor.scroll = line * 100 }, focus() {},
-        createDecorationsCollection: () => ({ clear() {} }), onDidChangeModelContent: () => ({ dispose() {} }), addCommand() {}, updateOptions() {},
+        createDecorationsCollection: () => ({ clear() {} }), onDidChangeModelContent: () => ({ dispose() {} }), addCommand() {}, addAction() { return { dispose() {} } }, updateOptions() {},
         dispose() { if (editor.model) editor.model.attached = false },
       }
       fake.editor = editor; return editor

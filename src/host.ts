@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
-import { dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
 import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, stat } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import type { HostContext } from './context.ts'
@@ -48,6 +48,51 @@ export async function workspacePath(cwd: string, raw: string, create = false): P
 function relativePath(root: string, absolute: string): string { return relative(root, absolute).split(sep).join('/') }
 function revision(content: Buffer, mtimeMs: number): string {
   return createHash('sha256').update(content).update(String(mtimeMs)).digest('hex')
+}
+
+const PROJECT_SOURCE = /\.(?:[cm]?[jt]sx?|d\.ts)$/i
+const PROJECT_CONFIG = new Set(['tsconfig.json', 'jsconfig.json', 'package.json'])
+const PROJECT_SKIP = new Set(['.git', 'node_modules', 'dist', 'build', 'out', 'coverage', '.next', '.nuxt', '.turbo', '.cache', 'vendor', 'third_party'])
+
+/** Add a folder picked in the OS chooser to DSH's workspace list, reusing an existing registration. */
+export async function openWorkspaceFromPicker(
+  picker: import('./context.ts').DirectoryPickerLike | undefined,
+  registry: import('./context.ts').WorkspaceRegistryLike | undefined,
+  signal: AbortSignal,
+): Promise<{ opened: boolean; workspace?: { id: string; path: string; title: string } }> {
+  if (picker === undefined) throw new WorkbenchError('picker-unavailable', '当前环境没有可用的文件夹选择器', 409)
+  const capability = picker.capability()
+  if (capability.kind !== 'native' || capability.pick === undefined) throw new WorkbenchError('picker-browse', '浏览器模式暂不支持从工作台选择文件夹，请使用 DSH 侧栏的「添加工作区」', 409)
+  const picked = await capability.pick(signal)
+  if (picked === null) return { opened: false }
+  if (registry === undefined) throw new WorkbenchError('workspace-unavailable', '工作区服务不可用', 503)
+  const workspace = await registry.create(picked)
+  return { opened: true, workspace: { id: workspace.id, path: workspace.path, title: workspace.title } }
+}
+
+/** TS/JS sources the editor's language service indexes, bounded so huge repos stay responsive. */
+export async function projectSources(cwd: string, limits: { files?: number; bytes?: number; fileBytes?: number } = {}): Promise<{ files: { path: string; content: string }[]; truncated: boolean }> {
+  const { files: maxFiles = 2000, bytes: maxBytes = 24 * 1024 * 1024, fileBytes = 512 * 1024 } = limits
+  const { root } = await workspacePath(cwd, '')
+  const files: { path: string; content: string }[] = []; let total = 0; let truncated = false
+  const queue = [root]
+  while (queue.length > 0) {
+    const directory = queue.shift()!
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
+    entries.sort((a, b) => a.name.localeCompare(b.name))
+    for (const entry of entries) {
+      const full = join(directory, entry.name)
+      if (entry.isDirectory()) { if (!PROJECT_SKIP.has(entry.name) && !entry.name.startsWith('.')) queue.push(full); continue }
+      if (!entry.isFile() || !(PROJECT_SOURCE.test(entry.name) || PROJECT_CONFIG.has(entry.name))) continue
+      const info = await stat(full).catch(() => undefined)
+      if (info === undefined || info.size > fileBytes) continue
+      if (files.length >= maxFiles || total + info.size > maxBytes) { truncated = true; return { files, truncated } }
+      const content = await readFile(full, 'utf8').catch(() => undefined)
+      if (content === undefined) continue
+      total += info.size; files.push({ path: relativePath(root, full), content })
+    }
+  }
+  return { files, truncated }
 }
 
 export async function listFiles(cwd: string, path: string): Promise<FileEntry[]> {
@@ -154,11 +199,14 @@ export async function deleteEntry(cwd: string, path: string): Promise<void> {
 }
 
 const IMAGE_TYPES:Record<string,string>={'.avif':'image/avif','.bmp':'image/bmp','.gif':'image/gif','.ico':'image/x-icon','.jpeg':'image/jpeg','.jpg':'image/jpeg','.png':'image/png','.svg':'image/svg+xml','.webp':'image/webp'}
-const PREVIEW_TYPES:Record<string,string>={...IMAGE_TYPES,'.pdf':'application/pdf','.doc':'application/msword','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.odt':'application/vnd.oasis.opendocument.text'}
+const PREVIEW_TYPES:Record<string,string>={...IMAGE_TYPES,'.pdf':'application/pdf','.doc':'application/msword','.docx':'application/vnd.openxmlformats-officedocument.wordprocessingml.document','.odt':'application/vnd.oasis.opendocument.text','.xls':'application/vnd.ms-excel','.xlsx':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet','.xlsm':'application/vnd.ms-excel.sheet.macroEnabled.12','.ods':'application/vnd.oasis.opendocument.spreadsheet','.pptx':'application/vnd.openxmlformats-officedocument.presentationml.presentation','.pptm':'application/vnd.ms-powerpoint.presentation.macroEnabled.12'}
 /** Resolve an image inside the workspace for protected browser preview. */
 export async function workspaceImage(cwd:string,path:string):Promise<{path:string;type:string}>{const resolved=await workspacePath(cwd,path);const type=IMAGE_TYPES[extname(resolved.absolute).toLowerCase()];if(type===undefined)throw new WorkbenchError('unsupported-media','file is not a supported image',415);return {path:resolved.absolute,type}}
 /** Resolve a supported preview file inside the workspace. */
 export async function workspacePreviewFile(cwd:string,path:string):Promise<{path:string;type:string}>{const resolved=await workspacePath(cwd,path);const type=PREVIEW_TYPES[extname(resolved.absolute).toLowerCase()];if(type===undefined)throw new WorkbenchError('unsupported-media','file is not a supported preview format',415);return {path:resolved.absolute,type}}
+
+/** Resolve a regular workspace file for drag-out downloads. */
+export async function workspaceDownloadFile(cwd:string,path:string):Promise<{path:string;name:string;size:number}>{const resolved=await workspacePath(cwd,path);const info=await stat(resolved.absolute);if(!info.isFile())throw new WorkbenchError('not-file','only files can be downloaded',400);return {path:resolved.absolute,name:basename(resolved.absolute),size:info.size}}
 
 /** Resolve the PDF.js worker shipped with this plugin's runtime dependency. */
 export function pdfWorkerAsset(): { path: string; type: string } {
@@ -374,6 +422,12 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
 export function codiconAsset(): { path: string; type: string } {
   const packageRoot = dirname(require.resolve('@vscode/codicons/package.json'))
   return { path: resolve(packageRoot, 'dist', 'codicon.ttf'), type: 'font/ttf' }
+}
+
+/** Browser build of SheetJS served as an asset so the client bundle stays free of Node builtins. */
+export function xlsxAsset(): { path: string; type: string } {
+  const packageRoot = dirname(require.resolve('xlsx/package.json'))
+  return { path: resolve(packageRoot, 'dist', 'xlsx.full.min.js'), type: 'text/javascript; charset=utf-8' }
 }
 
 export function monacoAsset(raw: string): { path: string; type: string } {

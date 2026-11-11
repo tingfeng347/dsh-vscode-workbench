@@ -77,7 +77,8 @@
     "node-pty": "^1.1.0",
     "pdfjs-dist": "4.10.38",
     "vscode-icons-js": "^11.6.1",
-    "ws": "^8.18.0"
+    "ws": "^8.18.0",
+    "xlsx": "0.18.5"
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "^4.0.5",

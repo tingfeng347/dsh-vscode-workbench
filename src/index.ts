@@ -1,20 +1,28 @@
 /** DSH host plugin for the VS Code workbench. */
-import { readFile } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { readFile, stat } from 'node:fs/promises'
 import type { IncomingMessage } from 'node:http'
 import { isAbsolute, relative, sep } from 'node:path'
 import type { Duplex } from 'node:stream'
+import { spawn } from 'node:child_process'
 import chokidar from 'chokidar'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { HostContext } from './context.ts'
-import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitStatus, listFiles, monacoAsset, pdfWorkerAsset, readDocument, renameEntry, saveDocument, searchWorkspace, uploadFile, workspacePreviewFile } from './host.ts'
+import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, searchWorkspace, uploadFile, workspacePreviewFile } from './host.ts'
+import { installLsp, lspStatuses, resolveLsp, uninstallLsp, pipeLanguageServer } from './lsp.ts'
+import { officePdf, officeStatus } from './office.ts'
 import { installTerminal } from './terminal.ts'
 import type { SearchRequest } from './types.ts'
-import { parseWatchIgnores, watchIgnore } from './watch-ignore.ts'
+import { watchIgnore, workspaceWatchIgnores } from './watch-ignore.ts'
 import { readBinaryBody, readBody, send, sendError, stringField, authorize, WorkbenchError } from './wire.ts'
 
 export { WorkbenchError } from './wire.ts'
 export * from './types.ts'
 export const name = 'dsh-vscode-workbench'
+
+// DSH services used by the workbench when present; resolved through optional injection, never a hard dependency.
+let dshDirectoryPicker: import('./context.ts').DirectoryPickerLike | undefined
+let dshWorkspaceRegistry: import('./context.ts').WorkspaceRegistryLike | undefined
 export const inject = ['webServer', 'sessions', 'connection', 'workingDirectory']
 
 async function dispatch(ctx: HostContext, method: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
@@ -27,6 +35,12 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     case 'fs.create': return createEntry(cwd, stringField(body, 'path'), body.kind === 'directory' ? 'directory' : 'file').then(() => ({ ok: true }))
     case 'fs.rename': return renameEntry(cwd, stringField(body, 'path'), stringField(body, 'nextPath')).then(() => ({ ok: true }))
     case 'fs.delete': return deleteEntry(cwd, stringField(body, 'path')).then(() => ({ ok: true }))
+    case 'project.sources': return projectSources(cwd)
+    case 'office.status': return officeStatus()
+    case 'workspace.open': return openWorkspaceFromPicker(dshDirectoryPicker, dshWorkspaceRegistry, AbortSignal.timeout(10 * 60 * 1000))
+    case 'lsp.status': return lspStatuses()
+    case 'lsp.install': await installLsp(stringField(body, 'id')); return lspStatuses()
+    case 'lsp.uninstall': await uninstallLsp(stringField(body, 'id')); return lspStatuses()
     case 'search': return searchWorkspace(cwd, body as unknown as SearchRequest, signal)
     case 'git.status': return gitStatus(cwd)
     case 'git.action': return gitAction(cwd, stringField(body, 'action'), typeof body.path === 'string' ? body.path : undefined, typeof body.value === 'string' ? body.value : undefined)
@@ -35,6 +49,17 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
 }
 
 export function apply(ctx: HostContext): void {
+  ctx.effect(() => {
+    if (typeof ctx.inject !== 'function') return
+    // Optional injection: the callback runs once both services are active, and never if a profile omits them.
+    const fiber = ctx.inject(['directoryPicker', 'workspaceRegistry'], (child) => {
+      const services = child as unknown as { directoryPicker: import('./context.ts').DirectoryPickerLike; workspaceRegistry: import('./context.ts').WorkspaceRegistryLike }
+      dshDirectoryPicker = services.directoryPicker
+      dshWorkspaceRegistry = services.workspaceRegistry
+      return () => { dshDirectoryPicker = undefined; dshWorkspaceRegistry = undefined }
+    })
+    return () => { void fiber.dispose?.() }
+  }, 'dsh-vscode-workbench: optional DSH services')
   installTerminal(ctx)
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact', path: '/dsh-vscode/codicons/codicon.ttf', handler: async (req, res) => {
@@ -46,6 +71,17 @@ export function apply(ctx: HostContext): void {
       } catch (error) { sendError(res, error) }
     },
   }), 'dsh-vscode-workbench: Codicon font')
+
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact', path: '/dsh-vscode/xlsx.js', handler: async (req, res) => {
+      if (!authorize(req, res, ctx.connection)) return
+      try {
+        const asset = xlsxAsset()
+        res.writeHead(200, { 'content-type': asset.type, 'cache-control': 'public, max-age=31536000, immutable' })
+        res.end(await readFile(asset.path))
+      } catch (error) { sendError(res, error) }
+    },
+  }), 'dsh-vscode-workbench: SheetJS asset')
 
   ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/dsh-vscode/file-icons', handler: async (req, res) => {
@@ -102,6 +138,26 @@ export function apply(ctx: HostContext): void {
   }), 'dsh-vscode-workbench: file preview')
 
   ctx.effect(() => ctx.webServer.register({
+    kind:'exact',path:'/dsh-vscode/download',handler:async(req,res)=>{if(!authorize(req,res,ctx.connection))return;try{const url=new URL(req.url??'/','http://dsh.local');const sessionId=url.searchParams.get('sessionId');const path=url.searchParams.get('path');if(sessionId===null||path===null)throw new WorkbenchError('bad-request','sessionId and path are required');const file=await workspaceDownloadFile(cwdFor(ctx,sessionId),path);res.writeHead(200,{'content-type':'application/octet-stream','content-length':file.size,'content-disposition':`attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`,'x-content-type-options':'nosniff','cache-control':'no-store'});createReadStream(file.path).on('error',error=>res.destroy(error)).pipe(res)}catch(error){sendError(res,error)}}
+  }), 'dsh-vscode-workbench: file download')
+
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact', path: '/dsh-vscode/office', handler: async (req, res) => {
+      if (!authorize(req, res, ctx.connection)) return
+      try {
+        const url = new URL(req.url ?? '/', 'http://dsh.local')
+        const sessionId = url.searchParams.get('sessionId'); const path = url.searchParams.get('path')
+        if (sessionId === null || path === null) throw new WorkbenchError('bad-request', 'sessionId and path are required')
+        const pdf = await officePdf(cwdFor(ctx, sessionId), path)
+        const info = await stat(pdf.path)
+        res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': info.size, 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' })
+        createReadStream(pdf.path).on('error', error => res.destroy(error)).pipe(res)
+      } catch (error) { sendError(res, error) }
+    },
+  }), 'dsh-vscode-workbench: office preview')
+  
+
+  ctx.effect(() => ctx.webServer.register({
     kind: 'prefix', path: '/dsh-vscode/monaco', handler: async (req, res) => {
       if (!authorize(req, res, ctx.connection)) return
       try {
@@ -124,23 +180,59 @@ export function apply(ctx: HostContext): void {
         let workspace: string
         try { workspace = cwdFor(ctx, sessionId) }
         catch { ws.close(1008, 'session workspace unavailable'); return }
-        const watcher = chokidar.watch(workspace, { ignoreInitial: true, ignored: watchIgnore(workspace, parseWatchIgnores(search.get('ignore'))), awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 25 } })
-        watcher.on('error', error => {
-          console.warn('[dsh-vscode-workbench] file watcher stopped:', error)
-          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'files.watch-error', message: String(error) }))
-          void watcher.close()
+        let watcher: ReturnType<typeof chokidar.watch> | undefined; let paths = new Set<string>(); let timer: ReturnType<typeof setTimeout> | undefined
+        // Exclusions come from the workspace's .gitignore plus the built-in dependency/build trees.
+        void workspaceWatchIgnores(workspace).then(extra => {
+          const instance = watcher = chokidar.watch(workspace, { ignoreInitial: true, ignored: watchIgnore(workspace, extra), awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 25 } })
+          instance.on('error', error => {
+            console.warn('[dsh-vscode-workbench] file watcher stopped:', error)
+            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'files.watch-error', message: String(error) }))
+            void instance.close()
+          })
+          instance.on('all', (_event, path) => {
+            const changed = isAbsolute(path) ? relative(workspace, path) : path
+            paths.add(changed.split(sep).join('/')); clearTimeout(timer); timer = setTimeout(() => {
+              if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'files.changed', paths: [...paths] }))
+              paths = new Set()
+            }, 150)
+          })
         })
-        let paths = new Set<string>(); let timer: ReturnType<typeof setTimeout> | undefined
-        watcher.on('all', (_event, path) => {
-          const changed = isAbsolute(path) ? relative(workspace, path) : path
-          paths.add(changed.split(sep).join('/')); clearTimeout(timer); timer = setTimeout(() => {
-            if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'files.changed', paths: [...paths] }))
-            paths = new Set()
-          }, 150)
-        })
-        ws.on('close', () => { clearTimeout(timer); void watcher.close() })
+        ws.on('close', () => { clearTimeout(timer); void watcher?.close() })
       })
     },
   }), 'dsh-vscode-workbench: file watcher')
+
+  const lspWss = new WebSocketServer({ noServer: true })
+  ctx.effect(() => ctx.webServer.registerUpgrade({
+    path: '/dsh-vscode/ws/lsp', handler(req, socket, head) {
+      if (ctx.connection.requestRejection(req) !== undefined) { socket.destroy(); return }
+      lspWss.handleUpgrade(req as IncomingMessage, socket as Duplex, head, (ws) => {
+        const search = new URL(req.url ?? '/', 'http://dsh.local').searchParams
+        const sessionId = search.get('sessionId'); const serverId = search.get('server')
+        if (sessionId === null || serverId === null) { ws.close(1008, 'sessionId and server required'); return }
+        let workspace: string
+        try { workspace = cwdFor(ctx, sessionId) }
+        catch { ws.close(1008, 'session workspace unavailable'); return }
+        void (async () => {
+          try {
+            const server = await resolveLsp(serverId)
+            const child = spawn(server.command, server.args, { cwd: workspace, stdio: ['pipe', 'pipe', 'pipe'], shell: server.shell, windowsHide: true })
+            const bridge = pipeLanguageServer(child, {
+              onMessage: message => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)) },
+              onStderr: text => console.warn('[dsh-vscode-workbench] lsp:', text.trim().slice(0, 500)),
+              onExit: code => { if (ws.readyState === WebSocket.OPEN) ws.close(1000, `server exited ${code ?? ''}`.trim()) },
+            })
+            ws.on('message', data => bridge.write(String(data)))
+            ws.on('close', () => bridge.kill())
+            ws.on('error', () => bridge.kill())
+            child.on('error', error => { if (ws.readyState === WebSocket.OPEN) ws.close(1011, String(error).slice(0, 120)) })
+          } catch (error) {
+            ws.close(1008, (error instanceof Error ? error.message : 'language server unavailable').slice(0, 120))
+          }
+        })()
+      })
+    },
+  }), 'dsh-vscode-workbench: language server bridge')
+  ctx.effect(() => () => { lspWss.close() }, 'dsh-vscode-workbench: language server teardown')
   ctx.effect(() => () => { wss.close() }, 'dsh-vscode-workbench: watcher teardown')
 }

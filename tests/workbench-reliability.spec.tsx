@@ -131,7 +131,7 @@ it('closes tabs from the VS Code tab context menu', async () => {
   expect(items.map(item => item.textContent)).toEqual(['关闭Ctrl+F4', '关闭其他', '关闭右侧标签页', '关闭已保存Ctrl+K U', '全部关闭Ctrl+K W'])
   await act(async () => items[4]!.click())
   expect(document.querySelector('.dvw-tab-menu')).toBeNull()
-  expect(document.body.textContent).not.toContain('二进制文件不能在文本编辑器中打开')
+  expect(document.body.textContent).not.toContain('二进制文件无法在文本编辑器或差异视图中打开')
 })
 
 it('does not reopen a hidden workbench when restoring its saved view', async () => {
@@ -144,11 +144,11 @@ it('does not reopen a hidden workbench when restoring its saved view', async () 
 
 it('shows one binary file message instead of an overlapping editor error', async () => {
   await setup(true)
-  expect(document.body.textContent).toContain('二进制文件不能在文本编辑器中打开')
+  expect(document.body.textContent).toContain('二进制文件无法在文本编辑器或差异视图中打开')
   expect(document.querySelector('.dvw-error')).toBeNull()
-  expect(document.querySelector('.dvw-message')?.textContent).toBe('二进制文件不能在文本编辑器中打开')
+  expect(document.querySelector('.dvw-message')?.textContent).toBe('二进制文件无法在文本编辑器或差异视图中打开')
   const closeTab = document.querySelector<HTMLElement>('.dvw-tab-close')
   expect(closeTab).not.toBeNull()
   await act(async () => closeTab!.click())
-  expect(document.body.textContent).not.toContain('二进制文件不能在文本编辑器中打开')
+  expect(document.body.textContent).not.toContain('二进制文件无法在文本编辑器或差异视图中打开')
 })

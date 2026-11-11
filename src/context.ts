@@ -9,6 +9,14 @@ export interface WorkbenchWebServer {
 }
 export interface WorkbenchSessions { get(id: string): Session | undefined }
 export interface WorkbenchConnection { requestRejection(req: IncomingMessage): 401 | 403 | undefined }
+/** Minimal shape of DSH's host directory chooser; only the native capability is usable here. */
+export interface DirectoryPickerLike {
+  capability(): { kind: string; pick?(signal: AbortSignal): Promise<string | null> }
+}
+/** Minimal shape of DSH's durable workspace registry. */
+export interface WorkspaceRegistryLike {
+  create(path: string, title?: string): Promise<{ id: string; path: string; title: string }>
+}
 export type HostContext = CordisContext & {
   webServer: WorkbenchWebServer
   sessions: WorkbenchSessions

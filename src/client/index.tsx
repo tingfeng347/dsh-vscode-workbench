@@ -14,15 +14,17 @@ import { Workbench } from './Workbench.tsx'
 import { installStyles } from './styles.ts'
 import { handleTerminalShortcut } from './shortcuts.ts'
 import { mainViewSession } from './session.ts'
+import { createDshNavigation } from './dshNavigation.ts'
+import type { DshNavigation } from './dshNavigation.ts'
 
 export type { BottomPanelContribution, BottomPanelProps, VscodeWorkbench, WorkbenchCommand, WorkbenchSnapshot, WorkbenchView } from './service.ts'
 
 declare module '@deepseek-ai/cordis' { interface Context { vscodeWorkbench: VscodeWorkbench } }
 
-const Overlay = ({ service, useSessions }: PropsRuntime<'shell.overlay'> & { service: VscodeWorkbench }) => {
+const Overlay = ({ service, useSessions, navigation }: PropsRuntime<'shell.overlay'> & { service: VscodeWorkbench; navigation: DshNavigation }) => {
   const session = useSessions(mainViewSession)
   const cwd = session?.projectionValues?.workingDirectory ?? session?.cwd
-  return <Workbench key={`${session?.id ?? 'no-session'}:${cwd ?? ''}`} service={service} sessionId={session?.id} cwd={cwd}/>
+  return <Workbench key={cwd ?? 'no-workspace'} service={service} sessionId={session?.id} cwd={cwd} navigation={navigation}/>
 }
 
 const WORKBENCH_PANEL_ID = 'vscode-workbench' as MainPanelId
@@ -40,6 +42,8 @@ function WorkbenchPanel({ service, restoreConversation }: { service: VscodeWorkb
 export const inject = ['slots', 'layout']
 export function apply(ctx: ClientContext): void {
   const service = new WorkbenchController()
+  // Optional access to DSH's own workspace/session stores, used by the centered workspace switcher.
+  const navigation = createDshNavigation((name) => (ctx as unknown as { get?: (name: string) => unknown }).get?.(name))
   ctx.effect(() => installStyles(), 'dsh-vscode-workbench: styles')
   ctx.effect(() => { const dispose = ctx.reflect.provide('vscodeWorkbench', service); return () => { void dispose() } }, 'dsh-vscode-workbench: service')
   ctx.effect(() => service.registerBottomPanel({ id: 'terminal', title: '终端', component: TerminalPanel }), 'dsh-vscode-workbench: terminal panel')
@@ -50,7 +54,7 @@ export function apply(ctx: ClientContext): void {
     const disposeIcon = ctx.slots.register({ name: 'sidebar.panellist', id: WORKBENCH_PANEL_ID, order: 60, label: () => 'VS Code 工作台' }, WorkbenchPanelIcon)
     return () => { disposeIcon(); disposeMain() }
   }))
-  ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'dsh-vscode-workbench-overlay', inject: () => ({ service }) }, Overlay))
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'dsh-vscode-workbench-overlay', inject: () => ({ service, navigation }) }, Overlay))
   ctx.effect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (handleTerminalShortcut(event, service)) return

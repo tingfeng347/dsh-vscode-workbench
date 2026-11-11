@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GitCommit } from '../src/types.ts'
-import { createdEntryPath, directoryAffected, graphRows, graphTrackPath, renamedPath, restoreTabPaths, tabLabel, tabScrollLeft, uploadDestination } from '../src/client/Workbench.tsx'
+import { canMoveTo, createdEntryPath, downloadUrlData, movedPath, parentPath, directoryAffected, graphParentPath, graphRows, graphTrackPath, renamedPath, restoreTabPaths, tabLabel, tabScrollLeft, uploadDestination } from '../src/client/Workbench.tsx'
 import { markdownHeadings, markdownWorkspacePath } from '../src/client/MarkdownPreview.tsx'
 
 function commit(hash: string, parents: string[]): GitCommit {
@@ -32,9 +32,13 @@ describe('Git graph lanes', () => {
     expect(rows[2]!.before.find(track=>track.hash==='b')?.color).toBe(branch.color)
   })
 
-  it('uses aligned vertical segments and fixed-radius lane turns', () => {
-    expect(graphTrackPath(8,8,0,38,19)).toBe('M 8 0 V 38')
-    expect(graphTrackPath(8,22,0,38,19)).toBe('M 8 0 V 14 Q 8 19 13 19 H 17 Q 22 19 22 24 V 38')
+  it('draws VS Code style lane shifts and parent arcs', () => {
+    expect(graphTrackPath(11,11,0,38,19)).toBe('M 11 0 V 38')
+    expect(graphTrackPath(22,11,0,38,19)).toBe('M 22 0 V 14 A 5 5 0 0 1 17 19 H 16 A 5 5 0 0 0 11 24 V 38')
+    expect(graphTrackPath(11,22,0,38,19)).toBe('M 11 0 V 14 A 5 5 0 0 0 16 19 H 17 A 5 5 0 0 1 22 24 V 38')
+    expect(graphParentPath(11,11,19,38)).toBe('M 11 19 V 38')
+    expect(graphParentPath(11,22,19,38)).toBe('M 11 19 H 11 A 11 11 0 0 1 22 30 V 38')
+    expect(graphParentPath(33,11,19,38)).toBe('M 33 19 H 22 A 11 11 0 0 0 11 30 V 38')
   })
 })
 
@@ -54,6 +58,23 @@ describe('Editor tab scrolling',()=>{
 })
 
 describe('Explorer upload destination',()=>{it('uses the selected directory and falls back to the workspace root',()=>{expect(uploadDestination('docs/assets')).toBe('docs/assets');expect(uploadDestination()).toBe('')})})
+
+describe('Explorer drag and drop',()=>{
+  it('moves entries into folders but never into themselves or their current folder',()=>{
+    expect(parentPath('src/client/App.tsx')).toBe('src/client')
+    expect(movedPath('src/client/App.tsx','tests')).toBe('tests/App.tsx')
+    expect(movedPath('docs/a.md','')).toBe('a.md')
+    expect(canMoveTo('src/client/App.tsx','tests')).toBe(true)
+    expect(canMoveTo('docs/a.md','')).toBe(true)
+    expect(canMoveTo('src/client/App.tsx','src/client')).toBe(false)
+    expect(canMoveTo('src','src')).toBe(false)
+    expect(canMoveTo('src','src/client')).toBe(false)
+    expect(canMoveTo('src','srcx')).toBe(true)
+  })
+  it('offers files to the desktop through a Chromium DownloadURL',()=>{
+    expect(downloadUrlData('s 1','docs/报告.pdf','http://127.0.0.1:5173')).toBe('application/octet-stream:报告.pdf:http://127.0.0.1:5173/dsh-vscode/download?sessionId=s+1&path=docs%2F%E6%8A%A5%E5%91%8A.pdf')
+  })
+})
 
 describe('Explorer inline creation',()=>{it('creates entries in the selected directory or workspace root',()=>{expect(createdEntryPath('docs/assets','logo.svg')).toBe('docs/assets/logo.svg');expect(createdEntryPath('','README.md')).toBe('README.md')})})
 

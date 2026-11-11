@@ -1,11 +1,19 @@
 import { useEffect, useRef, useState } from 'react'
 import { searchHighlightRange } from './searchHighlight.ts'
+import type { EditorSelection } from './dshComposer.ts'
+import { isIndexedModel } from './typescriptProject.ts'
 
 type Monaco = typeof import('monaco-editor')
 declare global { interface Window { require?: { (ids: string[], done: () => void): void; config(value: unknown): void }; monaco?: Monaco } }
 let loading: Promise<Monaco> | undefined
 /** Monaco chrome used by both editors so only the narrow native scrollbar remains. */
 export const WORKBENCH_EDITOR_CHROME = {
+  // VS Code navigation: Ctrl+hover underlines definitions, multiple results open Peek, a single one jumps.
+  definitionLinkOpensInPeek: false,
+  gotoLocation: { multipleDefinitions: 'gotoAndPeek', multipleReferences: 'peek', multipleImplementations: 'peek', multipleTypeDefinitions: 'gotoAndPeek', multipleDeclarations: 'peek', alternativeDefinitionCommand: 'editor.action.goToReferences' },
+  parameterHints: { enabled: true, cycle: true },
+  quickSuggestions: { other: true, comments: false, strings: false },
+  suggestOnTriggerCharacters: true,
   minimap: { enabled: false },
   renderOverviewRuler: false,
   overviewRulerLanes: 0,
@@ -67,12 +75,22 @@ function defineWorkbenchThemes(monaco: Monaco): void {
   monaco.editor.defineTheme(DARK_THEME, { base: 'vs-dark', inherit: true, rules: DARK_RULES, colors: DARK_COLORS })
 }
 
+/**
+ * Bootstrap source for Monaco's AMD web workers. Workers resolve module paths against their own
+ * blob URL, so they need an absolute `baseUrl`; without it the TypeScript language worker fails to load.
+ */
+export function monacoWorkerBootstrap(base: string): string {
+  return `self.MonacoEnvironment={baseUrl:${JSON.stringify(base)}};importScripts(${JSON.stringify(`${base}vs/base/worker/workerMain.js`)});`
+}
+
 export function loadMonaco(): Promise<Monaco> {
   loading ??= new Promise((resolve, reject) => {
     const start = () => {
       const loader = window.require
       if (loader === undefined) return reject(new Error('Monaco AMD loader unavailable'))
-      loader.config({ paths: { vs: '/dsh-vscode/monaco/vs' }, 'vs/nls': { availableLanguages: { '*': 'zh-cn' } } })
+      const base = new URL('/dsh-vscode/monaco/', location.href).href
+      window.MonacoEnvironment = { getWorkerUrl: () => URL.createObjectURL(new Blob([monacoWorkerBootstrap(base)], { type: 'text/javascript' })) }
+      loader.config({ paths: { vs: `${base}vs` }, 'vs/nls': { availableLanguages: { '*': 'zh-cn' } } })
       loader(['vs/nls.messages.zh-cn'], () => {
         loader(['vs/editor/editor.main'], () => {
           if (window.monaco === undefined) return reject(new Error('Monaco failed to initialize'))
@@ -120,11 +138,21 @@ export function retainEditorModels(uris: string[]): void {
   for (const model of monaco.editor.getModels()) {
     const key = model.uri.toString()
     if (model.uri.scheme !== 'file' || keep.has(key) || model.isAttachedToEditor()) continue
+    // Closing a tab returns its file to the language-service index instead of dropping it.
+    if (isIndexedModel(key)) { viewStates.delete(key); revealedHits.delete(key); continue }
     viewStates.delete(key); revealedHits.delete(key); model.dispose()
   }
 }
 
-export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' | 'light'; line?: number; column?: number; fontSize?: number; highlight?: string; onChange(value: string): void; onSave(): void }) {
+/** The primary selection as text plus inclusive lines; a selection ending at column 1 does not claim that line. */
+function editorSelection(instance: import('monaco-editor').editor.IStandaloneCodeEditor): EditorSelection | undefined {
+  const model = instance.getModel(); const range = instance.getSelection()
+  if (model === null || range === null || range.isEmpty()) return undefined
+  const endLine = range.endColumn === 1 && range.endLineNumber > range.startLineNumber ? range.endLineNumber - 1 : range.endLineNumber
+  return { text: model.getValueInRange(range), startLine: range.startLineNumber, endLine }
+}
+
+export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' | 'light'; line?: number; column?: number; fontSize?: number; highlight?: string; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
   const root = useRef<HTMLDivElement>(null)
   const editor = useRef<import('monaco-editor').editor.IStandaloneCodeEditor>()
   const decorations = useRef<import('monaco-editor').editor.IEditorDecorationsCollection>()
@@ -176,6 +204,7 @@ export function MonacoEditor(props: { uri: string; value: string; theme: 'dark' 
       editor.current = instance
       instance.onDidChangeModelContent(() => latest.current.onChange(instance.getValue()))
       instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => latest.current.onSave())
+      instance.addAction({ id: 'dvw.addToDsh', label: '添加到 DSH 对话', contextMenuGroupId: 'navigation', contextMenuOrder: 0, keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyK], run: () => latest.current.onAddToDsh?.(editorSelection(instance)) })
       attach(monaco, instance)
     }).catch(error => setError(error instanceof Error ? error.message : String(error)))
     return () => {

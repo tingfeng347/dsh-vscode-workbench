@@ -12,7 +12,7 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('--dvw-side:#191a1b')
     expect(styles).toContain('--dvw-accent:#307e9f')
     expect(styles).toContain('.dvw-side{grid-column:2;grid-row:1/3;min-width:0;width:100%;background:var(--dvw-side)')
-    expect(styles).toContain('.dvw-status{grid-column:1/4;grid-row:3;background:var(--dvw-base);color:var(--dvw-text);border-top:1px solid var(--dvw-border)')
+    expect(styles).toContain('.dvw-status{grid-column:1/4;grid-row:3;background:var(--dvw-base);color:var(--dvw-text);display:flex;align-items:center;padding:6px 8px 0;')
     expect(read('src/client/Workbench.tsx')).toContain("body.toggleAttribute('data-ds-dark-theme',theme==='dark')")
     expect(read('src/client/Workbench.tsx')).toContain('data-dvw-theme={colorScheme}')
     expect(read('src/client/Workbench.tsx')).toContain('followDsh={false}')
@@ -30,7 +30,7 @@ describe('workbench dark theme', () => {
 
   it('keeps the DSH chat toggle in the activity bar', () => {
     const workbench = read('src/client/Workbench.tsx')
-    expect(workbench).toContain("title={chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)'}")
+    expect(workbench).toContain("label:chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)'")
     expect(workbench).not.toContain('dvw-chat-toggle')
   })
 
@@ -67,6 +67,26 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('.dvw-branch-menu{')
   })
 
+  it('keeps the explorer loaded when switching sessions in one workspace', () => {
+    expect(read('src/client/index.tsx')).toContain("key={cwd ?? 'no-workspace'}")
+    expect(read('src/client/Workbench.tsx')).toContain('loadedWorkspaceCwd.current === cwd')
+  })
+
+  it('offers a centered workspace switcher below the DSH conversation button', () => {
+    const workbench = read('src/client/Workbench.tsx')
+    expect(workbench).toContain('打开工作区 / 切换会话')
+    expect(workbench).toContain('<WorkspaceSwitcher choices={switcherChoices}')
+    expect(workbench).toContain("api<{opened:boolean;workspace?:{id:string}}>('workspace.open'")
+    expect(read('src/client/index.tsx')).toContain('createDshNavigation(')
+    expect(read('src/index.ts')).toContain("ctx.inject(['directoryPicker', 'workspaceRegistry']")
+  })
+
+  it('shows the explorer file icons in the Git change list', () => {
+    const workbench = read('src/client/Workbench.tsx')
+    expect(workbench).toContain("<FileIcon name={change.path.split('/').at(-1) ?? change.path}/>")
+    expect(workbench).not.toContain("change.untracked?'new-file':'diff'")
+  })
+
   it('opens search results at the matched line with a highlight', () => {
     const workbench = read('src/client/Workbench.tsx')
     expect(workbench).toContain('props.onOpen(path,row.line,row.column,row.match||query)')
@@ -90,9 +110,9 @@ describe('workbench dark theme', () => {
 
   it('uses VS Code light surfaces and separators', () => {
     const styles = read('src/client/styles.ts')
-    expect(styles).toContain('--dvw-base:#f8f8f8')
-    expect(styles).toContain('--dvw-side:#f8f8f8')
-    expect(styles).toContain('--dvw-gutter:#ececec')
+    expect(styles).toContain('--dvw-base:#f9fafb')
+    expect(styles).toContain('--dvw-side:#f9fafb')
+    expect(styles).toContain('--dvw-gutter:#f9fafb')
     expect(styles).toContain('--dvw-border:#e5e5e5')
     expect(styles).toContain('border-left:1px solid var(--dvw-border);border-top:1px solid var(--dvw-border);border-right:1px solid var(--dvw-border);border-bottom:1px solid var(--dvw-border);border-radius:8px;margin-left:4px;overflow:hidden}')
     expect(styles).not.toContain('.dvw-overlay[data-dvw-bottom-panel] .dvw-main')
@@ -101,12 +121,49 @@ describe('workbench dark theme', () => {
     expect(read('src/client/Workbench.tsx')).toContain('data-dvw-bottom-panel={snapshot.bottomPanel||undefined}')
     expect(styles).toContain('.dvw-bottom{grid-column:3;grid-row:2;height:260px;min-height:120px;border-top:1px solid var(--dvw-border);border-left:1px solid var(--dvw-border);border-right:1px solid var(--dvw-border);border-bottom:1px solid var(--dvw-border);border-radius:8px;margin-top:4px;margin-left:4px')
     expect(styles).toContain('.dvw-tabs{height:35px;background:linear-gradient(to top,var(--dvw-border) 0 1px,var(--dvw-base) 1px 100%)')
-    expect(styles).toContain('border-top:1px solid var(--dvw-border);border-bottom:1px solid var(--dvw-border);border-right:1px solid var(--dvw-border);border-top-right-radius:8px;border-bottom-right-radius:8px;margin-right:4px')
-    expect(styles).toContain('[data-dvw-conversation-panel]{position:fixed!important;top:var(--dvw-titlebar-height)!important;right:4px!important')
+    expect(styles).toContain('border-top:1px solid var(--dvw-border);border-bottom:1px solid var(--dvw-border);border-right:1px solid var(--dvw-border);border-top-right-radius:8px;border-bottom-right-radius:8px;overflow:hidden')
+    expect(styles).toContain('padding-top:calc(var(--dvw-titlebar-height) + 6px)')
+    expect(styles).toContain('html[data-windows-titlebar] .dvw-overlay{top:var(--dvw-titlebar-height);padding-top:6px}')
+    expect(styles).toContain('.dvw-overlay:not([data-dvw-primary-side=true]) .dvw-activity{border-radius:8px}')
+    expect(styles).not.toContain('.dvw-status{grid-column:1/4;grid-row:3;background:var(--dvw-base);color:var(--dvw-text);border-top')
+    expect(styles).toContain('[data-dvw-conversation-panel]{position:fixed!important;top:calc(var(--dvw-titlebar-height) + 6px)!important;right:4px!important;bottom:var(--dvw-status-height,30px)!important')
+    expect(read('src/client/Workbench.tsx')).toContain('statusHeight={statusVisible?30:6}')
+    expect(styles).toContain('body[data-dvw-palette=light] [data-dvw-conversation-panel]{--dsw-alias-bg-base:#f9fafb;--dsw-specific-sidebar-fill:#f9fafb;--dsw-alias-border-l2:#e5e5e5;background:#f9fafb!important}')
     expect(styles).toContain('.dvw-tabs{height:35px')
     expect(styles).toContain('.dvw-tab{position:relative;height:35px')
     expect(styles).toContain('.dvw-tree-row{display:flex;align-items:center;height:22px;')
     expect(styles).toContain('.dvw-overlay ::-webkit-scrollbar-thumb{background:color-mix(in srgb,var(--dvw-text) 20%,transparent);border:2px solid transparent;background-clip:padding-box;border-radius:6px}')
+  })
+
+  it('prompts to install a missing language service', () => {
+    const workbench = read('src/client/Workbench.tsx')
+    expect(workbench).toContain('<h2>语言未安装</h2>')
+    expect(workbench).toContain('以后再说')
+    expect(workbench).toContain("languageServerIdForPath(active)")
+    expect(workbench).toContain("changeLsp(prompt.id,'install')")
+  })
+
+  it('lists TypeScript with the other languages in one block', () => {
+    const workbench = read('src/client/Workbench.tsx')
+    expect(workbench).not.toContain('未安装。安装后会索引工作区中的 TS/JS 文件。')
+    expect(workbench).toContain("内置 · {tsIntellisense ? tsIndex.state === 'loading'")
+  })
+
+  it('offers VS Code language navigation for TS/JS from settings', () => {
+    const workbench = read('src/client/Workbench.tsx')
+    const monaco = read('src/client/MonacoEditor.tsx')
+    expect(workbench).toContain('<h3>语言智能</h3>')
+    expect(workbench).toContain("changeLsp(server.id,server.installed?'uninstall':'install')")
+    expect(workbench).toContain('lsp.status')
+    expect(workbench).not.toContain('dvw:watch-ignore')
+    expect(workbench).not.toContain('<h3>文件监听</h3>')
+    expect(read('src/client/typescriptProject.ts')).toContain("localStorage.getItem(TS_INTELLISENSE_KEY) === 'on'")
+    expect(workbench).toContain("{tsIntellisense?'卸载':'安装'}")
+    expect(workbench).toContain('monaco.editor.registerEditorOpener(')
+    expect(monaco).toContain("multipleDefinitions: 'gotoAndPeek'")
+    expect(monaco).toContain("alternativeDefinitionCommand: 'editor.action.goToReferences'")
+    expect(monaco).toContain('parameterHints: { enabled: true, cycle: true }')
+    expect(monaco).toContain('if (isIndexedModel(key))')
   })
 
   it('adjusts the editor font size without scaling the workbench chrome', () => {
@@ -123,6 +180,8 @@ describe('workbench dark theme', () => {
   it('keeps the terminal and Monaco on the same dark surfaces', () => {
     expect(read('src/client/TerminalPanel.tsx')).toContain("background: '#191a1b'")
     expect(read('src/client/TerminalPanel.tsx')).toContain('getComputedStyle(root.current).backgroundColor')
+    expect(read('src/client/TerminalPanel.tsx')).toContain("yellow: '#949800'")
+    expect(read('src/client/TerminalPanel.tsx')).toContain('minimumContrastRatio: 4.5')
     const monaco = read('src/client/MonacoEditor.tsx')
     expect(monaco).toContain("DARK_THEME = 'dvw-dark'")
     expect(monaco).toContain("'editor.background': '#121314'")

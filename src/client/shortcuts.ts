@@ -31,3 +31,12 @@ export function handleTerminalShortcut(event: KeyboardEvent, workbench: VscodeWo
   }
   return true
 }
+
+/** Match the official desktop browser shortcut while the workbench owns focus. */
+export function handleBrowserShortcut(event: KeyboardEvent, workbench: VscodeWorkbench): boolean {
+  if (!workbench.getSnapshot().visible || event.isComposing || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.code !== 'KeyT') return false
+  event.preventDefault()
+  event.stopImmediatePropagation()
+  window.dispatchEvent(new Event('dvw-browser-new'))
+  return true
+}

@@ -16,5 +16,6 @@ describe('published plugin assembly', () => {
 
     const patch = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
     expect(patch).toContain('name: dsh-vscode-workbench')
+    expect(patch).toContain('id: ui-sidebar-browser\n  disabled: false')
   })
 })

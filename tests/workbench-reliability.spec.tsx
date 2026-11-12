@@ -34,10 +34,10 @@ afterEach(async () => {
   await act(async () => { root?.unmount() }); root = undefined
   vi.unstubAllGlobals(); localStorage.clear(); document.body.replaceChildren(); sockets.length = 0
 })
-async function mount(service = new WorkbenchController(), visible = true) {
+async function mount(service = new WorkbenchController(), visible = true, dshPanelId?: string, handlers: { open?(panelId: string): void; restore?(): void } = {}) {
   if (visible) service.show()
   const node = document.createElement('div'); document.body.append(node); root = createRoot(node)
-  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit"/>) })
+  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" dshPanelId={dshPanelId} onOpenDshPanel={handlers.open} onRestoreConversation={handlers.restore}/>) })
   return service
 }
 async function setup(binary = false) {
@@ -156,4 +156,54 @@ it('shows one binary file message instead of an overlapping editor error', async
   expect(closeTab).not.toBeNull()
   await act(async () => closeTab!.click())
   expect(document.body.textContent).not.toContain('二进制文件无法在文本编辑器或差异视图中打开')
+})
+
+it('keeps the official DSH tab open when switching to a file and back', async () => {
+  const service = await setup()
+  await act(async () => { root!.unmount() }); root = undefined
+  const panel = document.createElement('div')
+  panel.id = 'plugins'
+  panel.setAttribute('data-global-panel', '')
+  document.body.append(panel)
+  await mount(service, true, 'plugins')
+  const dshTab = () => document.querySelector<HTMLButtonElement>('[data-dvw-dsh-tab]')
+  expect(dshTab()?.dataset.active).toBe('true')
+  expect(panel.hasAttribute('data-dvw-dsh-hidden')).toBe(false)
+  await act(async () => document.querySelector<HTMLButtonElement>('.dvw-tab:not([data-dvw-dsh-tab])')!.click())
+  expect(dshTab()).not.toBeNull()
+  expect(dshTab()?.dataset.active).toBe('false')
+  expect(document.querySelector<HTMLButtonElement>('.dvw-tab:not([data-dvw-dsh-tab])')?.dataset.active).toBe('true')
+  expect(panel.hasAttribute('data-dvw-dsh-hidden')).toBe(true)
+  await act(async () => dshTab()!.click())
+  expect(dshTab()?.dataset.active).toBe('true')
+  expect(document.querySelector<HTMLButtonElement>('.dvw-tab:not([data-dvw-dsh-tab])')?.dataset.active).toBe('false')
+  expect(panel.hasAttribute('data-dvw-dsh-hidden')).toBe(false)
+})
+
+it('hands the centre back to the conversation and reopens the panel from its tab', async () => {
+  const service = await setup()
+  await act(async () => { root!.unmount() }); root = undefined
+  const panel = document.createElement('div')
+  panel.id = 'plugins'
+  panel.setAttribute('data-global-panel', '')
+  document.body.append(panel)
+  const restore = vi.fn()
+  const open = vi.fn()
+  await mount(service, true, 'plugins', { restore, open })
+  const dshTab = () => document.querySelector<HTMLButtonElement>('[data-dvw-dsh-tab]')
+  const fileTab = () => document.querySelector<HTMLButtonElement>('.dvw-tab:not([data-dvw-dsh-tab])')
+  expect(restore).not.toHaveBeenCalled()
+  // DSH unmounts its conversation while a global panel is selected, so showing a
+  // file must deselect the panel or the right column stays blank.
+  await act(async () => fileTab()!.click())
+  expect(restore).toHaveBeenCalledTimes(1)
+  // The host drops the panel from the centre; the workbench keeps it as a tab.
+  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" onOpenDshPanel={open} onRestoreConversation={restore}/>) })
+  expect(dshTab()).not.toBeNull()
+  expect(dshTab()?.dataset.active).toBe('false')
+  expect(fileTab()?.dataset.active).toBe('true')
+  await act(async () => dshTab()!.click())
+  expect(open).toHaveBeenCalledWith('plugins')
+  expect(dshTab()?.dataset.active).toBe('true')
+  expect(fileTab()?.dataset.active).toBe('false')
 })

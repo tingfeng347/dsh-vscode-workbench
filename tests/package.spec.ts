@@ -10,7 +10,9 @@ describe('published plugin assembly', () => {
 
     expect(manifest.dsh?.bundle?.patch).toBe('./cordis.patch.yml')
     expect(manifest.files).toContain('cordis.patch.yml')
-    expect((manifest as { dependencies?: Record<string, string> }).dependencies).toMatchObject({ 'node-pty': '^1.1.0', '@xterm/xterm': '^5.5.0', '@xterm/addon-fit': '^0.11.0' })
+    const dependencies = (manifest as { dependencies?: Record<string, string> }).dependencies
+    expect(dependencies).toMatchObject({ '@xterm/xterm': '^5.5.0', '@xterm/addon-fit': '^0.11.0' })
+    expect(dependencies).not.toHaveProperty('node-pty')
 
     const patch = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
     expect(patch).toContain('name: dsh-vscode-workbench')

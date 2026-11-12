@@ -148,6 +148,21 @@ it('explains missing saved terminals instead of suggesting that they were restor
   expect(terminalIssue({ phase: 'failed', writable: false, issue: 'missingTerminal' })).toContain('不存在')
 })
 
+it('forgets saved terminals that did not survive a DSH restart', async () => {
+  const first = harness()
+  const entry = await first.workspaces.get('s1').create()
+  expect(first.workspaces.get('s1').getSnapshot().terminals.map(row => row.id)).toEqual([entry.id])
+  // The layout identity survives in localStorage, but the new Host has no such process.
+  const second = harness()
+  const restored = new TerminalWorkspaces(second.models)
+  cleanup.push(() => restored.dispose())
+  const workspace = restored.get('s1')
+  expect(workspace.getSnapshot().terminals.map(row => row.id)).toEqual([entry.id])
+  await workspace.refresh()
+  expect(workspace.getSnapshot().terminals).toHaveLength(0)
+  expect(second.remote.close).not.toHaveBeenCalled()
+})
+
 it('preserves concurrent terminal additions from other windows and synchronizes external closures', async () => {
   const h = harness()
   const other = new TerminalWorkspaces(h.models)

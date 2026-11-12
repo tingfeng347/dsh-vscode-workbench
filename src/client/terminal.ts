@@ -96,8 +96,15 @@ export class TerminalWorkspaceController {
   async refresh(): Promise<boolean> {
     this.set({ ...this.snapshot, loading: true, error: undefined })
     try {
-      await Promise.all(this.snapshot.terminals.map(entry => this.view(entry.id).refresh()))
-      this.set({ ...this.snapshot, loading: false })
+      const entries = this.snapshot.terminals
+      await Promise.all(entries.map(entry => this.view(entry.id).refresh()))
+      // A saved tab can outlive its Host process after a DSH restart. It can never reconnect,
+      // so forget it instead of leaving a dead terminal that asks the user to close it manually.
+      const missing = new Set(entries.filter(entry => this.view(entry.id).state.getSnapshot().issue === 'missingTerminal').map(entry => entry.id))
+      if (missing.size === 0) { this.set({ ...this.snapshot, loading: false }); return true }
+      for (const id of missing) { this.views.get(id)?.unsubscribe(); this.views.delete(id) }
+      this.set({ ...this.snapshot, terminals: this.snapshot.terminals.filter(entry => !missing.has(entry.id)), loading: false })
+      this.save()
       return true
     } catch (error) { this.fail(error); return false }
   }

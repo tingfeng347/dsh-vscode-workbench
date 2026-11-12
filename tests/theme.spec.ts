@@ -101,6 +101,7 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('.dvw-workspace-layer{position:fixed!important;inset:0!important;z-index:1000!important;')
     expect(styles).toContain('.dvw-workspace-backdrop{position:absolute;inset:0;z-index:50;display:grid;place-items:center;padding:24px;background:rgba(0,0,0,.34);backdrop-filter:blur(3px)}')
     expect(styles).toContain('.dvw-workspace-switcher{width:min(640px,calc(100vw - 48px));height:min(680px,calc(100vh - 48px));max-height:none;border-radius:18px;')
+    expect(styles).toContain('.dvw-workspace-switcher>footer button.dvw-primary-button:hover:not(:disabled){background:color-mix(in srgb,var(--dvw-accent) 86%,#000)}')
   })
 
   it('shows the explorer file icons in the Git change list', () => {

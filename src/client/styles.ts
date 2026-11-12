@@ -187,6 +187,7 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-workspace-session{height:34px;padding:0 12px;border-radius:11px}
 .dvw-workspace-switcher>footer{padding:12px 16px}
 .dvw-workspace-switcher>footer button{height:32px;border-radius:9px;padding:0 16px}
+.dvw-workspace-switcher>footer button.dvw-primary-button:hover:not(:disabled){background:color-mix(in srgb,var(--dvw-accent) 86%,#000)}
 .dvw-workspace-switcher .dvw-icon{border-radius:9px}
 @media(max-width:760px){.dvw-settings-body{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr)}.dvw-settings-nav{grid-column:1;grid-row:1;flex-direction:row;border-right:0;border-bottom:1px solid var(--dvw-border-soft);padding:8px}.dvw-settings-nav button{flex:none}.dvw-settings-body>section{grid-column:1;grid-row:2;padding:16px 18px 24px}}
 .dvw-dsh-tab-mark{width:16px;height:16px;flex:none;background:currentColor;-webkit-mask:${DSH_MARK_MASK} center/contain no-repeat;mask:${DSH_MARK_MASK} center/contain no-repeat}

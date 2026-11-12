@@ -14,7 +14,7 @@ describe('published plugin assembly', () => {
     expect(dependencies).toMatchObject({ '@xterm/xterm': '^5.5.0', '@xterm/addon-fit': '^0.11.0' })
     expect(dependencies).not.toHaveProperty('node-pty')
 
-    const patch = await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')
+    const patch = (await readFile(new URL('../cordis.patch.yml', import.meta.url), 'utf8')).replace(/\r\n/g, '\n')
     expect(patch).toContain('name: dsh-vscode-workbench')
     expect(patch).toContain('id: ui-sidebar-browser\n  disabled: false')
   })

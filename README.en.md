@@ -36,18 +36,33 @@
 ## Demo
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/workbench-light.png" width="800" alt="Explorer, Monaco editor, terminal, and DSH conversation">
-  <br><em>Explorer, Monaco editor, terminal, and DSH conversation</em>
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/workbench-light.png" width="800" alt="Explorer, Markdown preview, terminal, and DSH conversation">
+  <br><em>Explorer, Markdown preview, terminal, and DSH conversation</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control-light.png" width="800" alt="Source control, AI commit message, and commit graph">
-  <br><em>Source control, AI commit message, and commit graph</em>
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/references-light.png" width="800" alt="Find references with Peek results in the editor">
+  <br><em>Find references with Peek results in the editor</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/settings-light.png" width="800" alt="Workbench settings">
-  <br><em>Language intelligence and language server management</em>
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control-light.png" width="800" alt="Source control, commit graph, and inline/split diffs">
+  <br><em>Source control, commit graph, and inline/split diffs</em>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/welcome-light.png" width="800" alt="Start a terminal or open the browser from the empty editor">
+  <br><em>Start a terminal or open the browser from the empty editor</em>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/settings-light.png" width="800" alt="Workbench settings for theme, font size, and layout">
+  <br><em>Workbench settings for theme, font size, and layout</em>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/workspace-switcher-light.png" width="800" alt="Open a workspace, switch sessions, or create a new workspace">
+  <br><em>Open a workspace, switch sessions, or create a new workspace</em>
 </p>
 
 ## Installation

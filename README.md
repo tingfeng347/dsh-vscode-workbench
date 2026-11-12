@@ -36,18 +36,33 @@
 ## 演示
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/workbench-light.png" width="800" alt="资源管理器、Monaco 编辑器、终端与 DSH 对话">
-  <br><em>资源管理器、Monaco 编辑器、终端与 DSH 对话</em>
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/workbench-light.png" width="800" alt="资源管理器、Markdown 预览、终端与 DSH 对话">
+  <br><em>资源管理器、Markdown 预览、终端与 DSH 对话</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control-light.png" width="800" alt="源代码管理、AI 提交信息与提交图表">
-  <br><em>源代码管理、AI 提交信息与提交图表</em>
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/references-light.png" width="800" alt="编辑器内查找引用与 Peek 结果">
+  <br><em>编辑器内查找引用与 Peek 结果</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/settings-light.png" width="800" alt="工作台设置">
-  <br><em>语言智能与语言服务器管理</em>
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control-light.png" width="800" alt="源代码管理、提交图与内联/并排差异">
+  <br><em>源代码管理、提交图与内联/并排差异</em>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/welcome-light.png" width="800" alt="空编辑器可直接新建终端或打开浏览器">
+  <br><em>空编辑器可直接新建终端或打开浏览器</em>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/settings-light.png" width="800" alt="工作台设置：主题、字号与布局">
+  <br><em>工作台设置：主题、字号与布局</em>
+</p>
+
+<p align="center">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/workspace-switcher-light.png" width="800" alt="打开工作区、切换会话与新建工作区">
+  <br><em>打开工作区、切换会话与新建工作区</em>
 </p>
 
 ## 安装

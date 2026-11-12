@@ -55,3 +55,32 @@ it('picks the laid-out body when a collapsed duplicate shares the tab id', async
   expect(collapsed.hasAttribute('data-dvw-browser-page')).toBe(false)
   await act(async () => { root.unmount() })
 })
+
+// A closed popover is only hidden by a user-agent rule, and DSH's `.tabBody { display: flex }`
+// is author CSS that outranks it. Leaving the node adopted therefore paints its chrome from stale
+// geometry with no live controller, which is what a browser tab showed over an open file.
+it('leaves the official body untouched while a file owns the centre', async () => {
+  const { host, seat } = stage()
+  const page = body(seat, 'tab1'); rect(page, 640, 480)
+  const root = createRoot(host)
+  await act(async () => { root.render(<DshBrowserPage sessionId="s" tabId="tab1" active={false} colorScheme="light"/>) })
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)) })
+  expect(page.hasAttribute('popover')).toBe(false)
+  expect(page.hasAttribute('data-dvw-browser-page')).toBe(false)
+  expect(page.getAttribute('style')).toBeFalsy()
+  await act(async () => { root.unmount() })
+})
+
+it('releases the official body when a file takes the centre back', async () => {
+  const { host, seat } = stage()
+  const page = body(seat, 'tab1'); rect(page, 640, 480)
+  const root = createRoot(host)
+  await act(async () => { root.render(<DshBrowserPage sessionId="s" tabId="tab1" active colorScheme="light"/>) })
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)) })
+  expect(page.hasAttribute('data-dvw-browser-page')).toBe(true)
+  await act(async () => { root.render(<DshBrowserPage sessionId="s" tabId="tab1" active={false} colorScheme="light"/>) })
+  expect(page.hasAttribute('popover')).toBe(false)
+  expect(page.hasAttribute('data-dvw-browser-page')).toBe(false)
+  expect(page.getAttribute('style')).toBeFalsy()
+  await act(async () => { root.unmount() })
+})

@@ -14,8 +14,15 @@ export function DshBrowserPage({ sessionId, tabId, active, colorScheme }: { sess
     let page: HTMLElement | undefined
     let restore: (() => void) | undefined
     let frame = 0
+    let retry = 0
+    const open = (node: HTMLElement) => { try { return node.matches(':popover-open') } catch { return false } }
+    const show = (node: HTMLElement) => { if (!open(node)) (node as HTMLElement & { showPopover?(): void }).showPopover?.() }
+    const hide = (node: HTMLElement) => { if (open(node)) (node as HTMLElement & { hidePopover?(): void }).hidePopover?.() }
+    const bodies = () => [...document.querySelectorAll<HTMLElement>('div[data-sidebar-right-tab]')].filter(node => node.dataset.sidebarRightTab === tabId && node.closest('[data-sidebar-right-session]')?.getAttribute('data-sidebar-right-session') === sessionId)
     const place = () => {
-      const next = [...document.querySelectorAll<HTMLElement>('div[data-sidebar-right-tab]')].find(node => node.dataset.sidebarRightTab === tabId && node.closest('[data-sidebar-right-session]')?.getAttribute('data-sidebar-right-session') === sessionId)
+      // DSH mounts only the active tab's body, and a restored tab mounts it after the seat adopts; keep the current node while it survives.
+      const nodes = bodies()
+      const next = nodes.find(node => node === page) ?? nodes.find(node => { const rect = node.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 }) ?? nodes[0]
       if (next !== page) {
         restore?.(); page = next
         if (page !== undefined) {
@@ -26,7 +33,7 @@ export function DshBrowserPage({ sessionId, tabId, active, colorScheme }: { sess
           node.setAttribute('popover', 'manual')
           node.setAttribute('data-dvw-browser-page', '')
           restore = () => {
-            if (node.matches(':popover-open')) node.hidePopover()
+            hide(node)
             if (popover === null) node.removeAttribute('popover'); else node.setAttribute('popover', popover)
             node.removeAttribute('data-dvw-browser-page')
             for (const [property, value, priority] of styles) node.style.setProperty(property!, value!, priority)
@@ -36,7 +43,7 @@ export function DshBrowserPage({ sessionId, tabId, active, colorScheme }: { sess
       if (page === undefined) return
       const rect = document.querySelector('.dvw-editor')?.getBoundingClientRect()
       const visible = active && rect !== undefined && rect.width > 0 && rect.height > 0
-      if (!visible) { if (page.matches(':popover-open')) page.hidePopover(); return }
+      if (!visible) { hide(page); return }
       for (const [property, value] of Object.entries({ left: rect.left, top: rect.top, width: rect.width, height: rect.height })) page.style.setProperty(property, `${Math.round(value)}px`, 'important')
       const overlay = document.querySelector('.dvw-overlay')
       if (overlay !== null) {
@@ -45,17 +52,18 @@ export function DshBrowserPage({ sessionId, tabId, active, colorScheme }: { sess
       }
       page.style.setProperty('color-scheme', colorScheme === 'dark' ? 'dark' : 'light')
       // The top layer escapes dockkit clipping while keeping the original DOM parent and lease.
-      if (!page.matches(':popover-open')) page.showPopover()
+      show(page)
     }
     const schedule = () => { if (frame === 0) frame = requestAnimationFrame(() => { frame = 0; place() }) }
     place()
+    retry = window.setInterval(() => { if (page !== undefined) { window.clearInterval(retry); return } place() }, 250)
     const resize = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(schedule)
     const editor = document.querySelector('.dvw-editor')
     if (editor !== null) resize?.observe(editor)
     const observer = new MutationObserver(schedule)
-    observer.observe(document.body, { childList: true, subtree: true })
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-sidebar-right-tab', 'data-sidebar-right-session'] })
     window.addEventListener('resize', schedule)
-    return () => { observer.disconnect(); resize?.disconnect(); window.removeEventListener('resize', schedule); cancelAnimationFrame(frame); restore?.() }
+    return () => { observer.disconnect(); resize?.disconnect(); window.removeEventListener('resize', schedule); cancelAnimationFrame(frame); window.clearInterval(retry); restore?.() }
   }, [sessionId, tabId, active, colorScheme])
   return null
 }

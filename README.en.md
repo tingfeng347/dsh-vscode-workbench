@@ -67,7 +67,7 @@
 
 ## Installation
 
-Plugin 0.2.5 targets DeepSeek Harness `0.2.2-rc.1` (Cordis `4.1.0`). Update Harness before installing:
+Plugin 0.2.6 targets DeepSeek Harness `0.2.2-rc.1` (Cordis `4.1.0`). Update Harness before installing:
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.1

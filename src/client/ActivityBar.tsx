@@ -121,9 +121,9 @@ export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderC
     const state = drag.current
     drag.current = undefined
     if (state?.active) {
-      didDrag.current = true
       const next = previewRef.current
-      if (next !== undefined) onOrderChange(next)
+      // Only a reorder swallows the click; a shaky click that crosses the drag threshold still activates the view.
+      if (next !== undefined && next.join('|') !== orderRef.current.join('|')) { didDrag.current = true; onOrderChange(next) }
     }
     draggingRef.current = false
     previewRef.current = undefined

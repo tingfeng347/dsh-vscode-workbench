@@ -109,4 +109,27 @@ describe('Activity bar pointer dragging', () => {
     expect(onActivate).toHaveBeenCalledTimes(1)
     await act(async () => { root.unmount() })
   })
+
+  it('still activates a view when a shaky click crosses the drag threshold without reordering', async () => {
+    const onActivate = vi.fn()
+    const onOrderChange = vi.fn()
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(<ActivityBar views={[{ id: 'explorer', label: 'explorer', icon: null, active: false, onActivate }, ...views.slice(1)]} fixed={[]} order={['explorer', 'search', 'git']} hidden={[]} onOrderChange={onOrderChange} onHiddenChange={() => {}}/>)
+    })
+    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-act-id]'))
+    layout(buttons)
+    const pointer = (type: string, x: number) => new MouseEvent(type, { bubbles: true, button: 0, clientX: x, clientY: 5 })
+    await act(async () => {
+      buttons[0]!.dispatchEvent(pointer('pointerdown', 0))
+      window.dispatchEvent(pointer('pointermove', 20))
+      window.dispatchEvent(pointer('pointerup', 20))
+      buttons[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    expect(onOrderChange).not.toHaveBeenCalled()
+    expect(onActivate).toHaveBeenCalledTimes(1)
+    await act(async () => { root.unmount() })
+  })
 })

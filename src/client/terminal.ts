@@ -1,100 +1,147 @@
-import type { TerminalInfo } from '../terminal.ts'
-import { ApiError, withSessionRetry } from './api.ts'
-import { websocketUrl } from './websocket.ts'
+import type { ClientTerminals, TerminalView, TerminalViewState } from '@deepseek-ai/dsh-api-terminal-controller/client'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
-export interface TerminalConnection {
-  write(data: string): void
-  resize(cols: number, rows: number): void
-  close(): void
-  subscribe(listener: (output: { sequence: number; data: string; replay?: boolean }) => void): () => void
-  subscribeError(listener: (message: string) => void): () => void
-}
+const STORAGE_PREFIX = 'dvw:native-terminal-tab:v1:'
+export interface TerminalEntry { id: string; title: string }
+export interface TerminalWorkspaceSnapshot { terminals: readonly TerminalEntry[]; loading: boolean; error?: string }
 
-export interface TerminalWorkspaceSnapshot { terminals: readonly TerminalInfo[]; loading: boolean; error?: string }
+/** Own workbench membership without overwriting the official sidebar's terminal inventory. */
+export class TerminalWorkspaces {
+  private readonly workspaces = new Map<string, TerminalWorkspaceController>()
+  private saved: Record<string, string[]> = Object.create(null)
 
-/** Browser client for the workbench's local terminal transport. */
-export interface TerminalWorkspace {
-  refresh(): Promise<boolean>
-  create(title?: string): Promise<TerminalInfo>
-  close(id: string): Promise<void>
-  rename(id: string, title: string): Promise<void>
-  connect(id: string): TerminalConnection
-  getSnapshot(): TerminalWorkspaceSnapshot
-  subscribe(listener: () => void): () => void
-}
-
-async function request<T>(method: string, body: Record<string, unknown>): Promise<T> {
-  const response = await fetch(`/dsh-vscode-terminal/api/${method}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
-  const text = await response.text()
-  let answer: { ok?: boolean; value?: T; error?: { code?: string; message?: string } }
-  try { answer = JSON.parse(text) as { ok?: boolean; value?: T; error?: { code?: string; message?: string } } } catch { throw new Error(`terminal request returned invalid JSON (${response.status})`) }
-  if (!response.ok || answer.ok !== true) throw new ApiError(answer.error?.code ?? 'terminal-request-failed', answer.error?.message ?? 'terminal request failed')
-  return answer.value as T
-}
-
-class SocketConnection implements TerminalConnection {
-  private readonly socket: WebSocket
-  private readonly listeners = new Set<(output: { sequence: number; data: string; replay?: boolean }) => void>()
-  private readonly errorListeners = new Set<(message: string) => void>()
-  private closed = false
-  private queue: string[] = []
-
-  constructor(sessionId: string, id: string) {
-    const url = websocketUrl(`/dsh-vscode-terminal/ws?sessionId=${encodeURIComponent(sessionId)}&id=${encodeURIComponent(id)}`)
-    if (url === undefined) throw new Error('无法连接终端：桌面端没有发布本地 Host 地址')
-    this.socket = new WebSocket(url)
-    this.socket.onopen = () => { for (const value of this.queue) this.socket.send(value); this.queue = [] }
-    this.socket.onerror = () => { for (const listener of this.errorListeners) listener('终端 WebSocket 连接失败') }
-    this.socket.onclose = () => { if (!this.closed) for (const listener of this.errorListeners) listener('终端 WebSocket 连接已断开') }
-    this.socket.onmessage = event => {
-      try {
-        const value = JSON.parse(String(event.data)) as { type?: unknown; sequence?: unknown; data?: unknown }
-        if (typeof value.sequence !== 'number' || typeof value.data !== 'string') return
-        for (const listener of this.listeners) listener({ sequence: value.sequence, data: value.data, replay: value.type === 'replay' })
-      } catch { /* Ignore malformed WebSocket messages from a disconnected server. */ }
-    }
+  constructor(readonly models: ClientTerminals) {
+    try {
+      this.saved = this.readSaved()
+    } catch { /* Invalid or unavailable storage must not prevent opening the terminal. */ }
+    this.retain()
+    window.addEventListener('storage', this.onStorage)
   }
 
-  private send(value: unknown): void { const text = JSON.stringify(value); if (this.socket.readyState === WebSocket.OPEN) this.socket.send(text); else this.queue.push(text) }
-  write(data: string): void { this.send({ type: 'input', data }) }
-  resize(cols: number, rows: number): void { this.send({ type: 'resize', cols, rows }) }
-  close(): void { this.closed = true; this.socket.close() }
-  subscribe(listener: (output: { sequence: number; data: string; replay?: boolean }) => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener) }
-  subscribeError(listener: (message: string) => void): () => void { this.errorListeners.add(listener); return () => this.errorListeners.delete(listener) }
+  get(sessionId: string): TerminalWorkspaceController {
+    let workspace = this.workspaces.get(sessionId)
+    if (workspace === undefined) {
+      workspace = new TerminalWorkspaceController(this, sessionId, this.saved[sessionId] ?? [])
+      this.workspaces.set(sessionId, workspace)
+    }
+    return workspace
+  }
+
+  save(sessionId: string, ids: string[]): void {
+    const previous = this.saved[sessionId] ?? []
+    try {
+      // Independent records preserve concurrent additions from other windows and Sessions.
+      for (const id of ids) if (!previous.includes(id)) localStorage.setItem(STORAGE_PREFIX + JSON.stringify([sessionId, id]), 'open')
+      for (const id of previous) if (!ids.includes(id)) localStorage.removeItem(STORAGE_PREFIX + JSON.stringify([sessionId, id]))
+      this.sync(this.readSaved())
+    } catch { this.saved[sessionId] = ids; this.retain() }
+  }
+
+  private readSaved(): Record<string, string[]> {
+    const saved: Record<string, string[]> = Object.create(null)
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index)
+      if (!key?.startsWith(STORAGE_PREFIX)) continue
+      try {
+        const value: unknown = JSON.parse(key.slice(STORAGE_PREFIX.length))
+        if (!Array.isArray(value) || value.length !== 2) continue
+        const [sessionId, id] = value
+        if (typeof sessionId !== 'string' || typeof id !== 'string' || !id.startsWith('dvw-terminal:')) continue
+        ;(saved[sessionId] ??= []).push(id)
+      } catch { /* Ignore only malformed external layout entries. */ }
+    }
+    return saved
+  }
+
+  private sync(saved: Record<string, string[]>): void {
+    this.saved = saved
+    for (const [sessionId, workspace] of this.workspaces) workspace.reconcile(saved[sessionId] ?? [])
+    this.retain()
+  }
+
+  private onStorage = (event: StorageEvent): void => {
+    if (event.storageArea !== localStorage || (event.key !== null && !event.key.startsWith(STORAGE_PREFIX))) return
+    this.sync(this.readSaved())
+  }
+
+  private retain(): void {
+    this.models.retainTabs(Object.entries(this.saved).flatMap(([sessionId, ids]) => ids.map(id => ({ sessionId: sessionId as SessionId, tabId: id, contentId: id }))))
+  }
+
+  dispose(): void { window.removeEventListener('storage', this.onStorage); for (const workspace of this.workspaces.values()) workspace.dispose(); this.models.retainTabs([]) }
 }
 
-/** Identify automatic terminal-emulator replies that must not be echoed during replay. */
-export function isTerminalProtocolReply(data: string): boolean {
-  return /^\x1b\](?:10|11|12);(?:rgb:[\da-f]{4}\/[\da-f]{4}\/[\da-f]{4}|#[\da-f]{6})(?:\x07|\x1b\\)$/i.test(data)
-    || /^\x1b\[\??[\d;]*[cR]$/.test(data)
-}
-
-/** Maintain one terminal collection for a DSH session. */
-export class TerminalWorkspaceController implements TerminalWorkspace {
-  private snapshot: TerminalWorkspaceSnapshot = { terminals: [], loading: false }
+/** Layout only; the official model owns processes, stream ordering, recovery and input control. */
+export class TerminalWorkspaceController {
+  readonly closeFailures: ClientTerminals['closeFailures']
+  private snapshot: TerminalWorkspaceSnapshot
   private readonly listeners = new Set<() => void>()
+  private readonly views = new Map<string, { model: TerminalView; unsubscribe: () => void }>()
 
-  constructor(private readonly sessionId: string) {}
+  constructor(private readonly owner: TerminalWorkspaces, readonly sessionId: string, ids: readonly string[]) {
+    this.closeFailures = owner.models.closeFailures
+    this.snapshot = { terminals: ids.map(id => ({ id, title: '终端' })), loading: false }
+  }
+
+  view(id: string): TerminalView {
+    const existing = this.views.get(id)
+    if (existing !== undefined) return existing.model
+    const model = this.owner.models.view(this.sessionId as SessionId, id, id)
+    const unsubscribe = model.state.subscribe(() => this.updateTitles())
+    this.views.set(id, { model, unsubscribe })
+    this.updateTitles()
+    return model
+  }
 
   async refresh(): Promise<boolean> {
     this.set({ ...this.snapshot, loading: true, error: undefined })
     try {
-      this.set({ terminals: await withSessionRetry(() => request<TerminalInfo[]>('list', { sessionId: this.sessionId })), loading: false })
+      await Promise.all(this.snapshot.terminals.map(entry => this.view(entry.id).refresh()))
+      this.set({ ...this.snapshot, loading: false })
       return true
-    } catch (error) {
-      this.set({ ...this.snapshot, loading: false, error: error instanceof Error ? error.message : String(error) })
-      return false
-    }
+    } catch (error) { this.fail(error); return false }
   }
 
-  async create(title?: string): Promise<TerminalInfo> {
-    try { const terminal = await withSessionRetry(() => request<TerminalInfo>('create', { sessionId: this.sessionId, ...(title === undefined ? {} : { title }) })); await this.refresh(); return terminal }
-    catch (error) { this.set({ ...this.snapshot, loading: false, error: error instanceof Error ? error.message : String(error) }); throw error }
+  async create(): Promise<TerminalEntry> {
+    const entry = { id: `dvw-terminal:${crypto.randomUUID()}`, title: '终端' }
+    this.set({ terminals: [...this.snapshot.terminals, entry], loading: false })
+    this.save()
+    const model = this.view(entry.id)
+    await model.refresh()
+    return this.snapshot.terminals.find(row => row.id === entry.id) ?? entry
   }
-  async close(id: string): Promise<void> { await withSessionRetry(() => request('close', { sessionId: this.sessionId, id })); await this.refresh() }
-  async rename(id: string, title: string): Promise<void> { await withSessionRetry(() => request('rename', { sessionId: this.sessionId, id, title })); await this.refresh() }
-  connect(id: string): TerminalConnection { return new SocketConnection(this.sessionId, id) }
-  getSnapshot(): TerminalWorkspaceSnapshot { return this.snapshot }
-  subscribe(listener: () => void): () => void { this.listeners.add(listener); return () => this.listeners.delete(listener) }
+
+  close(id: string): void {
+    this.owner.models.close(this.sessionId as SessionId, id, id)
+    this.views.get(id)?.unsubscribe()
+    this.views.delete(id)
+    this.set({ ...this.snapshot, terminals: this.snapshot.terminals.filter(entry => entry.id !== id) })
+    this.save()
+  }
+
+  async rename(id: string, title: string): Promise<void> {
+    try { await this.view(id).rename(title) } catch (error) { this.fail(error) }
+  }
+  retryClose(id: Parameters<ClientTerminals['retryClose']>[0]): void { this.owner.models.retryClose(id) }
+
+  reconcile(ids: readonly string[]): void {
+    const entries = new Map(this.snapshot.terminals.map(entry => [entry.id, entry]))
+    for (const [id, view] of this.views) if (!ids.includes(id)) { view.unsubscribe(); this.views.delete(id) }
+    this.set({ ...this.snapshot, terminals: ids.map(id => entries.get(id) ?? { id, title: '终端' }) })
+  }
+
+  getSnapshot = (): TerminalWorkspaceSnapshot => this.snapshot
+  subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener) }
+  dispose(): void { for (const view of this.views.values()) view.unsubscribe(); this.views.clear() }
+  private save(): void { this.owner.save(this.sessionId, this.snapshot.terminals.map(entry => entry.id)) }
+  private updateTitles(): void {
+    this.set({ ...this.snapshot, terminals: this.snapshot.terminals.map(entry => ({ ...entry, title: this.views.get(entry.id)?.model.state.getSnapshot().title ?? entry.title })) })
+  }
+  private fail(error: unknown): void { this.set({ ...this.snapshot, loading: false, error: error instanceof Error ? error.message : String(error) }) }
   private set(snapshot: TerminalWorkspaceSnapshot): void { this.snapshot = snapshot; for (const listener of this.listeners) listener() }
+}
+
+export function terminalIssue(state: TerminalViewState): string | undefined {
+  const messages = { missingTerminal: '此终端已不存在，请关闭后新建终端。', inputFull: '终端输入缓冲已满，请重新连接。', attachmentEnded: '终端连接已结束，请重新连接。', invalidOutput: '终端输出无法解析，请重新连接。', terminalLimit: '终端数量已达上限，请关闭不用的终端。' }
+  return state.issue === undefined ? state.error ?? state.info?.error : messages[state.issue]
 }

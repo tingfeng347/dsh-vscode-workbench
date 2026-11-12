@@ -3,6 +3,7 @@ import type { UserConfig } from 'tsdown'
 const EXTERNALS = [
   'react', 'react/jsx-runtime', 'react-dom', 'react-dom/client', 'cordis',
   '@deepseek-ai/cordis', '@deepseek-ai/dsh-client-ui-slots',
+  '@deepseek-ai/dsh-api-terminal-controller/client',
 ]
 
 /** Create a DSH host bundle and dynamic browser-client bundle. */

@@ -13,7 +13,6 @@ import { generateCommitMessage, normalizeCommitPreferences } from './commit-mess
 import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitCommitContext, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, searchWorkspace, uploadFile, workspacePreviewFile } from './host.ts'
 import { installLsp, lspStatuses, resolveLsp, uninstallLsp, pipeLanguageServer } from './lsp.ts'
 import { officePdf, officeStatus } from './office.ts'
-import { installTerminal } from './terminal.ts'
 import type { SearchRequest } from './types.ts'
 import { watchIgnore, workspaceWatchIgnores } from './watch-ignore.ts'
 import { readBinaryBody, readBody, send, sendError, stringField, authorize, WorkbenchError } from './wire.ts'
@@ -77,7 +76,6 @@ export function apply(ctx: HostContext): void {
     })
     return () => { void fiber.dispose?.() }
   }, 'dsh-vscode-workbench: optional DSH services')
-  installTerminal(ctx)
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact', path: '/dsh-vscode/codicons/codicon.ttf', handler: async (req, res) => {
       if (!authorize(req, res, ctx.connection)) return

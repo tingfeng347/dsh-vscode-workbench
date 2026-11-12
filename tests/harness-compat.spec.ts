@@ -97,7 +97,7 @@ describe('Harness 0.2 host integration', () => {
     expect((await workspace('missing')).status).toBe(404)
     expect((await fetch(`${base}/dsh-vscode/api/workspace`, { method: 'POST', headers: { ...headers, origin: 'https://evil.example' }, body: '{}' })).status).toBe(403)
     directory = process.cwd()
-    expect((await fetch(`${base}/dsh-vscode-terminal/api/list`, { method: 'POST', headers, body: '{"sessionId":"main"}' })).status).toBe(200)
+    expect((await fetch(`${base}/dsh-vscode-terminal/api/list`, { method: 'POST', headers, body: '{"sessionId":"main"}' })).status).toBe(404)
     for (const route of upgrades) {
       const socket = { destroy: vi.fn() }
       await route.handler({ headers: { host: new URL(base).host } } as IncomingMessage, socket as never, Buffer.alloc(0))

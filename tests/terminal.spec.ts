@@ -1,90 +1,168 @@
-import { chmod, mkdtemp, rm, stat, writeFile } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
-import { isTerminalProtocolReply, TerminalWorkspaceController } from '../src/client/terminal.ts'
-import { defaultTerminalShell, ensureExecutable, sanitizedTerminalEnv } from '../src/terminal.ts'
+// @vitest-environment jsdom
+import { createRequire } from 'node:module'
+import { readFileSync } from 'node:fs'
+import * as cordis from '@deepseek-ai/cordis'
+import * as stores from '@deepseek-ai/dsh-client-store'
+import * as gateway from '@deepseek-ai/dsh-api-gateway/client'
+import type { ClientTerminals, TerminalRemote, TerminalView } from '@deepseek-ai/dsh-api-terminal-controller/client'
+import type { TerminalFrame, TerminalInput, WebTerminalInfo } from '@deepseek-ai/dsh-api-terminal-controller/types'
+import { afterEach, expect, it, vi } from 'vitest'
+import { TerminalWorkspaces, terminalIssue } from '../src/client/terminal.ts'
 
-afterEach(() => vi.unstubAllGlobals())
+// Run the actual published Client controller. Only its Host transport is replaced.
+const require = createRequire(import.meta.url)
+let sdk!: { ClientTerminals: typeof ClientTerminals }
+new Function('window', readFileSync(require.resolve('@deepseek-ai/dsh-api-terminal-controller/client'), 'utf8'))({
+  __ModuleLoader__: { load: ({ factory }: { factory(require: (id: string) => unknown): typeof sdk }) => {
+    sdk = factory(id => ({ '@deepseek-ai/cordis': cordis, '@deepseek-ai/dsh-client-store': stores, '@deepseek-ai/dsh-api-gateway/client': gateway } as Record<string, unknown>)[id])
+  } },
+})
+const cleanup: Array<() => unknown> = []
+afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose(); localStorage.clear() })
 
-function terminalAnswer(ok: boolean, value?: unknown, error?: { code: string; message: string }) {
-  return { ok, text: async () => JSON.stringify(ok ? { ok: true, value } : { ok: false, error }) } as unknown as Response
+class Feed<T> implements AsyncIterable<T> {
+  private values: T[] = []
+  private wake?: () => void
+  constructor(private readonly signal: AbortSignal) { signal.addEventListener('abort', () => this.wake?.(), { once: true }) }
+  push(value: T) { this.values.push(value); this.wake?.() }
+  async *[Symbol.asyncIterator]() {
+    while (!this.signal.aborted) {
+      if (this.values.length > 0) yield this.values.shift()!
+      else await new Promise<void>(resolve => { this.wake = resolve })
+    }
+  }
 }
 
-describe('terminal host settings', () => {
-  it('keeps normal shell variables while removing credentials', () => {
-    expect(sanitizedTerminalEnv({ PATH: '/bin', LANG: 'zh_CN.UTF-8', DEEPSEEK_API_KEY: 'secret', TOKEN: 'secret', EMPTY: undefined })).toEqual({ PATH: '/bin', LANG: 'zh_CN.UTF-8' })
+function harness() {
+  const ctx = new cordis.Context()
+  const host = new Map<string, WebTerminalInfo>()
+  const inputs: TerminalInput[] = []
+  const holds = new Set<string>()
+  const feeds = new Map<string, Feed<TerminalFrame>>()
+  const ok = <T,>(value: T) => ({ ok: true as const, value })
+  const create = vi.fn(async (session: string, request: { id: WebTerminalInfo['id']; cols: number; rows: number }) => {
+    const info: WebTerminalInfo = { ...request, title: 'zsh', cwd: `/${session}`, shell: { path: '/bin/zsh', name: 'zsh', args: [] }, state: 'running', exitCode: null }
+    host.set(info.id, info)
+    return ok(info)
   })
+  let failClose = false
+  const remote = {
+    environment: async () => ok({ cwd: '/s1', maxCols: 500, maxRows: 200, scrollback: 1000, maxInputBytes: 65536, maxBufferedBytes: 2097152 }),
+    shells: async () => ok([{ path: '/bin/zsh', name: 'zsh', args: [] }]),
+    list: async () => ok([...host.values()]), create,
+    rename: async (_session: string, id: string, title: string) => { host.set(id, { ...host.get(id)!, title }); return ok(host.get(id)!) },
+    close: vi.fn(async (_session: string, id: string) => {
+      if (failClose) return { ok: false, error: new Error('close failed') }
+      host.delete(id); return ok(undefined)
+    }),
+    retain: (_session: string, id: string, signal: AbortSignal) => {
+      holds.add(id); signal.addEventListener('abort', () => holds.delete(id), { once: true })
+      const feed = new Feed(signal); feed.push({ type: 'retained' }); return feed
+    },
+    attach: (_session: string, id: string, signal: AbortSignal) => {
+      const feed = new Feed<TerminalFrame>(signal)
+      let sequence = 0
+      feed.push({ type: 'snapshot', sequence, screen: 'ready\r\n', info: host.get(id)!, writable: true })
+      feeds.set(id, feed)
+      return Object.assign(feed, { send: async (command: TerminalInput) => {
+        inputs.push(command)
+        feed.push({ type: 'ack', sequence: command.sequence })
+        if (command.type === 'write') feed.push({ type: 'output', sequence: ++sequence, data: command.data })
+      } })
+    },
+  }
+  ctx.provide('connection', { generation: stores.createSnapshotStore(1) } as never)
+  ctx.provide('remote', { terminal: remote, $stream: (options: { open(signal: AbortSignal): AsyncIterable<unknown> }) => {
+    const controller = new AbortController()
+    return { dispose: async () => controller.abort(), async *[Symbol.asyncIterator]() {
+      for await (const value of options.open(controller.signal)) yield { value, generation: 1, signal: controller.signal, accept() {} }
+    } }
+  } } as never)
+  const models = new sdk.ClientTerminals(ctx.isolate('webTerminals'), remote as unknown as TerminalRemote)
+  const workspaces = new TerminalWorkspaces(models)
+  cleanup.push(() => ctx.fiber.dispose(), () => workspaces.dispose())
+  return { ctx, models, workspaces, host, inputs, holds, create, remote, failClose: (value: boolean) => { failClose = value } }
+}
 
-  it('selects the platform interactive shell', () => {
-    expect(defaultTerminalShell('linux', { SHELL: '/usr/bin/fish' })).toEqual({ shell: '/usr/bin/fish', args: ['-l'] })
-    expect(defaultTerminalShell('win32', { COMSPEC: 'C:\\Windows\\System32\\cmd.exe' })).toEqual({ shell: 'powershell.exe', args: ['-NoLogo'] })
+function screen(model: TerminalView) {
+  const output: string[] = []
+  const unsubscribe = model.state.subscribe(() => {
+    const render = model.state.getSnapshot().render
+    if (render === undefined) return
+    output.push(render.frame.type === 'snapshot' ? render.frame.screen : render.frame.data)
+    queueMicrotask(() => model.acknowledge(render.revision))
   })
+  const unmount = model.mount()
+  cleanup.push(unsubscribe, unmount)
+  return output
+}
 
-  it('identifies terminal protocol replies emitted while replaying output', () => {
-    expect(isTerminalProtocolReply('\x1b]11;rgb:1313/1414/1717\x1b\\')).toBe(true)
-    expect(isTerminalProtocolReply('\x1b[?62;1;2;6;7;8;9c')).toBe(true)
-    expect(isTerminalProtocolReply('git status\r')).toBe(false)
-  })
-
-  it.skipIf(process.platform === 'win32')('restores a native helper extracted without execute bits', async () => {
-    const directory = await mkdtemp(join(tmpdir(), 'dsh-workbench-pty-'))
-    const helper = join(directory, 'spawn-helper')
-    try {
-      await writeFile(helper, '')
-      await chmod(helper, 0o644)
-      expect(ensureExecutable(helper)).toBe(true)
-      expect((await stat(helper)).mode & 0o111).toBe(0o111)
-    } finally { await rm(directory, { recursive: true, force: true }) }
-  })
-
-  it('does not fail plugin startup when a native helper is unavailable', () => {
-    expect(ensureExecutable(join(tmpdir(), 'dsh-workbench-missing-spawn-helper'))).toBe(process.platform === 'win32')
-  })
+it('uses official terminal models for independent split screens, typed input, resizing, rename and close', async () => {
+  const h = harness()
+  const workspace = h.workspaces.get('s1')
+  const first = await workspace.create(); const second = await workspace.create()
+  const model = workspace.view(first.id)
+  const output = screen(model); screen(workspace.view(second.id))
+  await vi.waitFor(() => expect(model.state.getSnapshot().writable).toBe(true))
+  model.write('你好\r'); model.resize(120, 30)
+  await vi.waitFor(() => expect(output.join('')).toContain('你好'))
+  expect(h.inputs).toContainEqual({ type: 'resize', sequence: 2, cols: 120, rows: 30 })
+  await workspace.rename(first.id, 'server')
+  expect(workspace.getSnapshot().terminals[0]?.title).toBe('server')
+  expect(h.host.get(model.id)?.title).toBe('server')
+  workspace.close(first.id)
+  await vi.waitFor(() => expect(h.host.size).toBe(1))
+  expect(workspace.getSnapshot().terminals.map(row => row.id)).toEqual([second.id])
 })
 
-describe('terminal workspace session retry', () => {
-  it('waits for the selected session before listing terminals', async () => {
-    let calls = 0
-    vi.stubGlobal('fetch', async () => {
-      calls++
-      return calls === 1
-        ? terminalAnswer(false, undefined, { code: 'session-not-found', message: 'session not found' })
-        : terminalAnswer(true, [])
-    })
-    const workspace = new TerminalWorkspaceController('s1')
-    await expect(workspace.refresh()).resolves.toBe(true)
-    expect(calls).toBe(2)
-    expect(workspace.getSnapshot()).toEqual({ terminals: [], loading: false })
-  })
+it('keeps hidden and background sessions held and restores saved identities without allocating again', async () => {
+  const h = harness()
+  const first = await h.workspaces.get('s1').create()
+  const second = await h.workspaces.get('s2').create()
+  const model = h.workspaces.get('s1').view(first.id)
+  const stop = model.mount(); stop()
+  await vi.waitFor(() => expect(h.holds.size).toBe(2))
+  // A new layout owner sees the same official identity, including a dormant Session.
+  const restored = new TerminalWorkspaces(h.models)
+  cleanup.push(() => restored.dispose())
+  await restored.get('s1').refresh()
+  expect(restored.get('s1').view(first.id).id).toBe(model.id)
+  expect(restored.get('s2').getSnapshot().terminals[0]?.id).toBe(second.id)
+  expect(h.create).toHaveBeenCalledTimes(2)
+  expect(h.remote.close).not.toHaveBeenCalled()
+})
 
-  it('surfaces unrelated terminal failures without retrying', async () => {
-    let calls = 0
-    vi.stubGlobal('fetch', async () => {
-      calls++
-      return terminalAnswer(false, undefined, { code: 'internal', message: 'boom' })
-    })
-    const workspace = new TerminalWorkspaceController('s1')
-    await expect(workspace.refresh()).resolves.toBe(false)
-    expect(calls).toBe(1)
-    expect(workspace.getSnapshot().error).toBe('boom')
-  })
+it('keeps failed process cleanup visible and retries through the official controller', async () => {
+  const h = harness()
+  const workspace = h.workspaces.get('s1')
+  const entry = await workspace.create()
+  h.failClose(true); workspace.close(entry.id)
+  await vi.waitFor(() => expect(h.models.closeFailures.getSnapshot()).toHaveLength(1))
+  h.failClose(false)
+  h.models.retryClose(h.models.closeFailures.getSnapshot()[0]!.id)
+  await vi.waitFor(() => expect(h.host.size).toBe(0))
+  expect(h.models.closeFailures.getSnapshot()).toHaveLength(0)
+})
 
-  it('retries creating a terminal while the session is being published', async () => {
-    const terminal = { id: 't1', title: 'zsh', cwd: '/workspace', running: true, sequence: 0 }
-    let createCalls = 0
-    vi.stubGlobal('fetch', async (url: string) => {
-      if (String(url).endsWith('/create')) {
-        createCalls++
-        return createCalls === 1
-          ? terminalAnswer(false, undefined, { code: 'session-not-found', message: 'session not found' })
-          : terminalAnswer(true, terminal)
-      }
-      return terminalAnswer(true, [terminal])
-    })
-    const workspace = new TerminalWorkspaceController('s1')
-    await expect(workspace.create()).resolves.toEqual(terminal)
-    expect(createCalls).toBe(2)
-    expect(workspace.getSnapshot().terminals).toEqual([terminal])
-  })
+it('explains missing saved terminals instead of suggesting that they were restored', () => {
+  expect(terminalIssue({ phase: 'failed', writable: false, issue: 'missingTerminal' })).toContain('不存在')
+})
+
+it('preserves concurrent terminal additions from other windows and synchronizes external closures', async () => {
+  const h = harness()
+  const other = new TerminalWorkspaces(h.models)
+  cleanup.push(() => other.dispose())
+  const first = await h.workspaces.get('s1').create()
+  const second = await other.get('s2').create()
+  const restored = new TerminalWorkspaces(h.models)
+  cleanup.push(() => restored.dispose())
+  expect(restored.get('s1').getSnapshot().terminals.map(row => row.id)).toEqual([first.id])
+  expect(restored.get('s2').getSnapshot().terminals.map(row => row.id)).toEqual([second.id])
+  // Browsers deliver storage events to the other windows, never to the writer.
+  window.dispatchEvent(new StorageEvent('storage', { key: null, storageArea: localStorage }))
+  expect(h.workspaces.get('s2').getSnapshot().terminals).toHaveLength(1)
+  other.get('s2').close(second.id)
+  window.dispatchEvent(new StorageEvent('storage', { key: null, storageArea: localStorage }))
+  expect(h.workspaces.get('s2').getSnapshot().terminals).toHaveLength(0)
+  expect(h.workspaces.get('s1').getSnapshot().terminals).toHaveLength(1)
 })

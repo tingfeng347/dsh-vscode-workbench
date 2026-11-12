@@ -200,6 +200,9 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 [data-dvw-browser-page]::backdrop{background:transparent;pointer-events:none}
 [data-dvw-dsh-page]{position:fixed!important;z-index:106!important;margin:0!important;display:flex!important;flex-direction:column!important;box-sizing:border-box!important;overflow:hidden!important;background:var(--dsw-alias-bg-base,#fff)!important;border:0!important;border-radius:0!important;box-shadow:none!important;--dsh-frame-top-clearance:0px;--dsh-frame-chrome-top:0px}
 [data-dvw-dsh-page][data-dvw-dsh-hidden]{display:none!important}
+/* The DSH host paints a -webkit-app-region:drag strip over the window's top-left corner. Real mouse presses
+   inside it never reach the renderer, so the workbench has to carve the whole overlay out of it. */
+.dvw-overlay{-webkit-app-region:no-drag}
 `
 
 export function installStyles(): () => void {

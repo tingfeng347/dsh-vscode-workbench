@@ -22,6 +22,7 @@ function setup() {
     tabsIn: (id: string) => rows.filter(row => row.sessionId === id),
     openTabIn: vi.fn((sessionId: string, kind: string) => { rows.push({ id: `tab-${rows.length}`, sessionId, kind, title: '浏览器', contentId: `content-${rows.length}` }); publish() }),
     closeIn: vi.fn((sessionId: string, id: string) => { const i = rows.findIndex(row => row.id === id && row.sessionId === sessionId); rows.splice(i, 1); publish() }),
+    close: vi.fn((id: string) => { const i = rows.findIndex(row => row.id === id); rows.splice(i, 1); publish() }),
     focus: vi.fn(), isExpanded: () => expanded, toggleExpanded: () => { expanded = !expanded },
   }
   const browser = new NativeBrowser({ sidebarRight: sidebar, sidebarRightTabs: { get: () => ({}), subscribe: () => () => {} } } as unknown as Context)
@@ -63,4 +64,22 @@ it('waits for the native sidebar seat after mounted changes before React commits
   expect(h.sidebar.openTabIn).not.toHaveBeenCalled()
   const seat = document.createElement('div'); seat.setAttribute('data-sidebar-right-session', 's'); document.body.append(seat)
   await expect(opening).resolves.toBe('tab-0')
+})
+
+it('falls back to the on-screen close when a Session store was never adopted', async () => {
+  const h = setup(); const id = await h.browser.open('s')
+  // A released adoption makes closeIn a documented no-op, and the tab would otherwise stay clickable forever.
+  h.sidebar.closeIn.mockImplementation(() => {})
+  h.browser.close('s', id)
+  expect(h.sidebar.close).toHaveBeenCalledWith(id)
+  expect(h.rows.some(row => row.id === id)).toBe(false)
+})
+
+it('never closes a same-named tab of a different Session', async () => {
+  const h = setup(); const id = await h.browser.open('s')
+  h.rows.push({ id: 'other', sessionId: 'x', kind: 'browser', title: '浏览器', contentId: 'other' }); h.publish()
+  h.mounted.set('x')
+  h.sidebar.closeIn.mockImplementation(() => {})
+  h.browser.close('s', id)
+  expect(h.sidebar.close).not.toHaveBeenCalled()
 })

@@ -52,7 +52,13 @@ export class NativeBrowser {
     if (!this.ctx.sidebarRight.isExpanded()) this.ctx.sidebarRight.toggleExpanded()
   }
 
-  close(sessionId: string, id: string): void { this.ctx.sidebarRight.closeIn(sessionId as SessionId, id as TabId); this.update() }
+  close(sessionId: string, id: string): void {
+    const target = sessionId as SessionId
+    this.ctx.sidebarRight.closeIn(target, id as TabId)
+    // `closeIn` is a no-op for a Session whose store was never adopted; the public close names the on-screen one.
+    if (this.ctx.sidebarRight.mounted.getSnapshot() === target && this.ctx.sidebarRight.tabsIn(target).some(tab => tab.id === id)) this.ctx.sidebarRight.close(id as TabId)
+    this.update()
+  }
   dispose(): void { this.lifetime.abort(); for (const dispose of this.disposers) dispose(); this.listeners.clear() }
 
   private update(): void {

@@ -52,14 +52,14 @@
 
 ## Installation
 
-Plugin 0.2.4 targets DeepSeek Harness `0.2.2-rc.1` (Cordis `4.1.0`). Update Harness before installing:
+Plugin 0.2.5 targets DeepSeek Harness `0.2.2-rc.1` (Cordis `4.1.0`). Update Harness before installing:
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.1
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
-Installing from the DSH Plugins page or a marketplace enables the plugin automatically. After a CLI install, add `dsh-vscode-workbench` to `dsh.profile.bundles` in `~/.dsh/profiles/web/package.json` and restart `dsh web`. The terminal depends on `node-pty`; see [Installation](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.en.md) for blocked build scripts, upgrades, and Harness compatibility failures.
+Installing from the DSH Plugins page or a marketplace enables the plugin automatically. After a CLI install, add `dsh-vscode-workbench` to `dsh.profile.bundles` in `~/.dsh/profiles/web/package.json` and restart `dsh web`. Terminals use the official Harness service, and the bundled Browser is enabled automatically; no additional terminal or sidebar plugin is needed. See [Installation](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.en.md) for upgrades and Harness compatibility failures.
 
 ## Shortcuts
 
@@ -75,7 +75,7 @@ Installing from the DSH Plugins page or a marketplace enables the plugin automat
 
 ## Security
 
-All plugin routes require Harness authentication. The host accepts only paths relative to the active DSH session workspace and rejects traversal and symlink escape. Saves use revision checks and atomic replacement. Git and ripgrep run with argument arrays rather than shell-concatenated commands. The terminal accepts same-origin loopback requests only, stays in the session workspace selected at creation, and removes API keys, tokens, secrets, and similar environment variables.
+All plugin routes require Harness authentication. The host accepts only paths relative to the active DSH session workspace and rejects traversal and symlink escape. Saves use revision checks and atomic replacement. Git and ripgrep run with argument arrays rather than shell-concatenated commands. Terminals use the official Harness controller, connection authentication and execution environment. Credential filtering belongs to the official subprocess provider.
 
 ## Development
 
@@ -86,7 +86,7 @@ pnpm test
 pnpm build
 ```
 
-Requires Node.js `^22.19 || >=24`, pnpm 11.7, system Git, and the native build prerequisites for `node-pty` when no prebuild is available.
+Requires Node.js `^22.19 || >=24`, pnpm 11.7 and system Git. The workbench no longer installs its own native terminal module.
 
 ## Docs
 
@@ -98,3 +98,5 @@ Requires Node.js `^22.19 || >=24`, pnpm 11.7, system Git, and the native build p
 ## License
 
 [MIT](LICENSE)
+
+The Browser activity button opens official browser pages in the editor tab area. Use Cmd+T on macOS or Ctrl+T to open another page. Terminals retain the bottom layout, session list, rename and split controls. Old workbench terminal processes cannot migrate to the official controller; create new terminals after updating.

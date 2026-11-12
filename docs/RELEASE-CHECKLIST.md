@@ -9,8 +9,9 @@
 - [ ] 确认版本号需要递增；已发布版本不能重复发布。
 - [ ] 若修复了安装或运行时问题，确认旧版本 tarball 确实不含这些修复，避免“已修复但用户装不到”。
 
-当前已知状态（2026-11-11）：
+当前已知状态（2026-11-12）：
 
+- `0.2.5` 终端改为 Harness 官方终端服务，新增普通浏览器标签；移除自建终端接口和 `node-pty` 依赖。旧终端进程不能迁移，升级后需新建终端；CLI 安装后仍需手动加入 `dsh.profile.bundles`。
 - `0.2.4` 修复 Windows 语言服务器检测：只接受带可执行扩展名的命令，POSIX bin 目录不再进入 Windows 搜索路径；CI 在 Windows 恢复通过。
 - `0.2.3` 包含 0.2.2 的全部功能，并修复工作区切换窗口未覆盖 DSH 面板的问题：遮罩现在覆盖整个窗口、背景模糊，不再高亮右侧 DSH；同时移除重复的 DSH 侧边栏按钮。README 精简，架构 / 安装 / 版本记录拆分到 `docs/`，截图更新为浅色主题。
 - `0.2.2` 新增 AI 提交信息生成（简洁 / 标准 / 详细、跟随最近提交 / 中文 / English），重构设置面板，新增纯白与护眼主题并覆盖 Monaco、终端和 DSH 对话栏；Markdown 默认预览，活动栏支持自由排序，工作区切换固定顶部，语言与 LSP 安装状态分离。
@@ -39,7 +40,7 @@ git diff --check
 ```
 
 - [ ] 类型检查通过。
-- [ ] 全部测试通过（本次基线：40 个测试文件、212 项测试）。
+- [ ] 全部测试通过（本次基线：42 个测试文件、218 项测试）。
 - [ ] 构建通过；只有既有提示时可以接受。
 - [ ] `git diff --check` 没有空白错误。
 
@@ -72,17 +73,10 @@ HOME="$CLEAN_HOME" "/Applications/DeepSeek Harness.app/Contents/Resources/runtim
   plugin --profile web add /absolute/path/to/dsh-vscode-workbench-<version>.tgz
 ```
 
-### 5.1 首次安装（不预置 allowBuilds）
+### 5.1 首次安装
 
-- [ ] 记录实际结果。若出现 `ERR_PNPM_IGNORED_BUILDS: Ignored build scripts: node-pty`，说明 pnpm 拦截了 `node-pty` 的构建脚本，安装会失败或回滚。
-- [ ] 在 `$CLEAN_HOME/.dsh/profiles/web/pnpm-workspace.yaml` 合并：
-
-```yaml
-allowBuilds:
-  node-pty: true
-```
-
-- [ ] 重新执行安装，确认成功。
+- [ ] 无需为工作台批准 `node-pty` 构建；插件包不再依赖该模块。
+- [ ] 官方终端 controller 与普通浏览器均由 Harness 提供，安装后无需另装侧栏或终端插件。
 
 ### 5.2 启用插件
 
@@ -115,20 +109,16 @@ HOME="$CLEAN_HOME" "/Applications/DeepSeek Harness.app/Contents/Resources/runtim
 - [ ] 首页 HTML 的插件列表包含 `dsh-vscode-workbench/client.js`。
 - [ ] `/dsh-vscode/codicons/codicon.ttf` 返回 200。
 - [ ] `/dsh-vscode/api/unknown` 返回 405（说明 API 前缀已注册，而不是 404）。
-- [ ] `/dsh-vscode-terminal/api/list` 带合法 `sessionId` 时能返回列表。
+- [ ] 已移除的 `/dsh-vscode-terminal/api/list` 返回 404。
 
-### 5.4 终端修复
+### 5.4 官方终端与浏览器
 
-安装后先确认 node-pty 的 helper 权限：
-
-```sh
-ls -l "$CLEAN_HOME/.dsh/profiles/web/node_modules/node-pty/prebuilds/darwin-arm64/spawn-helper"
-```
-
-- [ ] 安装后可能是 `0644`（无执行位）。
-- [ ] 启动 DSH、插件加载后变为 `0755`（`TerminalManager` 构造时自动修复）。
-- [ ] 用干净 profile 里的 `node-pty` 直接 spawn `/bin/zsh`，能收到命令输出。
-- [ ] 在 DSH 工作台里新建终端，能出现 `zsh` 提示符并执行 `pwd`。
+- [ ] 工作台新建终端能出现 shell 提示符并执行 `pwd`。
+- [ ] 多终端、分屏、重命名、关闭与失败重试正常。
+- [ ] 折叠面板、切换 Session 和刷新不会重复创建终端。
+- [ ] 多窗口新建不会覆盖彼此的恢复记录。
+- [ ] 普通浏览器在中间标签区打开；切回文件再返回保留网页状态。
+- [ ] 工作台设置和工作区切换器能覆盖浏览器，退出工作台恢复官方布局。
 
 ## 6. 功能验收
 
@@ -164,6 +154,6 @@ corepack pnpm publish
 
 ## 已知安装注意事项
 
-- `node-pty` 的构建脚本可能被 pnpm 拦截；需要 `allowBuilds: node-pty: true`。插件运行时会补 `spawn-helper` 执行位，但无法绕过 pnpm 在安装阶段的拦截。
+- 升级到官方终端后，旧版自建终端的进程不能迁移，需要新建终端。
 - CLI 安装不会自动修改 `dsh.profile.bundles`；只装依赖而不启用 bundle，插件不会加载。
 - 刚发布不足 24 小时的版本可能触发 pnpm 的安全等待期；等待后重试，或使用 DSH 的“立即更新”。

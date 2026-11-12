@@ -19,6 +19,7 @@ The install gate compares `engines.dsh` or the `@deepseek-ai/dsh*` peerDependenc
 
 | Plugin version | Required Harness |
 | --- | --- |
+| 0.2.5 | `0.2.2-rc.1` (Cordis `4.1.0`, default baseline); also checked with `0.2.1-rc.5` (Cordis `4.0.5`) |
 | 0.2.4 | `0.2.2-rc.1` (Cordis `4.1.0`, default baseline); also checked with `0.2.1-rc.5` (Cordis `4.0.5`) |
 | 0.2.3 | `0.2.2-rc.1` (Cordis `4.1.0`, default baseline); also checked with `0.2.1-rc.5` (Cordis `4.0.5`) |
 | 0.2.2 | `0.2.2-rc.1` (Cordis `4.1.0`, default baseline); also checked with `0.2.1-rc.5` (Cordis `4.0.5`) |
@@ -45,3 +46,7 @@ No plugin version runs on Harness `0.2.0-rc.2`: 0.1.9 needs the `workingDirector
 `0.2.1` retried terminal requests while a session was being published, so switching workspaces waits for the session instead of leaving a failed terminal behind.
 
 `0.2.2` added AI commit messages, the settings panel, Pure White and Eye Care themes, and the split-diff stabilization while keeping the `0.2.1-rc.5` compatibility range. Full release notes are on [GitHub Releases](https://github.com/tingfeng347/dsh-vscode-workbench/releases).
+
+## Official tools
+
+Terminals use an isolated official `ClientTerminals` controller for process ownership, recovery and input flow; the workbench owns tab membership and layout. Custom `/dsh-vscode-terminal/*` routes and the `node-pty` dependency are removed. Browser navigation and rendering stay with the official sidebar; its original DOM is presented in the editor area without moving React-owned nodes or rebuilding Electron webviews. Leaving the workbench restores the original presentation. See [native tools](native-tools.md) for scope and verification.

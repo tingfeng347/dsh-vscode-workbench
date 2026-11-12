@@ -1,6 +1,6 @@
 # 安装与升级
 
-插件 0.2.4 适配 DeepSeek Harness `0.2.2-rc.1`（Cordis `4.1.0`）。请先更新 Harness，再安装插件。架构接入与版本兼容表见[架构适配](ARCHITECTURE.md)。
+插件 0.2.5 适配 DeepSeek Harness `0.2.2-rc.1`（Cordis `4.1.0`）。请先更新 Harness，再安装插件。架构接入与版本兼容表见[架构适配](ARCHITECTURE.md)。
 
 ## 安装
 
@@ -30,19 +30,9 @@ dsh plugin --profile web add dsh-vscode-workbench
 
 ## 首次安装终端支持
 
-终端使用 `node-pty`。如果安装日志提示其构建脚本被阻止，在 DSH 所在机器的 `~/.dsh/profiles/web/pnpm-workspace.yaml` 中合并以下配置，保留已有设置：
+终端直接复用 Harness 官方控制器；工作台保留现有底部布局、多终端、重命名和分屏，不再依赖单独的 `node-pty` 安装或构建许可。普通浏览器由插件补丁启用，无需另装侧栏插件。Agent 浏览器不在此功能范围内。
 
-```yaml
-allowBuilds:
-  node-pty: true
-```
-
-新版 Harness 可能回滚失败的安装，配置后应重新执行安装命令。若插件已安装但终端仍提示 `node-pty` 加载失败，可执行：
-
-```bash
-cd ~/.dsh/profiles/web
-pnpm rebuild node-pty
-```
+旧版工作台的终端进程无法迁移到官方控制器，更新后需要新建终端。
 
 刚发布不足 24 小时的版本可能被 pnpm 的安全等待期拦截。等待后重试即可；DSH 提供“立即更新”时可直接选择它。
 
@@ -78,6 +68,7 @@ dsh: nothing was installed.
 
 | 插件版本 | 需要的 Harness |
 | --- | --- |
+| 0.2.5 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
 | 0.2.4 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
 | 0.2.3 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
 | 0.2.2 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
@@ -91,7 +82,7 @@ dsh: nothing was installed.
 | 0.1.9 | `0.2.1-alpha.3`（Cordis `4.0.5-alpha.2`，旧版验证基线） |
 | 0.1.8 | `0.1.1-rc.2` |
 
-Harness `0.2.0-rc.2` 上没有可用的插件版本：0.1.9 依赖 Harness `0.2.1-alpha.2` 才引入的 `workingDirectory` 服务，0.1.8 又只适配 `0.1.1-rc.2`。请先把 Harness 升级到 `0.2.2-rc.1` 再安装 0.2.4，例如 npm 全局安装时：
+Harness `0.2.0-rc.2` 上没有可用的插件版本：0.1.9 依赖 Harness `0.2.1-alpha.2` 才引入的 `workingDirectory` 服务，0.1.8 又只适配 `0.1.1-rc.2`。请先把 Harness 升级到 `0.2.2-rc.1` 再安装 0.2.5，例如 npm 全局安装时：
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.1

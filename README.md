@@ -52,14 +52,14 @@
 
 ## 安装
 
-插件 0.2.4 适配 DeepSeek Harness `0.2.2-rc.1`（Cordis `4.1.0`）。请先更新 Harness，再安装插件：
+插件 0.2.5 适配 DeepSeek Harness `0.2.2-rc.1`（Cordis `4.1.0`）。请先更新 Harness，再安装插件：
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.1
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
-通过 DSH 插件页或插件市场安装会自动启用。用 CLI 安装后还需在 `~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles` 中加入 `dsh-vscode-workbench`，再重启 `dsh web`。终端依赖 `node-pty`，首次安装如被构建策略拦截、升级旧版或遇到 Harness 版本不兼容，见[安装与升级](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.md)。
+通过 DSH 插件页或插件市场安装会自动启用。用 CLI 安装后还需在 `~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles` 中加入 `dsh-vscode-workbench`，再重启 `dsh web`。终端直接使用 Harness 官方服务，普通浏览器也随工作台启用，无需另装终端或侧栏插件。升级旧版或遇到 Harness 版本不兼容，见[安装与升级](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.md)。
 
 ## 快捷键
 
@@ -73,11 +73,11 @@ dsh plugin --profile web add dsh-vscode-workbench
 | `Ctrl+\`` | 显示或隐藏终端 |
 | `Ctrl+Shift+\`` | 新建终端 |
 
-左侧活动栏的终端按钮可切换显示或隐藏终端面板。
+左侧活动栏的终端按钮可切换底部面板，浏览器按钮在中间打开官方浏览器标签；`Cmd+T`（macOS）或 `Ctrl+T` 新建浏览器。终端保留右侧列表、重命名和分屏。升级前运行的旧终端不能迁移，更新后请新建终端。
 
 ## 安全
 
-所有插件接口要求 Harness 登录认证。Host 只接受当前 DSH 会话工作目录内的相对路径，并阻止目录穿越与符号链接越界。保存使用版本校验与原子替换；Git 与 ripgrep 使用参数数组启动，不拼接 Shell 命令。终端只接受同源 loopback 请求，固定在创建时的会话工作目录启动，并移除 API key、token、secret 等敏感环境变量。
+所有插件接口要求 Harness 登录认证。Host 只接受当前 DSH 会话工作目录内的相对路径，并阻止目录穿越与符号链接越界。保存使用版本校验与原子替换；Git 与 ripgrep 使用参数数组启动，不拼接 Shell 命令。终端使用 Harness 官方控制器、连接认证和执行环境，在 Session 当前工作目录启动；凭据环境变量过滤由官方 subprocess provider 负责。
 
 ## 开发
 
@@ -88,7 +88,7 @@ pnpm test
 pnpm build
 ```
 
-需要 Node.js `^22.19 || >=24`、pnpm 11.7、系统 Git，以及 `node-pty` 所需的本机构建环境（预编译产物不可用时）。
+需要 Node.js `^22.19 || >=24`、pnpm 11.7 和系统 Git。工作台不再单独安装终端原生模块。
 
 ## 文档
 

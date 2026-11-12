@@ -1,6 +1,6 @@
 # Installation
 
-Plugin 0.2.4 targets DeepSeek Harness `0.2.2-rc.1` (Cordis `4.1.0`). Architecture and the full compatibility table are in [Architecture](ARCHITECTURE.en.md).
+Plugin 0.2.5 targets DeepSeek Harness `0.2.2-rc.1` (Cordis `4.1.0`). Architecture and the full compatibility table are in [Architecture](ARCHITECTURE.en.md).
 
 ## Install
 
@@ -27,21 +27,11 @@ Installing from the DSH Plugins page or a marketplace adds the package to `dsh.p
 
 ## Terminal support on first install
 
-The terminal uses `node-pty`. If installation reports a blocked build script, merge the following into `~/.dsh/profiles/web/pnpm-workspace.yaml` on the DSH host, preserving existing settings:
+Terminals reuse the official Harness controller while retaining the bottom layout, session list, rename and split controls. No separate `node-pty` installation or build approval is needed. The plugin patch enables the bundled Browser; no sidebar plugin is required. Agent Browser is outside this feature.
 
-```yaml
-allowBuilds:
-  node-pty: true
-```
+Old workbench terminal processes cannot migrate to the official controller. Create new terminals after updating.
 
-Newer Harness releases may roll back failed installations, so run the install command again after configuring builds. If the plugin is installed but `node-pty` still cannot load:
-
-```bash
-cd ~/.dsh/profiles/web
-pnpm rebuild node-pty
-```
-
-pnpm can delay versions published less than 24 hours ago. Retry after the waiting period, or use DSH's "Update now" action when offered.
+pnpm can delay versions published less than 24 hours ago. Retry later, or use DSH's "Update now" action when offered.
 
 ## Upgrading
 
@@ -71,7 +61,7 @@ dsh: nothing was installed.
 
 The marketplace files this under the generic `plugin-side install failure`, so the auto-submitted issue keeps only the `pnpm.log` path.
 
-Update Harness to `0.2.2-rc.1` before installing plugin 0.2.4:
+Update Harness to `0.2.2-rc.1` before installing plugin 0.2.5:
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.1

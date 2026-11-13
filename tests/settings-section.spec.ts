@@ -22,7 +22,7 @@ describe('workbench settings section', () => {
 
   it('keeps the workbench layout untouched while settings are open', () => {
     const workbench = read('src/client/Workbench.tsx')
-    expect(workbench).toContain('const chatShown=chatVisible&&!showingDshPanel')
+    expect(workbench).toContain('const chatShown=chatVisible&&!showingDshPanel&&!floating')
     expect(workbench).toContain('const showingDshPanel=dshTabId!==undefined&&dshTabActive')
     expect(workbench).toContain('active={browserId===tab.id&&!dshTabActive&&!switcherOpen&&snapshot.visible}')
   })
@@ -48,6 +48,23 @@ describe('workbench settings section', () => {
     expect(panel).toContain('默认浏览器')
     expect(panel).toContain("['builtin', '内置浏览器']")
     expect(panel).toContain("['system', '系统浏览器']")
+  })
+
+  it('lets the workbench open as a floating window', () => {
+    const panel = read('src/client/SettingsPanel.tsx')
+    const workbench = read('src/client/Workbench.tsx')
+    expect(panel).toContain('打开方式')
+    expect(panel).toContain("['current', '当前窗口']")
+    expect(panel).toContain("['floating', '浮动窗口']")
+    expect(panel).toContain('dvw-set-group-title">窗口')
+    expect(panel).toContain('重置位置与大小')
+    expect(panel).toContain("props.openMode==='floating'")
+    expect(workbench).toContain("const floating=openMode==='floating'")
+    expect(workbench).toContain('data-dvw-float={floating||undefined}')
+    expect(workbench).toContain('resetFloatGeometry')
+    expect(workbench).toContain('requestFullscreen')
+    expect(workbench).toContain('fullscreenchange')
+    expect(read('src/client/floatWindow.ts')).toContain("OPEN_MODE_KEY = 'dvw:open-mode'")
   })
 
   it('leaves browser tabs out of the activity bar', () => {

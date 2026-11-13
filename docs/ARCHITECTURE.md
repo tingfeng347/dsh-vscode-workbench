@@ -6,6 +6,8 @@
 
 工作台通过官方 `sidebar.footer.action` 与 `shell.overlay` 扩展点挂载，不替换或卸载 `ui-layout`。入口位于 DSH 侧栏的面板列表，与「插件」「自动化任务」等并列；DSH 对话栏由活动栏的鲸鱼图标开关。
 
+「打开方式 → 浮动窗口」不是新的系统窗口：DSH Desktop 只有一个原生窗口，宿主会把 `window.open` 交给系统浏览器，因此工作台仍在 `shell.overlay` 里渲染，只是把 `.dvw-overlay` 从 `position: absolute; inset: 0` 改成 `position: fixed` 加内联的左上角与宽高。标题栏拖动和八向缩放由 React 指针事件计算。标题栏的全屏按钮和双击调用 `requestFullscreen()`，让浮层进入浏览器 top layer 并触发 Electron 的原生全屏，此时 DSH 标题栏、侧栏和对话都被遮住；`fullscreenchange` 同步按钮状态，`Esc` 由浏览器退出。全屏不可用时回退到原来的窗口内最大化，顶部保留 DSH 标题栏。打开方式、几何和内嵌最大化状态分别存在 `dvw:open-mode`、`dvw:float-rect`、`dvw:float-max`。浮动模式不再把 DSH 对话搬进右侧栏，因为对话本来就露在浮层外面。
+
 ## 客户端接入
 
 - 界面通过 `ui-renderer` 提供的槽位服务注册，使用 `ui-session` 的 `mainView` 引用选择当前会话，不再依赖已移除的 `dsh-client-runtime`。

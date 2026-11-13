@@ -166,6 +166,21 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 @media(max-width:720px){.dvw-set-row{flex-direction:column;align-items:stretch;gap:8px}.dvw-set-text{padding-right:0}.dvw-set-control{justify-content:flex-start}}
 /* Monaco owns diff scrolling; an outer scroller changes the width as scrollbars appear and makes split mode oscillate. */
 .dvw-editor{min-width:0;overflow:hidden}
+.dvw-pane>.dvw-editor{flex:1;min-height:0}
+.dvw-panes{display:flex;flex:1;min-width:0;min-height:0}
+.dvw-split{display:flex;flex:1;min-width:0;min-height:0}
+.dvw-split[data-direction=column]{flex-direction:column}
+.dvw-slot{display:flex;flex-basis:0;min-width:0;min-height:0}
+.dvw-splitter{flex:0 0 4px;background:var(--dvw-border-soft);cursor:col-resize;position:relative;z-index:2}
+.dvw-splitter[data-direction=column]{cursor:row-resize}
+.dvw-splitter:hover,.dvw-splitter:active{background:var(--dvw-accent)}
+.dvw-pane{position:relative;display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;outline:1px solid transparent;outline-offset:-1px}
+.dvw-pane[data-focused]{outline-color:var(--dvw-border-soft)}
+.dvw-pane-drop{position:absolute;z-index:6;pointer-events:none;background:color-mix(in srgb,var(--dvw-accent) 20%,transparent);border:1px solid var(--dvw-accent)}
+.dvw-pane-drop[data-direction=row][data-position=first]{inset:0 50% 0 0}
+.dvw-pane-drop[data-direction=row][data-position=second]{inset:0 0 0 50%}
+.dvw-pane-drop[data-direction=column][data-position=first]{inset:0 0 50% 0}
+.dvw-pane-drop[data-direction=column][data-position=second]{inset:50% 0 0 0}
 .dvw-editor-body{min-width:0;overflow:hidden}
 .dvw-monaco-diff{height:auto;min-width:0;min-height:0;margin:0;padding:0;overflow:hidden;white-space:normal}
 /* Keep the workspace switcher in the same elevated surface family as workbench settings. */

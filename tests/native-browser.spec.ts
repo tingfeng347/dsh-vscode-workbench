@@ -16,11 +16,18 @@ function setup() {
   const rows: Array<{ id: string; sessionId: string; kind: string; title: string; contentId: string }> = []
   const openTabs = source<Array<{ sessionId: string; tabId: string; kind: string; contentId: string }>>([])
   let expanded = false
+  let lastId = -1
   const publish = () => openTabs.set(rows.map(row => ({ ...row, tabId: row.id })))
   const sidebar = {
     openTabs, mounted,
     tabsIn: (id: string) => rows.filter(row => row.sessionId === id),
-    openTabIn: vi.fn((sessionId: string, kind: string) => { rows.push({ id: `tab-${rows.length}`, sessionId, kind, title: '浏览器', contentId: `content-${rows.length}` }); publish() }),
+    openTabIn: vi.fn((sessionId: string, kind: string, options?: { replaceTab?: string }) => {
+      if (options?.replaceTab !== undefined) {
+        const index = rows.findIndex(row => row.id === options.replaceTab)
+        if (index >= 0) rows.splice(index, 1)
+      }
+      rows.push({ id: `tab-${++lastId}`, sessionId, kind, title: '浏览器', contentId: `content-${lastId}` }); publish()
+    }),
     closeIn: vi.fn((sessionId: string, id: string) => { const i = rows.findIndex(row => row.id === id && row.sessionId === sessionId); rows.splice(i, 1); publish() }),
     close: vi.fn((id: string) => { const i = rows.findIndex(row => row.id === id); rows.splice(i, 1); publish() }),
     focus: vi.fn(), isExpanded: () => expanded, toggleExpanded: () => { expanded = !expanded },
@@ -47,6 +54,17 @@ it('waits for the selected Session to mount after leaving a global panel', async
   expect(h.sidebar.openTabIn).not.toHaveBeenCalled()
   h.mounted.set('s')
   await expect(opening).resolves.toBe('tab-0')
+})
+
+it('opens the official page at an address and reuses that tab for the next address', async () => {
+  const h = setup()
+  const first = await h.browser.open('s', undefined, 'https://example.com/')
+  expect(h.sidebar.openTabIn.mock.calls[0]?.[2]).toMatchObject({ params: { url: 'https://example.com/' } })
+  expect(h.sidebar.openTabIn.mock.calls[0]?.[2]).not.toHaveProperty('replaceTab')
+  const second = await h.browser.open('s', undefined, 'https://example.org/docs', first)
+  expect(second).not.toBe(first)
+  expect(h.sidebar.openTabIn.mock.calls[1]?.[2]).toMatchObject({ params: { url: 'https://example.org/docs' }, replaceTab: first })
+  expect(h.rows.filter(row => row.kind === 'browser').map(row => row.id)).toEqual([second])
 })
 it('cancels pending opens when switching workspaces instead of opening a stale page later', async () => {
   const h = setup(); h.mounted.set(undefined)

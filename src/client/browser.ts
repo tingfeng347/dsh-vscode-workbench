@@ -3,6 +3,13 @@ import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { TabId } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 
+declare module '@deepseek-ai/dsh-client-ui-sidebar-right/client' {
+  interface SidebarRightTabParamsMap {
+    /** Optional initial Browser URL; mirrors the official browser package's declaration. */
+    browser: { readonly url?: string }
+  }
+}
+
 export interface BrowserTab { id: string; sessionId: string; title: string }
 export interface BrowserSnapshot { available: boolean; tabs: readonly BrowserTab[] }
 
@@ -21,7 +28,12 @@ export class NativeBrowser {
   getSnapshot = (): BrowserSnapshot => this.snapshot
   subscribe = (listener: () => void): (() => void) => { this.listeners.add(listener); return () => this.listeners.delete(listener) }
 
-  async open(sessionId: string, request?: AbortSignal): Promise<string> {
+  /**
+   * Open the official browser page, optionally at an address.
+   * An address replaces the Session's existing browser tab so following several links
+   * reuses one page instead of stacking a new tab for every click.
+   */
+  async open(sessionId: string, request?: AbortSignal, url?: string, replaceId?: string): Promise<string> {
     const signal = request === undefined ? this.lifetime.signal : AbortSignal.any([request, this.lifetime.signal])
     signal.throwIfAborted()
     if (!this.snapshot.available) throw new Error('官方浏览器尚未启用，请重新加载 Harness。')
@@ -39,9 +51,18 @@ export class NativeBrowser {
       signal.addEventListener('abort', abort, { once: true })
     })
     signal.throwIfAborted()
-    const before = new Set(this.ctx.sidebarRight.tabsIn(sessionId as SessionId).map(tab => tab.id))
-    this.ctx.sidebarRight.openTabIn(sessionId as SessionId, 'browser', { revealIfOpened: false })
-    const tab = this.ctx.sidebarRight.tabsIn(sessionId as SessionId).find(tab => tab.kind === 'browser' && !before.has(tab.id))
+    const target = sessionId as SessionId
+    const existing = url === undefined ? undefined
+      : this.ctx.sidebarRight.tabsIn(target).find(tab => tab.kind === 'browser' && tab.id === replaceId)
+        ?? this.ctx.sidebarRight.tabsIn(target).find(tab => tab.kind === 'browser')
+    const before = new Set(this.ctx.sidebarRight.tabsIn(target).map(tab => tab.id))
+    this.ctx.sidebarRight.openTabIn(target, 'browser', {
+      revealIfOpened: false,
+      ...(url === undefined ? {} : { params: { url } }),
+      ...(existing === undefined ? {} : { replaceTab: existing.id as TabId }),
+    })
+    const tabs = this.ctx.sidebarRight.tabsIn(target).filter(tab => tab.kind === 'browser')
+    const tab = tabs.find(tab => !before.has(tab.id)) ?? (existing === undefined ? undefined : tabs.find(tab => tab.id === existing.id))
     if (tab === undefined) throw new Error('浏览器页面未能打开，请重试。')
     this.update()
     return tab.id

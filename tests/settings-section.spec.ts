@@ -43,4 +43,16 @@ describe('workbench settings section', () => {
     expect(styles).toContain('.dvw-set-switch[aria-checked=false] .dvw-set-knob{background:var(--dsw-alias-switch-thumb,#fff)}')
   })
 
+  it('offers a default browser for links and HTML pages', () => {
+    const panel = read('src/client/SettingsPanel.tsx')
+    expect(panel).toContain('默认浏览器')
+    expect(panel).toContain("['builtin', '内置浏览器']")
+    expect(panel).toContain("['system', '系统浏览器']")
+  })
+
+  it('leaves browser tabs out of the activity bar', () => {
+    const workbench = read('src/client/Workbench.tsx')
+    expect(workbench).not.toContain("id:'browser',label:'新建浏览器'")
+    expect(workbench).toContain("const ACTIVITY_IDS=['explorer','search','git','terminal','chat'] as const")
+  })
 })

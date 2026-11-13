@@ -5,6 +5,7 @@ import { settingsHost } from './settingsHost.ts'
 
 type WorkbenchTheme = 'dsh' | 'dark' | 'light' | 'white' | 'eyecare'
 type MarkdownView = 'preview' | 'source'
+type DefaultBrowser = 'builtin' | 'system'
 type CommitDetail = 'concise' | 'standard' | 'detailed'
 type CommitLanguage = 'auto' | 'zh' | 'en'
 type TsIndex = { state: 'idle' | 'loading' | 'ready' | 'error'; files?: number; truncated?: boolean; error?: string }
@@ -29,6 +30,8 @@ export interface WorkbenchSettingsProps {
   chatMaxWidth: number
   markdownView: MarkdownView
   setMarkdownView(value: MarkdownView): void
+  defaultBrowser: DefaultBrowser
+  setDefaultBrowser(value: DefaultBrowser): void
   commitDetail: CommitDetail
   setCommitDetail(value: CommitDetail): void
   commitLanguage: CommitLanguage
@@ -45,6 +48,7 @@ export interface WorkbenchSettingsProps {
 
 const THEMES = [['dsh', '跟随 DSH'], ['dark', '深色'], ['light', '浅色'], ['white', '纯白'], ['eyecare', '护眼']] as const
 const MARKDOWN_VIEWS = [['preview', '预览'], ['source', '源码']] as const
+const DEFAULT_BROWSERS = [['builtin', '内置浏览器'], ['system', '系统浏览器']] as const
 const COMMIT_DETAILS = [['concise', '简洁'], ['standard', '标准'], ['detailed', '详细']] as const
 const COMMIT_LANGUAGES = [['auto', '跟随最近提交'], ['zh', '中文'], ['en', 'English']] as const
 
@@ -133,6 +137,13 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
       </Row>
       <Row title="编辑器字号" description="影响 Monaco 编辑器、差异视图和 Markdown 源码。">
         <DebouncedRange label="编辑器字号" min={11} max={20} unit="px" value={props.fontSize} onChange={props.setFontSize}/>
+      </Row>
+    </section>
+
+    <section className="dvw-set-group">
+      <h3 className="dvw-set-group-title">浏览器</h3>
+      <Row title="默认浏览器" description="打开网页链接和 HTML 文件时使用的浏览器。">
+        <Selector label="默认浏览器" value={props.defaultBrowser} options={DEFAULT_BROWSERS} onChange={props.setDefaultBrowser}/>
       </Row>
     </section>
 

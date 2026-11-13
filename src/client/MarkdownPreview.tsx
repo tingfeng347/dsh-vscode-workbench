@@ -14,5 +14,12 @@ export function MarkdownPreview({ source, sessionId, path }: { source: string; s
   const root=useRef<HTMLElement>(null)
   const html=useMemo(()=>{const clean=DOMPurify.sanitize(marked.parse(source,{gfm:true,breaks:false}) as string,{USE_PROFILES:{html:true}});const template=document.createElement('template');template.innerHTML=clean;template.content.querySelectorAll('h1,h2,h3,h4,h5,h6').forEach((heading,index)=>{heading.id=`dvw-heading-${index}`;heading.setAttribute('data-dvw-heading',String(index))});template.content.querySelectorAll('img').forEach(image=>{const target=markdownWorkspacePath(path,image.getAttribute('src')??'');if(target!==undefined)image.src=`/dsh-vscode/file?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(target)}`});return template.innerHTML},[source,sessionId,path])
   useEffect(()=>{const listener=(event:Event)=>{const index=(event as CustomEvent<number>).detail;root.current?.querySelector<HTMLElement>(`[data-dvw-heading="${index}"]`)?.scrollIntoView({behavior:'smooth',block:'start'})};window.addEventListener('dvw-markdown-heading',listener);return()=>window.removeEventListener('dvw-markdown-heading',listener)},[])
-  return <article ref={root} className="dvw-markdown" onClick={event=>{const anchor=(event.target as Element).closest('a');if(anchor===null)return;const target=markdownWorkspacePath(path,anchor.getAttribute('href')??'');if(target===undefined)return;event.preventDefault();window.dispatchEvent(new CustomEvent('dvw-open-workspace-path',{detail:target}))}} dangerouslySetInnerHTML={{__html:html}}/>
+  return <article ref={root} className="dvw-markdown" onClick={event=>{
+    const anchor=(event.target as Element).closest('a');if(anchor===null)return
+    const href=anchor.getAttribute('href')??''
+    // Web links follow the browser preference; workspace links keep opening in the editor.
+    if(/^https?:\/\//i.test(href)){event.preventDefault();window.dispatchEvent(new CustomEvent('dvw-open-external-url',{detail:href}));return}
+    const target=markdownWorkspacePath(path,href);if(target===undefined)return
+    event.preventDefault();window.dispatchEvent(new CustomEvent('dvw-open-workspace-path',{detail:target}))
+  }} dangerouslySetInnerHTML={{__html:html}}/>
 }

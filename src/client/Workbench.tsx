@@ -34,6 +34,8 @@ interface Tab extends FileDocument { instance?: symbol; dirty: boolean; draft: s
 type WorkbenchTheme = 'dsh' | 'dark' | 'light' | 'white' | 'eyecare'
 export type MarkdownDefaultView = 'preview' | 'source'
 export const MARKDOWN_DEFAULT_VIEW_KEY = 'dvw:markdown-default-view'
+export type DefaultBrowser = 'builtin' | 'system'
+export const DEFAULT_BROWSER_KEY = 'dvw:default-browser'
 interface TreeProps { sessionId: string; root: string; path: string; depth: number; expanded: Set<string>; selected?: string; selectedDirectory: string; statuses: Map<string, string>; onToggle(path: string): void; onSelectDirectory(path: string): void; onOpen(path: string): void; onChange(): void; onUpload(directory: string, files: FileList): void; onAddToDsh(path: string, directory: boolean): void }
 interface CreatingEntry { kind: 'file' | 'directory'; directory: string; value: string; error?: string }
 
@@ -467,14 +469,33 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   },[browserSnapshot,sessionId,browserId,snapshot.visible])
   const browserRequest=useRef<AbortController>()
   useEffect(()=>()=>browserRequest.current?.abort(),[browser,sessionId,snapshot.visible])
-  const newBrowser=async()=>{
+  const browserIdRef=useRef(browserId);browserIdRef.current=browserId
+  const newBrowser=async(url?:string)=>{
     if(browser===undefined||sessionId===undefined)return
     setDshTabActive(false);onRestoreConversation?.()
     browserRequest.current?.abort();const request=new AbortController();browserRequest.current=request
-    try{setBrowserId(await browser.open(sessionId,request.signal))}catch(error){if(!request.signal.aborted)setError(error instanceof Error?error.message:String(error))}
+    try{setBrowserId(await browser.open(sessionId,request.signal,url,browserIdRef.current))}catch(error){if(!request.signal.aborted)setError(error instanceof Error?error.message:String(error))}
+  }
+  const [defaultBrowser,setDefaultBrowser]=useState<DefaultBrowser>(()=>localStorage.getItem(DEFAULT_BROWSER_KEY)==='system'?'system':'builtin')
+  useEffect(()=>localStorage.setItem(DEFAULT_BROWSER_KEY,defaultBrowser),[defaultBrowser])
+  const openBrowserUrl=(url:string)=>{
+    if(defaultBrowser==='system'||browser===undefined){window.open(url,'_blank','noopener,noreferrer');return}
+    void newBrowser(url)
+  }
+  const openSiteFile=async(path:string)=>{
+    if(sessionId===undefined)return
+    try{
+      const {url}=await api<{url:string}>('preview.site',{sessionId,path})
+      openBrowserUrl(url)
+    }catch(error){setError(error instanceof Error?error.message:String(error))}
   }
   useEffect(()=>{if(browserId!==undefined&&!dshTabActive)browser?.focus(browserId)},[browser,browserId,dshTabActive])
   useEffect(()=>{if(!snapshot.visible)return;const open=()=>void newBrowser();window.addEventListener('dvw-browser-new',open);return()=>window.removeEventListener('dvw-browser-new',open)},[browser,sessionId,snapshot.visible])
+  useEffect(()=>{
+    const open=(event:Event)=>{const url=(event as CustomEvent<string>).detail;if(typeof url==='string'&&url!=='')openBrowserUrl(url)}
+    window.addEventListener('dvw-open-external-url',open)
+    return ()=>window.removeEventListener('dvw-open-external-url',open)
+  },[defaultBrowser,browser,sessionId])
   useEffect(()=>{if(hostDshPanelId!==undefined)setBrowserId(undefined)},[hostDshPanelId])
   const tabsRef=useRef(tabs);tabsRef.current=tabs
   // DSH unmounts its conversation while a global panel (Plugins…) is selected,
@@ -534,7 +555,10 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   // The conversation may still be attaching after the chat column opens, so retry for about a second.
   const addToDsh=useCallback((reference:string)=>{setChatVisible(true);let frames=0;const attempt=()=>{void insertIntoDshComposer(reference).then(done=>{if(done)return;if(++frames<60){requestAnimationFrame(attempt);return}alert('DSH 对话输入框当前不可用，请先选择会话或等待当前回复结束。')})};requestAnimationFrame(attempt)},[])
   const addEntryToDsh=useCallback((path:string,directory:boolean)=>addToDsh(dshReference(path,{directory})),[addToDsh])
-  const openForWorkspace=(path:string,line?:number,column?:number,highlight?:string)=>{const existing=tabsRef.current.find(tab=>tab.path===path);if(existing)setTabs(rows=>rows.map(tab=>tab.path===path?{...tab,line,column,highlight,preview:line!==undefined?false:tab.preview}:tab));else setTabs(rows=>[...rows,{...unloadedTab(path),line,column,highlight,...(line!==undefined?{preview:false}:{})}]);leaveDshPanel();setActive(path)}
+  const openForWorkspace=(path:string,line?:number,column?:number,highlight?:string)=>{
+    // HTML is a page, not source: hand it to the configured browser so its assets resolve.
+    if(!path.startsWith('diff:')&&/\.html?$/i.test(path)){void openSiteFile(path);return}
+    const existing=tabsRef.current.find(tab=>tab.path===path);if(existing)setTabs(rows=>rows.map(tab=>tab.path===path?{...tab,line,column,highlight,preview:line!==undefined?false:tab.preview}:tab));else setTabs(rows=>[...rows,{...unloadedTab(path),line,column,highlight,...(line!==undefined?{preview:false}:{})}]);leaveDshPanel();setActive(path)}
   useEffect(() => {
     if (sessionId === undefined) return
     // Switching sessions inside one workspace must keep the explorer, tabs and layout as they are.
@@ -755,7 +779,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const activeTab=tabs.find(tab=>tab.path===active); const Panel=panels.find(panel=>panel.id===snapshot.bottomPanel)?.component; const terminalAvailable=panels.some(panel=>panel.id==='terminal')
   const menuTab=tabMenu===undefined?undefined:tabs.find(tab=>tab.path===tabMenu.path); const menuIndex=menuTab===undefined?-1:tabs.findIndex(tab=>tab.path===menuTab.path); const savedTabs=tabs.filter(tab=>!tab.dirty)
   const selectView=(view:WorkbenchView)=>{if(snapshot.view===view&&primarySideVisible){setPrimarySideVisible(false);return}setPrimarySideVisible(true);service.show(view)}
-  const ACTIVITY_IDS=['explorer','search','git','terminal','browser','chat'] as const
+  const ACTIVITY_IDS=['explorer','search','git','terminal','chat'] as const
   const [activityOrder,setActivityOrder]=useState<string[]>(()=>normalizeActivityOrder(readActivityJSON('dvw:activity-order'),ACTIVITY_IDS))
   const [activityHidden,setActivityHidden]=useState<string[]>(()=>{const value=readActivityJSON('dvw:activity-hidden');return Array.isArray(value)?value.filter((id):id is string=>typeof id==='string'&&(ACTIVITY_IDS as readonly string[]).includes(id)):[]})
   useEffect(()=>localStorage.setItem('dvw:activity-order',JSON.stringify(activityOrder)),[activityOrder])
@@ -767,7 +791,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   },[activityHidden])
   const selectHeading=(index:number)=>{if(activeTab===undefined)return;setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab));window.setTimeout(()=>window.dispatchEvent(new CustomEvent('dvw-markdown-heading',{detail:index})),50)}
   const suppressAttachmentDrop=(event:DragEvent)=>{if(!event.dataTransfer.types.includes('Files'))return;const target=event.target;const insideTree=target instanceof Element&&target.closest('.dvw-tree')!==null;if(!insideTree){event.preventDefault();event.stopPropagation()}}
-  const settingsPage=<WorkbenchSettings theme={theme} setTheme={setTheme} fontSize={fontSize} setFontSize={setFontSize} primarySideVisible={primarySideVisible} setPrimarySideVisible={setPrimarySideVisible} chatVisible={chatVisible} setChatVisible={setChatVisible} statusVisible={statusVisible} setStatusVisible={setStatusVisible} sideWidth={sideWidth} setSideWidth={setSideWidth} chatWidth={chatWidth} setChatWidth={setChatWidth} chatMinWidth={DSH_CHAT_MIN_WIDTH} chatMaxWidth={DSH_CHAT_MAX_WIDTH} markdownView={markdownView} setMarkdownView={setMarkdownView} commitDetail={commitDetail} setCommitDetail={setCommitDetail} commitLanguage={commitLanguage} setCommitLanguage={setCommitLanguage} tsIntellisense={tsIntellisense} setTsIntellisense={setTsIntellisense} tsIndex={tsIndex} lspServers={lspServers} lspBusy={lspBusy} lspError={lspError} changeLsp={changeLspAction} refreshLsp={refreshLspAction}/>
+  const settingsPage=<WorkbenchSettings theme={theme} setTheme={setTheme} fontSize={fontSize} setFontSize={setFontSize} primarySideVisible={primarySideVisible} setPrimarySideVisible={setPrimarySideVisible} chatVisible={chatVisible} setChatVisible={setChatVisible} statusVisible={statusVisible} setStatusVisible={setStatusVisible} sideWidth={sideWidth} setSideWidth={setSideWidth} chatWidth={chatWidth} setChatWidth={setChatWidth} chatMinWidth={DSH_CHAT_MIN_WIDTH} chatMaxWidth={DSH_CHAT_MAX_WIDTH} markdownView={markdownView} setMarkdownView={setMarkdownView} defaultBrowser={defaultBrowser} setDefaultBrowser={setDefaultBrowser} commitDetail={commitDetail} setCommitDetail={setCommitDetail} commitLanguage={commitLanguage} setCommitLanguage={setCommitLanguage} tsIntellisense={tsIntellisense} setTsIntellisense={setTsIntellisense} tsIndex={tsIndex} lspServers={lspServers} lspBusy={lspBusy} lspError={lspError} changeLsp={changeLspAction} refreshLsp={refreshLspAction}/>
   if(!snapshot.visible)return settingsNode===undefined?null:createPortal(settingsPage,settingsNode)
   if(sessionId===undefined)return <div className="dvw-overlay" data-dvw-theme={colorScheme} data-dvw-theme-name={theme}><WorkbenchTitlebar/><div className="dvw-empty" style={{gridColumn:'1/4'}}><div>请先选择或创建一个 DSH 会话。<br/><button onClick={()=>service.hide()}>返回 DSH</button></div></div></div>
   const showingDshPanel=dshTabId!==undefined&&dshTabActive
@@ -792,7 +816,6 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
           {id:'search',label:'搜索',icon:<Icon name="search"/>,active:primarySideVisible&&snapshot.view==='search',onActivate:()=>selectView('search')},
           {id:'git',label:'源代码管理',icon:<Icon name="source-control"/>,active:primarySideVisible&&snapshot.view==='git',onActivate:()=>selectView('git')},
           {id:'terminal',label:terminalAvailable?(snapshot.bottomPanel==='terminal'?'隐藏终端':'显示终端'):'终端适配器未安装',icon:<Icon name="terminal"/>,active:snapshot.bottomPanel==='terminal',disabled:!terminalAvailable,onActivate:()=>toggleTerminal(service)},
-          {id:'browser',label:'新建浏览器',icon:<Icon name="globe"/>,active:browserId!==undefined,disabled:!browserSnapshot.available||sessionId===undefined,onActivate:()=>void newBrowser()},
           {id:'chat',label:chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)',icon:<DshMark size={22}/>,active:chatVisible,onActivate:()=>setChatVisible(value=>!value)},
         ]}
         fixed={[{id:'workspaces',label:'打开工作区 / 切换会话',icon:<Icon name="folder-opened"/>,active:false,onActivate:openSwitcher}]}

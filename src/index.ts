@@ -13,6 +13,7 @@ import { generateCommitMessage, normalizeCommitPreferences } from './commit-mess
 import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitCommitContext, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, searchWorkspace, uploadFile, workspacePreviewFile } from './host.ts'
 import { installLsp, lspStatuses, resolveLsp, uninstallLsp, pipeLanguageServer } from './lsp.ts'
 import { officePdf, officeStatus } from './office.ts'
+import { WorkspaceSite } from './site.ts'
 import type { SearchRequest } from './types.ts'
 import { watchIgnore, workspaceWatchIgnores } from './watch-ignore.ts'
 import { readBinaryBody, readBody, send, sendError, stringField, authorize, WorkbenchError } from './wire.ts'
@@ -26,7 +27,7 @@ let dshDirectoryPicker: import('./context.ts').DirectoryPickerLike | undefined
 let dshWorkspaceRegistry: import('./context.ts').WorkspaceRegistryLike | undefined
 export const inject = ['webServer', 'sessions', 'connection', 'workingDirectory']
 
-async function dispatch(ctx: HostContext, method: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
+async function dispatch(ctx: HostContext, method: string, body: Record<string, unknown>, signal?: AbortSignal, site?: WorkspaceSite): Promise<unknown> {
   const sessionId = stringField(body, 'sessionId'); const cwd = cwdFor(ctx, sessionId)
   switch (method) {
     case 'workspace': return { cwd, name: cwd.split(/[\\/]/).at(-1) || cwd }
@@ -38,6 +39,10 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     case 'fs.delete': return deleteEntry(cwd, stringField(body, 'path')).then(() => ({ ok: true }))
     case 'project.sources': return projectSources(cwd)
     case 'office.status': return officeStatus()
+    case 'preview.site': {
+      if (site === undefined) throw new WorkbenchError('site-unavailable', 'HTML 预览服务不可用', 503)
+      return { url: await site.url(sessionId, stringField(body, 'path')) }
+    }
     case 'workspace.open': return openWorkspaceFromPicker(dshDirectoryPicker, dshWorkspaceRegistry, AbortSignal.timeout(10 * 60 * 1000))
     case 'lsp.status': return lspStatuses()
     case 'lsp.install': await installLsp(stringField(body, 'id')); return lspStatuses()
@@ -65,6 +70,8 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
 }
 
 export function apply(ctx: HostContext): void {
+  const site = new WorkspaceSite(ctx)
+  ctx.effect(() => () => site.dispose(), 'dsh-vscode-workbench: workspace sites')
   ctx.effect(() => {
     if (typeof ctx.inject !== 'function') return
     // Optional injection: the callback runs once both services are active, and never if a profile omits them.
@@ -130,7 +137,7 @@ export function apply(ctx: HostContext): void {
         req.once('aborted', () => controller.abort())
         const path = new URL(req.url ?? '/', 'http://dsh.local').pathname
         const method = path.slice('/dsh-vscode/api/'.length)
-        send(res, 200, { ok: true, value: await dispatch(ctx, method, await readBody(req), controller.signal) })
+        send(res, 200, { ok: true, value: await dispatch(ctx, method, await readBody(req), controller.signal, site) })
       } catch (error) { sendError(res, error) }
     },
   }), 'dsh-vscode-workbench: API')

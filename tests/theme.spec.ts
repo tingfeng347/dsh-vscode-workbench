@@ -38,7 +38,8 @@ describe('workbench dark theme', () => {
 
   it('keeps the DSH chat toggle in the activity bar', () => {
     const workbench = read('src/client/Workbench.tsx')
-    expect(workbench).toContain("label:chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)'")
+    expect(workbench).toContain("label:showingDshPanel?'返回 DSH 对话 (Ctrl+Alt+B)'")
+    expect(workbench).toContain('showConversation')
     expect(workbench).not.toContain('dvw-chat-toggle')
   })
 

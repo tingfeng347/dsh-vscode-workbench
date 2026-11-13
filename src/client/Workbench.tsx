@@ -629,6 +629,10 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const restoreConversationRef=useRef(onRestoreConversation);restoreConversationRef.current=onRestoreConversation
   const leaveDshPanel=useCallback(()=>{setBrowserId(undefined);const wasActive=dshTabActiveRef.current;setDshTabActive(false);if(wasActive)restoreConversationRef.current?.()},[])
   const openDshTab=useCallback(()=>{setBrowserId(undefined);const id=dshTabIdRef.current;if(id===undefined)return;setDshTabActive(true);if(hostDshPanelIdRef.current!==id)openDshPanelRef.current?.(id)},[])
+  // Bring the official conversation back without requiring another tab: while a
+  // DSH panel is pinned, the chat column is intentionally hidden, so the whale
+  // button and Ctrl+Alt+B must first leave that panel.
+  const showConversation=useCallback(()=>{setBrowserId(undefined);setDshTabActive(false);setChatVisible(true)},[])
   const tabListRef=useRef<HTMLDivElement>(null)
   const workspaceRequests=useRef(new WorkspaceRequestScope());const loadedWorkspaceCwd=useRef<string>();const loadingTabs=useRef(new Map<string, symbol>())
   const dshDark = useDshDarkTheme()
@@ -651,8 +655,10 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   useEffect(()=>localStorage.setItem('dvw:font-size',String(fontSize)),[fontSize])
   useEffect(()=>{
     if(hostDshPanelId!==undefined){setDshTabId(hostDshPanelId);setDshTabActive(true);return}
-    // The panel went away while it was on screen (closed outside the tab), so forget the tab.
-    if(dshTabActiveRef.current)setDshTabId(undefined)
+    // DSH's own navigation left the panel (for example the user clicked the
+    // conversation). Release the tab instead of selecting the panel again: a
+    // reopen here would fight the host and trap the user on the plugin page.
+    if(dshTabActiveRef.current){setDshTabId(undefined);setDshTabActive(false)}
   },[hostDshPanelId])
   // The host only mounts its conversation while no global panel is selected, so
   // showing a file must hand the centre back; clicking the tab re-selects it.
@@ -660,19 +666,21 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     if(dshTabActive||dshTabId===undefined||hostDshPanelId===undefined)return
     restoreConversationRef.current?.()
   },[dshTabActive,dshTabId,hostDshPanelId])
+  // Only a local activation (clicking the tab) asks DSH to select the panel
+  // again. Host-driven changes must never bounce the centre back to the panel.
   useEffect(()=>{
     if(!dshTabActive)return
     const id=dshTabIdRef.current
-    if(id===undefined||hostDshPanelId===id)return
+    if(id===undefined||hostDshPanelIdRef.current===id)return
     openDshPanelRef.current?.(id)
-  },[dshTabActive,hostDshPanelId])
+  },[dshTabActive])
   useEffect(()=>{if(tabMenu===undefined)return;const close=()=>setTabMenu(undefined);const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')close()};window.addEventListener('pointerdown',close);window.addEventListener('keydown',escape);return()=>{window.removeEventListener('pointerdown',close);window.removeEventListener('keydown',escape)}},[tabMenu])
   useEffect(() => {
     if (!snapshot.visible || openMode === 'floating') return
     document.body.setAttribute('data-dvw-workbench-active', '')
     return () => document.body.removeAttribute('data-dvw-workbench-active')
   }, [snapshot.visible, openMode])
-  useEffect(()=>{if(!snapshot.visible)return;const onKey=(event:KeyboardEvent)=>{if(event.isComposing||!event.ctrlKey||!event.altKey||event.shiftKey||event.code!=='KeyB')return;event.preventDefault();setChatVisible(value=>!value)};window.addEventListener('keydown',onKey,true);return()=>window.removeEventListener('keydown',onKey,true)},[snapshot.visible])
+  useEffect(()=>{if(!snapshot.visible)return;const onKey=(event:KeyboardEvent)=>{if(event.isComposing||!event.ctrlKey||!event.altKey||event.shiftKey||event.code!=='KeyB')return;event.preventDefault();if(dshTabActiveRef.current&&dshTabIdRef.current!==undefined){showConversation();return}setChatVisible(value=>!value)};window.addEventListener('keydown',onKey,true);return()=>window.removeEventListener('keydown',onKey,true)},[snapshot.visible,showConversation])
   useEffect(()=>{
     if(!floating||!snapshot.visible)return
     const onKey=(event:KeyboardEvent)=>{
@@ -1102,7 +1110,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
           {id:'search',label:'搜索',icon:<Icon name="search"/>,active:primarySideVisible&&snapshot.view==='search',onActivate:()=>selectView('search')},
           {id:'git',label:'源代码管理',icon:<Icon name="source-control"/>,active:primarySideVisible&&snapshot.view==='git',onActivate:()=>selectView('git')},
           {id:'terminal',label:terminalAvailable?(snapshot.bottomPanel==='terminal'?'隐藏终端':'显示终端'):'终端适配器未安装',icon:<Icon name="terminal"/>,active:snapshot.bottomPanel==='terminal',disabled:!terminalAvailable,onActivate:()=>toggleTerminal(service)},
-          ...(floating?[]:[{id:'chat',label:chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)',icon:<DshMark size={22}/>,active:chatVisible,onActivate:()=>setChatVisible(value=>!value)}]),
+          ...(floating?[]:[{id:'chat',label:showingDshPanel?'返回 DSH 对话 (Ctrl+Alt+B)':chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)',icon:<DshMark size={22}/>,active:chatShown,onActivate:()=>{if(showingDshPanel)showConversation();else setChatVisible(value=>!value)}}]),
         ]}
         fixed={[{id:'workspaces',label:'打开工作区 / 切换会话',icon:<Icon name="folder-opened"/>,active:false,onActivate:openSwitcher}]}
         bottom={[

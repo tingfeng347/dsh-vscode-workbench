@@ -207,3 +207,38 @@ it('hands the centre back to the conversation and reopens the panel from its tab
   expect(dshTab()?.dataset.active).toBe('true')
   expect(fileTab()?.dataset.active).toBe('false')
 })
+
+it('does not bounce the centre back to a DSH panel after the user leaves it', async () => {
+  const service = await setup()
+  await act(async () => { root!.unmount() }); root = undefined
+  const panel = document.createElement('div')
+  panel.id = 'plugins'
+  panel.setAttribute('data-global-panel', '')
+  document.body.append(panel)
+  const open = vi.fn()
+  await mount(service, true, 'plugins', { open })
+  expect(open).not.toHaveBeenCalled()
+  // DSH's own navigation (for example clicking the conversation) clears the
+  // global panel. Reopening it here is what trapped users on the plugin page.
+  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" onOpenDshPanel={open}/>) })
+  expect(open).not.toHaveBeenCalled()
+  expect(document.querySelector('[data-dvw-dsh-tab]')).toBeNull()
+})
+
+it('returns to the conversation from the DSH chat button while a panel is open', async () => {
+  const service = await setup()
+  await act(async () => { root!.unmount() }); root = undefined
+  const panel = document.createElement('div')
+  panel.id = 'plugins'
+  panel.setAttribute('data-global-panel', '')
+  document.body.append(panel)
+  const restore = vi.fn()
+  await mount(service, true, 'plugins', { restore })
+  expect(document.querySelector('.dvw-chat')).toBeNull()
+  const chat = document.querySelector<HTMLButtonElement>('[data-act-id="chat"]')
+  expect(chat?.title).toBe('返回 DSH 对话 (Ctrl+Alt+B)')
+  await act(async () => chat!.click())
+  expect(restore).toHaveBeenCalledTimes(1)
+  expect(document.querySelector<HTMLElement>('[data-dvw-dsh-tab]')?.dataset.active).toBe('false')
+  expect(document.querySelector('.dvw-chat')).not.toBeNull()
+})

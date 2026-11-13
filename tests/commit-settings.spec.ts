@@ -6,12 +6,12 @@ const read = (path: string) => readFileSync(new URL(`../${path}`, import.meta.ur
 describe('commit message settings', () => {
   it('offers detail and language choices in the settings panel', () => {
     const workbench = read('src/client/Workbench.tsx')
-    expect(workbench).toContain("['commit','提交信息','sparkle']")
+    const panel = read('src/client/SettingsPanel.tsx')
     expect(workbench).toContain("'dvw:commit-detail'")
     expect(workbench).toContain("'dvw:commit-language'")
-    expect(workbench).toContain("['concise','简洁'],['standard','标准'],['detailed','详细']")
-    expect(workbench).toContain("['auto','跟随最近提交'],['zh','中文'],['en','English']")
-    expect(workbench).toContain('提交信息')
+    expect(panel).toContain("['concise', '简洁'], ['standard', '标准'], ['detailed', '详细']")
+    expect(panel).toContain("['auto', '跟随最近提交'], ['zh', '中文'], ['en', 'English']")
+    expect(panel).toContain('提交信息')
   })
 
   it('sends the selected preferences with the generation request', () => {

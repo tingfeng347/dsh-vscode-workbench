@@ -23,9 +23,9 @@ describe('Markdown default view', () => {
   })
 
   it('keeps the default-view control in the layout section', () => {
-    const workbench = readFileSync('src/client/Workbench.tsx', 'utf8')
-    const appearance = workbench.slice(workbench.indexOf('<h3>外观</h3>'), workbench.indexOf('<h3>布局</h3>'))
-    const layout = workbench.slice(workbench.indexOf('<h3>布局</h3>'), workbench.indexOf('<h3>提交信息</h3>'))
+    const panel = readFileSync('src/client/SettingsPanel.tsx', 'utf8')
+    const appearance = panel.slice(panel.indexOf('>外观</h3>'), panel.indexOf('>布局</h3>'))
+    const layout = panel.slice(panel.indexOf('>布局</h3>'), panel.indexOf('>提交信息</h3>'))
     expect(appearance).not.toContain('Markdown 默认视图')
     expect(layout).toContain('Markdown 默认视图')
   })

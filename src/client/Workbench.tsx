@@ -1,5 +1,6 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, DragEvent, ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import type { FileDocument, FileEntry, GitBranch, GitChange, GitCommit, GitCommitFile, GitDiff, GitStatus, SearchMatch } from '../types.ts'
 import { ApiError, api } from './api.ts'
 import type { VscodeWorkbench, WorkbenchView } from './service.ts'
@@ -25,6 +26,8 @@ import { DocumentPreview, documentPreviewKind, type DocumentPreviewKind } from '
 import { toggleTerminal } from './shortcuts.ts'
 import { websocketUrl } from './websocket.ts'
 import { resetWorkspaceDocuments, WorkspaceRequestScope } from './workspaceState.ts'
+import { WorkbenchSettings } from './SettingsPanel.tsx'
+import { settingsHost } from './settingsHost.ts'
 import type { CommitDetail, CommitLanguage, CommitMessagePreferences } from '../commit-message.ts'
 
 interface Tab extends FileDocument { instance?: symbol; dirty: boolean; draft: string; loaded?: boolean; line?: number; column?: number; highlight?: string; external?: boolean; preview?: boolean; title?: string; diff?: GitDiff; diffMode?: 'inline' | 'split'; diffSourcePath?:string; imageUrl?:string; documentPreview?:DocumentPreviewKind; documentUrl?:string }
@@ -442,26 +445,14 @@ function Git(props: { sessionId: string; preferences: CommitMessagePreferences; 
   </>
 }
 
-/** Keep range dragging responsive and commit the editor font size after a short pause. */
-function FontSizeControl({ value, onChange }: { value: number; onChange(value: number): void }) {
-  const [draft, setDraft] = useState(value)
-  useEffect(() => setDraft(value), [value])
-  useEffect(() => {
-    if (draft === value) return
-    const timer = setTimeout(() => onChange(draft), 180)
-    return () => clearTimeout(timer)
-  }, [draft, value, onChange])
-  return <label className="dvw-setting-range"><span>编辑器字体大小</span><input type="range" min="11" max="20" step="1" value={draft} onChange={event=>setDraft(Number(event.target.value))}/><output>{draft}px</output></label>
-}
-
 const ExplorerView = memo(Explorer)
 const SearchView = memo(Search)
 const GitView = memo(Git)
 
-export function Workbench({ service, browser, sessionId, cwd, navigation, dshPanelId: hostDshPanelId, onOpenDshPanel, onRestoreConversation, onCloseDshPanel }: { service: VscodeWorkbench; browser?: NativeBrowser; sessionId?: string; cwd?: string; navigation?: DshNavigation; dshPanelId?: string; onOpenDshPanel?(panelId: string): void; onRestoreConversation?(): void; onCloseDshPanel?(): void }) {
+export function Workbench({ service, browser, sessionId, cwd, navigation, dshPanelId: hostDshPanelId, onOpenDshPanel, onRestoreConversation, onCloseDshPanel, openSettings }: { service: VscodeWorkbench; browser?: NativeBrowser; sessionId?: string; cwd?: string; navigation?: DshNavigation; dshPanelId?: string; onOpenDshPanel?(panelId: string): void; onRestoreConversation?(): void; onCloseDshPanel?(): void; openSettings?(): void }) {
   const [snapshot, setSnapshot] = useState(() => service.getSnapshot()); const [panels, setPanels] = useState(() => service.getPanels())
   useEffect(() => service.subscribe(() => { setSnapshot(service.getSnapshot()); setPanels(service.getPanels()) }), [service])
-  const [workspace,setWorkspace]=useState<{cwd:string;name:string}>(); const [tabs,setTabs]=useState<Tab[]>([]); const [active,setActive]=useState<string>(); const [dshTabActive,setDshTabActive]=useState(hostDshPanelId!==undefined); const [dshTabId,setDshTabId]=useState<string|undefined>(hostDshPanelId); const dshPanelId=dshTabId; const [error,setError]=useState<string>(); const [panelHeight,setPanelHeight]=useState(260); const [sideWidth,setSideWidth]=useState(210); const [primarySideVisible,setPrimarySideVisible]=useState(()=>localStorage.getItem('dvw:primary-side-visible')!=='closed');const [statusVisible,setStatusVisible]=useState(()=>localStorage.getItem('dvw:status-bar-visible')==='open');const [settingsOpen,setSettingsOpen]=useState(false);const [chatWidth,setChatWidth]=useState(()=>clampChatWidth(Number(localStorage.getItem('dvw:dsh-chat-width'))||DSH_CHAT_DEFAULT_WIDTH));const [chatVisible,setChatVisible]=useState(()=>localStorage.getItem('dvw:dsh-chat-visible')!=='closed');const [outlineVisible,setOutlineVisible]=useState(()=>localStorage.getItem('dvw:outline')!=='closed');const [tsIntellisense,setTsIntellisense]=useState(tsIntellisenseEnabled);const [tsIndex,setTsIndex]=useState<{state:'idle'|'loading'|'ready'|'error';files?:number;truncated?:boolean;error?:string}>({state:'idle'});const [lspServers,setLspServers]=useState<LspServerStatus[]>([]);const [lspBusy,setLspBusy]=useState<string>();const [lspError,setLspError]=useState('');const lspManager=useRef<LspManager>();const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localStorage.getItem('dvw:font-size')));return Number.isFinite(saved)&&saved>=11&&saved<=20?saved:14});const [tabMenu,setTabMenu]=useState<{x:number;y:number;path:string}>()
+  const [workspace,setWorkspace]=useState<{cwd:string;name:string}>(); const [tabs,setTabs]=useState<Tab[]>([]); const [active,setActive]=useState<string>(); const [dshTabActive,setDshTabActive]=useState(hostDshPanelId!==undefined); const [dshTabId,setDshTabId]=useState<string|undefined>(hostDshPanelId); const dshPanelId=dshTabId; const [error,setError]=useState<string>(); const [panelHeight,setPanelHeight]=useState(260); const [sideWidth,setSideWidth]=useState(210); const [primarySideVisible,setPrimarySideVisible]=useState(()=>localStorage.getItem('dvw:primary-side-visible')!=='closed');const [statusVisible,setStatusVisible]=useState(()=>localStorage.getItem('dvw:status-bar-visible')==='open');const settingsNode=useSyncExternalStore(settingsHost.subscribe,settingsHost.getSnapshot);const settingsOpen=settingsNode!==undefined;const [chatWidth,setChatWidth]=useState(()=>clampChatWidth(Number(localStorage.getItem('dvw:dsh-chat-width'))||DSH_CHAT_DEFAULT_WIDTH));const [chatVisible,setChatVisible]=useState(()=>localStorage.getItem('dvw:dsh-chat-visible')!=='closed');const [outlineVisible,setOutlineVisible]=useState(()=>localStorage.getItem('dvw:outline')!=='closed');const [tsIntellisense,setTsIntellisense]=useState(tsIntellisenseEnabled);const [tsIndex,setTsIndex]=useState<{state:'idle'|'loading'|'ready'|'error';files?:number;truncated?:boolean;error?:string}>({state:'idle'});const [lspServers,setLspServers]=useState<LspServerStatus[]>([]);const [lspBusy,setLspBusy]=useState<string>();const [lspError,setLspError]=useState('');const lspManager=useRef<LspManager>();const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localStorage.getItem('dvw:font-size')));return Number.isFinite(saved)&&saved>=11&&saved<=20?saved:14});const [tabMenu,setTabMenu]=useState<{x:number;y:number;path:string}>()
   const [browserSnapshot,setBrowserSnapshot]=useState<BrowserSnapshot>(()=>browser?.getSnapshot()??{available:false,tabs:[]})
   const [browserId,setBrowserId]=useState<string>()
   const browserTabs=browserSnapshot.tabs.filter(tab=>tab.sessionId===sessionId)
@@ -496,7 +487,6 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const restoreConversationRef=useRef(onRestoreConversation);restoreConversationRef.current=onRestoreConversation
   const leaveDshPanel=useCallback(()=>{setBrowserId(undefined);const wasActive=dshTabActiveRef.current;setDshTabActive(false);if(wasActive)restoreConversationRef.current?.()},[])
   const openDshTab=useCallback(()=>{setBrowserId(undefined);const id=dshTabIdRef.current;if(id===undefined)return;setDshTabActive(true);if(hostDshPanelIdRef.current!==id)openDshPanelRef.current?.(id)},[])
-  const [settingsSection,setSettingsSection]=useState<'appearance'|'layout'|'commit'|'language'>('appearance')
   const tabListRef=useRef<HTMLDivElement>(null)
   const workspaceRequests=useRef(new WorkspaceRequestScope());const loadedWorkspaceCwd=useRef<string>();const loadingTabs=useRef(new Map<string, symbol>())
   const dshDark = useDshDarkTheme()
@@ -709,9 +699,11 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   },[snapshot.visible,sessionId,workspace])
   const refreshLsp=useCallback(async()=>{if(sessionId===undefined)return;try{const list=await api<LspServerStatus[]>('lsp.status',{sessionId});setLspServers(list);await startLsp(list)}catch(error){setLspError(error instanceof Error?error.message:String(error))}},[sessionId,startLsp])
   const changeLsp=useCallback(async(id:string,action:'install'|'uninstall')=>{if(sessionId===undefined)return;setLspBusy(id);setLspError('');try{const list=await api<LspServerStatus[]>(`lsp.${action}`,{sessionId,id});setLspServers(list);await startLsp(list)}catch(error){setLspError(error instanceof Error?error.message:String(error))}finally{setLspBusy(undefined)}},[sessionId,startLsp])
+  // The settings page is rendered through a portal from this tree; keep its callbacks referentially stable
+  // so its mount effect re-probes the machine once instead of on every render.
+  const refreshLspAction=useCallback(()=>{void refreshLsp()},[refreshLsp])
+  const changeLspAction=useCallback((id:string,action:'install'|'uninstall')=>{void changeLsp(id,action)},[changeLsp])
   useEffect(()=>{if(!snapshot.visible||sessionId===undefined||workspace===undefined)return;void refreshLsp()},[snapshot.visible,sessionId,workspace,refreshLsp])
-  // Opening the language panel re-probes the machine; there is no manual "re-detect" button to click.
-  useEffect(()=>{if(settingsOpen&&settingsSection==='language')void refreshLsp()},[settingsOpen,settingsSection,refreshLsp])
   useEffect(()=>()=>{lspManager.current?.dispose()},[])
   useEffect(()=>{try{localStorage.setItem(TS_INTELLISENSE_KEY,tsIntellisense?'on':'off')}catch{}},[tsIntellisense])
   // Definition and reference jumps land in workbench tabs for every language, including LSP servers
@@ -775,12 +767,13 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   },[activityHidden])
   const selectHeading=(index:number)=>{if(activeTab===undefined)return;setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab));window.setTimeout(()=>window.dispatchEvent(new CustomEvent('dvw-markdown-heading',{detail:index})),50)}
   const suppressAttachmentDrop=(event:DragEvent)=>{if(!event.dataTransfer.types.includes('Files'))return;const target=event.target;const insideTree=target instanceof Element&&target.closest('.dvw-tree')!==null;if(!insideTree){event.preventDefault();event.stopPropagation()}}
-  if(!snapshot.visible)return null
+  const settingsPage=<WorkbenchSettings theme={theme} setTheme={setTheme} fontSize={fontSize} setFontSize={setFontSize} primarySideVisible={primarySideVisible} setPrimarySideVisible={setPrimarySideVisible} chatVisible={chatVisible} setChatVisible={setChatVisible} statusVisible={statusVisible} setStatusVisible={setStatusVisible} sideWidth={sideWidth} setSideWidth={setSideWidth} chatWidth={chatWidth} setChatWidth={setChatWidth} chatMinWidth={DSH_CHAT_MIN_WIDTH} chatMaxWidth={DSH_CHAT_MAX_WIDTH} markdownView={markdownView} setMarkdownView={setMarkdownView} commitDetail={commitDetail} setCommitDetail={setCommitDetail} commitLanguage={commitLanguage} setCommitLanguage={setCommitLanguage} tsIntellisense={tsIntellisense} setTsIntellisense={setTsIntellisense} tsIndex={tsIndex} lspServers={lspServers} lspBusy={lspBusy} lspError={lspError} changeLsp={changeLspAction} refreshLsp={refreshLspAction}/>
+  if(!snapshot.visible)return settingsNode===undefined?null:createPortal(settingsPage,settingsNode)
   if(sessionId===undefined)return <div className="dvw-overlay" data-dvw-theme={colorScheme} data-dvw-theme-name={theme}><WorkbenchTitlebar/><div className="dvw-empty" style={{gridColumn:'1/4'}}><div>请先选择或创建一个 DSH 会话。<br/><button onClick={()=>service.hide()}>返回 DSH</button></div></div></div>
-  const showingDshPanel=dshTabId!==undefined&&dshTabActive&&!settingsOpen
+  const showingDshPanel=dshTabId!==undefined&&dshTabActive
   const closeDshPanel=()=>{setDshTabActive(false);setDshTabId(undefined);onCloseDshPanel?.()}
   const openFromView=(path:string,line?:number,column?:number,highlight?:string)=>{leaveDshPanel();openPath(path,line,column,highlight)}
-  const chatShown=chatVisible&&!settingsOpen&&!showingDshPanel
+  const chatShown=chatVisible&&!showingDshPanel
   const markdown=activeTab!==undefined&&!activeTab.path.startsWith('diff:')&&/\.md$/i.test(activeTab.path)
   const diffMarkdown=activeTab?.diff!==undefined&&/\.md$/i.test(activeTab.diffSourcePath??'')
   const markdownPreview=markdown||(diffMarkdown&&activeTab?.preview===true)
@@ -792,36 +785,8 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     <DshConversationTheme visible={chatShown} colorScheme={colorScheme} followDsh={false}/>
     {chatShown&&<aside className="dvw-chat"><PanelResizer className="dvw-chat-resizer" label="拖动调整 DSH 对话栏宽度" width={chatWidth} min={DSH_CHAT_MIN_WIDTH} max={DSH_CHAT_MAX_WIDTH} defaultWidth={DSH_CHAT_DEFAULT_WIDTH} direction={-1} hideBelow={200} onHide={()=>setChatVisible(false)} onWidth={setChatWidth}/><header className="dvw-chat-head"><span><DshMark/> DSH</span><button className="dvw-icon" title="关闭 DSH 对话栏" onClick={()=>setChatVisible(false)}><Icon name="close"/></button></header><div className="dvw-chat-body"/></aside>}
     {switcherOpen&&<WorkspaceSwitcher choices={switcherChoices} activeSessionId={sessionId} unavailable={navigation?.available===false} busy={switcherBusy} error={switcherError} theme={colorScheme} onCreate={()=>void createWorkspace()} onSwitch={switchSession} onOpenWorkspace={enterWorkspace} onClose={()=>setSwitcherOpen(false)}/>}
-    {settingsOpen&&<div className="dvw-settings-backdrop" role="presentation" onMouseDown={()=>setSettingsOpen(false)}>
-      <section className="dvw-settings" role="dialog" aria-modal="true" aria-label="工作台设置" onMouseDown={event=>event.stopPropagation()}>
-        <header><span><Icon name="settings"/> 工作台设置</span><button className="dvw-icon" title="关闭设置" onClick={()=>setSettingsOpen(false)}><Icon name="close"/></button></header>
-        <div className="dvw-settings-body" data-section={settingsSection}>
-          <nav className="dvw-settings-nav" aria-label="设置分类">{([['appearance','外观','color-mode'],['layout','布局','layout-sidebar-right'],['commit','提交信息','sparkle'],['language','语言智能','code']] as const).map(([value,label,icon])=><button key={value} data-active={settingsSection===value} onClick={()=>setSettingsSection(value)}><Icon name={icon}/><span>{label}</span></button>)}</nav>
-          <section><h3>外观</h3><label>颜色主题</label><div className="dvw-settings-themes">{([['dsh','跟随 DSH'],['dark','深色'],['light','浅色'],['white','纯白'],['eyecare','护眼']] as const).map(([value,label])=><button key={value} data-active={theme===value} onClick={()=>setTheme(value)}><span className={`dvw-theme-swatch ${value}`}/><span>{label}</span>{theme===value&&<Icon name="check"/>}</button>)}</div><FontSizeControl value={fontSize} onChange={setFontSize}/></section>
-          <section><h3>布局</h3><label className="dvw-setting-check"><input type="checkbox" checked={primarySideVisible} onChange={event=>setPrimarySideVisible(event.target.checked)}/><span>显示左侧视图</span></label><label className="dvw-setting-check"><input type="checkbox" checked={chatVisible} onChange={event=>setChatVisible(event.target.checked)}/><span>显示 DSH 对话栏</span></label><label className="dvw-setting-check"><input type="checkbox" checked={statusVisible} onChange={event=>setStatusVisible(event.target.checked)}/><span>显示底部状态栏</span></label><label className="dvw-setting-range"><span>左侧视图宽度</span><input type="range" min="210" max="640" step="1" value={Math.round(sideWidth)} onChange={event=>setSideWidth(Math.round(Number(event.target.value)))}/><output>{sideWidth}px</output></label><label className="dvw-setting-range"><span>DSH 对话栏宽度</span><input type="range" min={DSH_CHAT_MIN_WIDTH} max={DSH_CHAT_MAX_WIDTH} step="1" value={Math.round(chatWidth)} onChange={event=>setChatWidth(clampChatWidth(Number(event.target.value)))}/><output>{chatWidth}px</output></label><div className="dvw-setting-choice"><span>Markdown 默认视图</span><div className="dvw-setting-segment">{([['preview','预览'],['source','源码']] as const).map(([value,label])=><button key={value} data-active={markdownView===value} onClick={()=>setMarkdownView(value)}>{label}</button>)}</div></div></section>
-          <section><h3>提交信息</h3><div className="dvw-setting-choice"><span>详细程度</span><div className="dvw-setting-segment">{([['concise','简洁'],['standard','标准'],['detailed','详细']] as const).map(([value,label])=><button key={value} data-active={commitDetail===value} onClick={()=>setCommitDetail(value)}>{label}</button>)}</div></div><div className="dvw-setting-choice"><span>语言</span><div className="dvw-setting-segment">{([['auto','跟随最近提交'],['zh','中文'],['en','English']] as const).map(([value,label])=><button key={value} data-active={commitLanguage===value} onClick={()=>setCommitLanguage(value)}>{label}</button>)}</div></div><p className="dvw-setting-hint">详细模式会生成标题和 2–4 条说明；简洁模式限制标题长度，标准模式保持单行约定式提交。</p></section>
-          <section><h3>语言智能</h3>
-            <div className="dvw-setting-extension"><div><strong>TypeScript / JavaScript</strong><span>内置 · {tsIntellisense ? tsIndex.state === 'loading' ? '正在索引工作区…' : tsIndex.state === 'error' ? `索引失败：${tsIndex.error}` : tsIndex.state === 'ready' ? `已索引 ${tsIndex.files} 个文件${tsIndex.truncated ? '（已达上限）' : ''}` : '已安装，转到定义、查找引用、Peek、补全、签名帮助' : '点击安装'}</span></div><button className={tsIntellisense?undefined:'dvw-primary-button'} onClick={()=>setTsIntellisense(value=>!value)}>{tsIntellisense?'卸载':'安装'}</button></div>
-            {lspServers.map(server=><div className="dvw-setting-extension" key={server.id}>
-              <div>
-                <strong>{server.name}</strong>
-                <div className="dvw-lsp-status">
-                  <span className="dvw-lsp-chip" data-installed={server.language===undefined||server.language.installed} data-action={server.language!==undefined&&!server.language.installed}>{server.language===undefined?'语言：无需安装':server.language.installed?'语言：已安装':'安装语言'}</span>
-                  <span className="dvw-lsp-chip" data-installed={server.installed}>{server.installed?'LSP：已安装':'LSP：未安装'}</span>
-                  {!server.installed&&server.hint!==undefined&&<span className="dvw-lsp-hint">{server.hint}</span>}
-                </div>
-              </div>
-              {server.language!==undefined&&!server.language.installed
-                ? <button disabled title="先安装语言工具链，再安装 LSP">等待</button>
-                : server.installable&&<button disabled={lspBusy===server.id} className={server.installed?undefined:'dvw-primary-button'} onClick={()=>void changeLsp(server.id,server.installed?'uninstall':'install')}>{lspBusy===server.id?'处理中…':server.installed?'卸载 LSP':'安装 LSP'}</button>}
-            </div>)}
-            <p className="dvw-setting-hint">每种语言使用该生态里最活跃的语言服务器；能自动安装的会装进本插件的私有目录，需要手动安装的会分别检查语言工具链和服务器本身。</p>
-            {lspError&&<p className="dvw-setting-hint">{lspError}</p>}
-          </section>
-        </div>
-      </section>
-    </div>}
-          <ActivityBar
+    {settingsNode!==undefined&&createPortal(settingsPage,settingsNode)}
+    <ActivityBar
         views={[
           {id:'explorer',label:'资源管理器',icon:<Icon name="files"/>,active:primarySideVisible&&snapshot.view==='explorer',onActivate:()=>selectView('explorer')},
           {id:'search',label:'搜索',icon:<Icon name="search"/>,active:primarySideVisible&&snapshot.view==='search',onActivate:()=>selectView('search')},
@@ -833,7 +798,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
         fixed={[{id:'workspaces',label:'打开工作区 / 切换会话',icon:<Icon name="folder-opened"/>,active:false,onActivate:openSwitcher}]}
         bottom={[
           {id:'home',label:'返回 DSH',icon:<Icon name="home"/>,active:false,onActivate:()=>service.hide()},
-          {id:'settings',label:'管理工作台设置',icon:<Icon name="settings"/>,active:settingsOpen,onActivate:()=>setSettingsOpen(true)},
+          {id:'settings',label:'打开 DSH 设置',icon:<Icon name="settings"/>,active:settingsOpen,onActivate:()=>openSettings?.()},
         ]}
         order={activityOrder} hidden={activityHidden}
         onOrderChange={setActivityOrder} onHiddenChange={setActivityHidden}/>
@@ -847,7 +812,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
       <button role="menuitem" disabled={savedTabs.length===0} onClick={()=>removeTabs(savedTabs,'关闭已保存标签页')}>关闭已保存<span>Ctrl+K U</span></button>
       <button role="menuitem" onClick={closeAll}>全部关闭<span>Ctrl+K W</span></button>
     </div>}
-    {sessionId!==undefined&&browserTabs.map(tab=><DshBrowserPage key={tab.id} sessionId={sessionId} tabId={tab.id} colorScheme={colorScheme} active={browserId===tab.id&&!dshTabActive&&!settingsOpen&&!switcherOpen&&snapshot.visible}/>)}
+    {sessionId!==undefined&&browserTabs.map(tab=><DshBrowserPage key={tab.id} sessionId={sessionId} tabId={tab.id} colorScheme={colorScheme} active={browserId===tab.id&&!dshTabActive&&!switcherOpen&&snapshot.visible}/>)}
     {snapshot.bottomPanel&&<section className="dvw-bottom" style={{height:panelHeight}}><div className="dvw-bottom-resizer" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();const startY=event.clientY,startHeight=panelHeight;const move=(e:PointerEvent)=>setPanelHeight(Math.max(120,Math.min(window.innerHeight-160,startHeight+startY-e.clientY)));const up=(e:PointerEvent)=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);if(startHeight+startY-e.clientY<80)service.toggleBottomPanel(snapshot.bottomPanel!)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/><div className="dvw-bottom-head"><button className="dvw-bottom-title">{panels.find(p=>p.id===snapshot.bottomPanel)?.title??snapshot.bottomPanel}</button>{snapshot.bottomPanel==='terminal'&&<button className="dvw-icon" title="新建终端" onClick={()=>window.dispatchEvent(new Event('dvw-terminal-new'))}><Icon name="add"/></button>}<button className="dvw-icon" style={{marginLeft:'auto'}} onClick={()=>service.toggleBottomPanel(snapshot.bottomPanel!)}><Icon name="close"/></button></div><div className="dvw-bottom-body">{Panel&&workspace&&<Panel sessionId={sessionId} cwd={workspace.cwd} visible colorScheme={colorScheme}/>}</div></section>}
     <footer className="dvw-status"><span><Icon name="git-branch"/> 工作区</span><span>{workspace?.cwd??cwd??''}</span>{activeTab?.external&&<span>磁盘文件已变化</span>}<button className="dvw-icon" style={{color:'inherit',marginLeft:'auto'}} onClick={()=>service.hide()}>返回 DSH</button></footer>
   </div>

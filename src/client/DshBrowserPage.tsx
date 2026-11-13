@@ -1,4 +1,5 @@
-import { useLayoutEffect } from 'react'
+import { useLayoutEffect, useSyncExternalStore } from 'react'
+import { settingsHost } from './settingsHost.ts'
 
 /** Present the original browser DOM without moving React-owned nodes or rebuilding webviews. */
 const PALETTE: Record<string, string> = {
@@ -10,6 +11,10 @@ const PALETTE: Record<string, string> = {
 }
 
 export function DshBrowserPage({ sessionId, tabId, active, colorScheme }: { sessionId: string; tabId: string; active: boolean; colorScheme: 'dark' | 'light' | 'white' | 'eyecare' }) {
+  // The adopted page lives in the top layer, so it would paint over DSH's settings dialog.
+  // Step back into the sidebar while settings is open and adopt the page again when it closes.
+  const settingsOpen = useSyncExternalStore(settingsHost.subscribe, settingsHost.getSnapshot) !== undefined
+  const presenting = active && !settingsOpen
   useLayoutEffect(() => {
     let page: HTMLElement | undefined
     let restore: (() => void) | undefined
@@ -28,7 +33,7 @@ export function DshBrowserPage({ sessionId, tabId, active, colorScheme }: { sess
       const rect = document.querySelector('.dvw-editor')?.getBoundingClientRect()
       // Adopt only while the workbench presents this tab. A browser page that stays in the sidebar
       // must remain DSH's alone, or switching to a file leaves its address bar drawn over the editor.
-      if (!active || rect === undefined || rect.width <= 0 || rect.height <= 0) { release(); return }
+      if (!presenting || rect === undefined || rect.width <= 0 || rect.height <= 0) { release(); return }
       // DSH mounts only the active tab's body, and a restored tab mounts it after the seat adopts; keep the current node while it survives.
       const nodes = bodies()
       const next = nodes.find(node => node === page) ?? nodes.find(node => { const box = node.getBoundingClientRect(); return box.width > 0 && box.height > 0 }) ?? nodes[0]
@@ -62,7 +67,7 @@ export function DshBrowserPage({ sessionId, tabId, active, colorScheme }: { sess
     }
     const schedule = () => { if (frame === 0) frame = requestAnimationFrame(() => { frame = 0; place() }) }
     place()
-    retry = window.setInterval(() => { if (page !== undefined || !active) { window.clearInterval(retry); return } place() }, 250)
+    retry = window.setInterval(() => { if (page !== undefined || !presenting) { window.clearInterval(retry); return } place() }, 250)
     const resize = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(schedule)
     const editor = document.querySelector('.dvw-editor')
     if (editor !== null) resize?.observe(editor)
@@ -70,6 +75,6 @@ export function DshBrowserPage({ sessionId, tabId, active, colorScheme }: { sess
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-sidebar-right-tab', 'data-sidebar-right-session'] })
     window.addEventListener('resize', schedule)
     return () => { observer.disconnect(); resize?.disconnect(); window.removeEventListener('resize', schedule); cancelAnimationFrame(frame); window.clearInterval(retry); release() }
-  }, [sessionId, tabId, active, colorScheme])
+  }, [sessionId, tabId, presenting, colorScheme])
   return null
 }

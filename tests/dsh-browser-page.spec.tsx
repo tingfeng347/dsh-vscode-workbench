@@ -3,6 +3,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it } from 'vitest'
 import { DshBrowserPage } from '../src/client/DshBrowserPage.tsx'
+import { settingsHost } from '../src/client/settingsHost.ts'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 if (typeof globalThis.requestAnimationFrame !== 'function') {
@@ -12,7 +13,7 @@ if (typeof globalThis.requestAnimationFrame !== 'function') {
   })
 }
 
-afterEach(() => { document.body.replaceChildren() })
+afterEach(() => { settingsHost.set(undefined); document.body.replaceChildren() })
 
 function stage() {
   document.body.innerHTML = '<div class="dvw-overlay"><div class="dvw-editor"></div></div><div data-sidebar-right-session="s"></div><div id="host"></div>'
@@ -82,5 +83,20 @@ it('releases the official body when a file takes the centre back', async () => {
   expect(page.hasAttribute('popover')).toBe(false)
   expect(page.hasAttribute('data-dvw-browser-page')).toBe(false)
   expect(page.getAttribute('style')).toBeFalsy()
+  await act(async () => { root.unmount() })
+})
+
+it('steps out of the top layer while DSH settings is open and returns afterwards', async () => {
+  const { host, seat } = stage()
+  const page = body(seat, 'tab1'); rect(page, 640, 480)
+  const root = createRoot(host)
+  await act(async () => { root.render(<DshBrowserPage sessionId="s" tabId="tab1" active colorScheme="light"/>) })
+  expect(page.hasAttribute('data-dvw-browser-page')).toBe(true)
+  await act(async () => { settingsHost.set(document.createElement('div')) })
+  expect(page.hasAttribute('popover')).toBe(false)
+  expect(page.hasAttribute('data-dvw-browser-page')).toBe(false)
+  await act(async () => { settingsHost.set(undefined) })
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 400)) })
+  expect(page.hasAttribute('data-dvw-browser-page')).toBe(true)
   await act(async () => { root.unmount() })
 })

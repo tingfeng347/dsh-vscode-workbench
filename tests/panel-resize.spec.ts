@@ -36,7 +36,7 @@ describe('resizedPanelWidth', () => {
     expect(workbench).toContain('hideBelow={200} onHide={()=>setChatVisible(false)}')
     expect(workbench).toContain('hideBelow={105} onHide={()=>setPrimarySideVisible(false)}')
     expect(workbench).toContain('min={DSH_CHAT_MIN_WIDTH} max={DSH_CHAT_MAX_WIDTH} defaultWidth={DSH_CHAT_DEFAULT_WIDTH}')
-    expect(workbench).toContain('<input type="range" min={DSH_CHAT_MIN_WIDTH} max={DSH_CHAT_MAX_WIDTH}')
+    expect(workbench).toContain('chatMinWidth={DSH_CHAT_MIN_WIDTH} chatMaxWidth={DSH_CHAT_MAX_WIDTH}')
     expect(styles).toContain('.dvw-chat-resizer{position:fixed;top:var(--dvw-titlebar-height);right:calc(var(--dvw-chat-width) - 5px);z-index:22}')
     expect(styles).toContain('--dvw-chat-effective:max(440px,min(var(--dvw-chat-width),calc(100vw - 254px)))')
     expect(styles).toContain('grid-template-columns:44px min(210px,var(--dvw-side-width),max(0px,calc(100vw - 164px - var(--dvw-chat-effective)))) minmax(0,1fr) var(--dvw-chat-effective)')

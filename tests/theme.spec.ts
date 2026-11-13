@@ -19,11 +19,12 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('body[data-dvw-palette=dark] [data-dvw-conversation-panel]')
   })
 
-  it('keeps only one explorer row highlighted at a time', () => {
+  it('keeps the open file highlighted while hovering another row', () => {
     const styles = read('src/client/styles.ts')
-    expect(styles).toContain(
-      '.dvw-tree:has(.dvw-tree-row:hover) .dvw-tree-row[data-selected=true]:not(:hover){background:transparent}'
-    )
+    expect(styles).not.toContain(':has(.dvw-tree-row:hover)')
+    expect(styles).toContain('.dvw-tree-row:hover{background:color-mix(in srgb,var(--dvw-text) 4%,transparent)}')
+    expect(styles).toContain('.dvw-tree-row[data-selected=true]:not([data-dvw-upload-directory]){background:var(--dvw-active)}')
+    expect(styles).toContain('.dvw-tree-row[data-selected=true][data-dvw-upload-directory]:not(:hover):not([data-drop-target=true]){background:transparent}')
   })
 
   it('offers the workbench from the sidebar panel list', () => {
@@ -99,7 +100,7 @@ describe('workbench dark theme', () => {
     expect(switcher).toContain('className="dvw-workspace-backdrop"')
     expect(switcher).toContain('className="dvw-overlay dvw-workspace-layer"')
     expect(styles).toContain('.dvw-workspace-layer{position:fixed!important;inset:0!important;z-index:1000!important;')
-    expect(styles).toContain('.dvw-workspace-backdrop{position:absolute;inset:0;z-index:50;display:grid;place-items:center;padding:24px;background:rgba(0,0,0,.34);backdrop-filter:blur(3px)}')
+    expect(styles).toContain('.dvw-workspace-backdrop{position:absolute;inset:0;z-index:50;display:grid;place-items:center;padding:24px;background:var(--dsw-alias-bg-mask-1,rgba(0,0,0,.24));backdrop-filter:none}')
     expect(styles).toContain('.dvw-workspace-switcher{width:min(640px,calc(100vw - 48px));height:min(680px,calc(100vh - 48px));max-height:none;border-radius:18px;')
     expect(styles).toContain('.dvw-workspace-switcher>footer button.dvw-primary-button:hover:not(:disabled){background:color-mix(in srgb,var(--dvw-accent) 86%,#000)}')
   })
@@ -161,31 +162,34 @@ describe('workbench dark theme', () => {
 
   it('leaves language service installation to settings', () => {
     const workbench = read('src/client/Workbench.tsx')
+    const panel = read('src/client/SettingsPanel.tsx')
     expect(workbench).not.toContain('<h2>语言未安装</h2>')
     expect(workbench).not.toContain('以后再说')
     expect(workbench).not.toContain('languageServerIdForPath(active)')
-    expect(workbench).toContain('<h3>语言智能</h3>')
+    expect(panel).toContain('>语言智能</h3>')
   })
 
   it('lists TypeScript with the other languages in one block', () => {
-    const workbench = read('src/client/Workbench.tsx')
-    expect(workbench).not.toContain('未安装。安装后会索引工作区中的 TS/JS 文件。')
-    expect(workbench).toContain("内置 · {tsIntellisense ? tsIndex.state === 'loading'")
+    const panel = read('src/client/SettingsPanel.tsx')
+    expect(panel).not.toContain('未安装。安装后会索引工作区中的 TS/JS 文件。')
+    expect(panel).toContain("内置 · {props.tsIntellisense")
+    expect(panel).toContain("props.tsIndex.state === 'loading'")
   })
 
   it('offers VS Code language navigation for TS/JS from settings', () => {
     const workbench = read('src/client/Workbench.tsx')
+    const panel = read('src/client/SettingsPanel.tsx')
     const monaco = read('src/client/MonacoEditor.tsx')
-    expect(workbench).toContain('<h3>语言智能</h3>')
-    expect(workbench).toContain("changeLsp(server.id,server.installed?'uninstall':'install')")
+    expect(panel).toContain('>语言智能</h3>')
+    expect(panel).toContain("props.changeLsp(server.id, server.installed ? 'uninstall' : 'install')")
     expect(workbench).toContain('lsp.status')
-    expect(workbench).toContain('dvw-lsp-chip')
+    expect(panel).toContain('dvw-set-chip')
     expect(workbench).not.toContain('重新检测')
-    expect(workbench).toContain("settingsSection==='language'")
+    expect(panel).toContain('useEffect(() => { refreshLsp() }, [refreshLsp])')
     expect(workbench).not.toContain('dvw:watch-ignore')
     expect(workbench).not.toContain('<h3>文件监听</h3>')
     expect(read('src/client/typescriptProject.ts')).toContain("localStorage.getItem(TS_INTELLISENSE_KEY) === 'on'")
-    expect(workbench).toContain("{tsIntellisense?'卸载':'安装'}")
+    expect(panel).toContain("{props.tsIntellisense ? '卸载' : '安装'}")
     expect(workbench).toContain('monaco.editor.registerEditorOpener(')
     expect(monaco).toContain("multipleDefinitions: 'gotoAndPeek'")
     expect(monaco).toContain("alternativeDefinitionCommand: 'editor.action.goToReferences'")
@@ -195,9 +199,10 @@ describe('workbench dark theme', () => {
 
   it('adjusts the editor font size without scaling the workbench chrome', () => {
     const workbench = read('src/client/Workbench.tsx')
+    const panel = read('src/client/SettingsPanel.tsx')
     expect(workbench).toContain("localStorage.setItem('dvw:font-size'")
-    expect(workbench).toContain('<span>编辑器字体大小</span>')
-    expect(workbench).toContain('setTimeout(() => onChange(draft), 180)')
+    expect(panel).toContain('title="编辑器字号"')
+    expect(panel).toContain('setTimeout(() => props.onChange(draft), 180)')
     expect(workbench).toContain('fontSize={fontSize}')
     expect(read('src/client/MonacoEditor.tsx')).toContain('fontSize: props.fontSize ?? 14')
     expect(read('src/client/MonacoEditor.tsx')).toContain('renderLineHighlightOnlyWhenFocus: true')
@@ -220,9 +225,10 @@ describe('workbench dark theme', () => {
   it('offers pure-white and eye-care themes with matching surfaces', () => {
     const styles = read('src/client/styles.ts')
     const workbench = read('src/client/Workbench.tsx')
+    const panel = read('src/client/SettingsPanel.tsx')
     const monaco = read('src/client/MonacoEditor.tsx')
-    expect(workbench).toContain("['white','纯白']")
-    expect(workbench).toContain("['eyecare','护眼']")
+    expect(panel).toContain("['white', '纯白']")
+    expect(panel).toContain("['eyecare', '护眼']")
     expect(styles).toContain('.dvw-overlay[data-dvw-theme=white]{--dvw-base:#fff;--dvw-surface-1:#fff')
     expect(styles).toContain('.dvw-overlay[data-dvw-theme=eyecare]{--dvw-base:#f7ebc8;--dvw-surface-1:#f7ebc8')
     expect(styles).toContain('body[data-dvw-palette=white] [data-dvw-conversation-panel]')

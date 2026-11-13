@@ -12,7 +12,7 @@ const CSS = String.raw`
 :root{--dvw-titlebar-height:0px}html[data-platform=darwin]{--dvw-titlebar-height:var(--dsh-frame-top-clearance,48px)}html[data-windows-titlebar]{--dvw-titlebar-height:var(--dsh-frame-top-clearance,40px)}
 .codicon{display:inline-block;font:normal normal normal 16px/1 codicon;text-align:center;text-decoration:none;text-rendering:auto;-webkit-font-smoothing:antialiased;user-select:none}
 .codicon-add:before{content:"\ea60"}.codicon-git-branch:before,.codicon-source-control:before{content:"\ea68"}.codicon-search:before{content:"\ea6d"}.codicon-edit:before{content:"\ea73"}.codicon-close:before{content:"\ea76"}.codicon-close-all:before{content:"\eac1"}.codicon-cloud-upload:before{content:"\eac3"}.codicon-file:before{content:"\ea7b"}.codicon-new-file:before{content:"\ea7f"}.codicon-new-folder:before{content:"\ea80"}.codicon-folder:before{content:"\ea83"}.codicon-trash:before{content:"\ea81"}.codicon-code:before{content:"\eac4"}.codicon-check:before{content:"\eab2"}.codicon-chevron-down:before{content:"\eab4"}.codicon-chevron-right:before{content:"\eab6"}.codicon-color-mode:before{content:"\eac6"}.codicon-diff:before,.codicon-diff-sidebyside:before{content:"\eae1"}.codicon-diff-single:before{content:"\ec22"}.codicon-discard:before{content:"\eae2"}.codicon-file-code:before{content:"\eae9"}.codicon-file-media:before{content:"\eaea"}.codicon-file-pdf:before{content:"\eaeb"}.codicon-file-zip:before{content:"\eaef"}.codicon-files:before{content:"\eaf0"}.codicon-folder-opened:before{content:"\eaf7"}.codicon-git-commit:before{content:"\eafc"}.codicon-graph:before{content:"\eb03"}.codicon-home:before{content:"\eb06"}.codicon-list-tree:before{content:"\eb86"}.codicon-preview:before{content:"\eb2f"}.codicon-refresh:before{content:"\eb37"}.codicon-remove:before{content:"\eb3b"}.codicon-check-all:before{content:"\ebb1"}
-.codicon-layout-sidebar-right:before{content:"\ebf4"}.codicon-layout-sidebar-right-off:before{content:"\ec00"}.codicon-settings:before{content:"\eb51"}.codicon-sparkle:before{content:"\ec10"}.codicon-split-horizontal:before{content:"\eb56"}.codicon-terminal:before{content:"\ea85"}
+.codicon-layout-sidebar-right:before{content:"\ebf4"}.codicon-layout-sidebar-right-off:before{content:"\ec00"}.codicon-screen-full:before{content:"\eb4c"}.codicon-screen-normal:before{content:"\eb4d"}.codicon-settings:before{content:"\eb51"}.codicon-sparkle:before{content:"\ec10"}.codicon-split-horizontal:before{content:"\eb56"}.codicon-terminal:before{content:"\ea85"}
 .dvw-overlay{--dvw-side-width:210px;--dvw-graph-ref:#3794ff;--dvw-base:var(--dsw-alias-bg-base,#181818);--dvw-surface-1:var(--dsw-alias-bg-layer-1,#1e1e1e);--dvw-surface-2:var(--dsw-alias-bg-layer-2,#252526);--dvw-surface-3:var(--dsw-alias-bg-layer-3,#2d2d30);--dvw-side:var(--dvw-surface-1);--dvw-tab-active:var(--dvw-surface-2);--dvw-gutter:var(--dvw-base);--dvw-text:var(--dsw-alias-label-primary,#ccc);--dvw-text-2:var(--dsw-alias-label-secondary,#aaa);--dvw-text-3:var(--dsw-alias-label-tertiary,#858585);--dvw-border:var(--dsw-alias-border-l2,#333);--dvw-border-soft:var(--dsw-alias-border-l3,#292929);--dvw-hover:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.08));--dvw-active:var(--dsw-alias-interactive-bg-active,rgba(255,255,255,.14));--dvw-accent:var(--dsw-alias-state-business-primary,#3b82f6);--dvw-error:var(--dsw-alias-state-error-primary,#f48771);--dvw-success:var(--dsw-alias-state-success-primary,#73c991);--dvw-warn:var(--dsw-alias-state-warn-primary,#d7ba7d);position:absolute;inset:0;z-index:100;display:grid;grid-template-columns:48px var(--dvw-side-width) minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto 30px;box-sizing:border-box;padding-top:calc(var(--dvw-titlebar-height) + 6px);background:var(--dvw-gutter);color:var(--dvw-text);pointer-events:auto;font:13px/1.4 var(--dsw-font-family,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);overflow:hidden;color-scheme:light}
 .dvw-titlebar{display:none}html[data-platform=darwin] .dvw-titlebar{position:absolute;top:0;right:0;left:0;z-index:6;display:flex;align-items:center;gap:8px;height:var(--dvw-titlebar-height);padding:0 12px 0 84px;border-bottom:1px solid var(--dvw-border-soft);background:var(--dvw-base);color:var(--dvw-text-3);font-size:12px;-webkit-app-region:drag;user-select:none}.dvw-titlebar strong{flex:none;font-weight:600;color:var(--dvw-text-2)}.dvw-titlebar span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 html[data-windows-titlebar] .dvw-overlay{top:var(--dvw-titlebar-height);padding-top:6px}
@@ -195,6 +195,31 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 /* The DSH host paints a -webkit-app-region:drag strip over the window's top-left corner. Real mouse presses
    inside it never reach the renderer, so the workbench has to carve the whole overlay out of it. */
 .dvw-overlay{-webkit-app-region:no-drag}
+/* Floating layout: the workbench stays inside the same native window but paints as a movable layer over DSH.
+   Geometry and the top inset come from Workbench.tsx as inline styles; these rules only shape the shell. */
+.dvw-overlay[data-dvw-float=true]{position:fixed;inset:auto;z-index:100;padding-top:34px;border:1px solid var(--dvw-border);border-radius:10px;box-shadow:0 18px 48px rgba(0,0,0,.45)}
+.dvw-overlay[data-dvw-float=true] .dvw-titlebar{display:none}
+.dvw-overlay[data-dvw-float-max=true]{border-radius:0;border-width:0 0 1px;box-shadow:none}
+/* Real fullscreen puts the floating layer in the top layer: it must cover the DSH
+   title bar, sidebar and conversation, not merely fill their container. */
+.dvw-overlay:fullscreen{position:fixed!important;inset:0!important;left:0!important;top:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;padding-top:34px!important;border:0!important;border-radius:0!important;box-shadow:none!important}
+.dvw-overlay:fullscreen::backdrop{background:var(--dvw-base)}
+.dvw-overlay:fullscreen .dvw-float-handle{display:none}
+.dvw-floatbar{position:absolute;z-index:7;top:0;right:0;left:0;height:34px;display:flex;align-items:center;gap:8px;padding:0 6px 0 10px;border-bottom:1px solid var(--dvw-border);background:var(--dvw-base);color:var(--dvw-text-2);cursor:grab;user-select:none;touch-action:none}
+.dvw-floatbar:active{cursor:grabbing}
+.dvw-floatbar-mark{flex:none;display:flex;color:var(--dvw-text-2)}
+.dvw-floatbar strong{flex:none;font-size:12px;font-weight:600;color:var(--dvw-text-2)}
+.dvw-floatbar-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dvw-text-3);font-size:11px}
+.dvw-floatbar-actions{flex:none;display:flex;gap:2px;margin-left:auto}
+.dvw-float-handle{position:absolute;z-index:6;touch-action:none}
+.dvw-float-handle[data-handle=n]{top:34px;right:14px;left:14px;height:6px;cursor:ns-resize}
+.dvw-float-handle[data-handle=s]{right:14px;bottom:0;left:14px;height:6px;cursor:ns-resize}
+.dvw-float-handle[data-handle=w]{top:34px;bottom:14px;left:0;width:8px;cursor:ew-resize}
+.dvw-float-handle[data-handle=e]{top:34px;right:0;bottom:14px;width:8px;cursor:ew-resize}
+.dvw-float-handle[data-handle=nw]{top:34px;left:0;width:12px;height:12px;cursor:nwse-resize}
+.dvw-float-handle[data-handle=ne]{top:34px;right:0;width:12px;height:12px;cursor:nesw-resize}
+.dvw-float-handle[data-handle=sw]{bottom:0;left:0;width:12px;height:12px;cursor:nesw-resize}
+.dvw-float-handle[data-handle=se]{right:0;bottom:0;width:12px;height:12px;cursor:nwse-resize}
 `
 
 export function installStyles(): () => void {

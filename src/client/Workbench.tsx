@@ -28,6 +28,7 @@ import { websocketUrl } from './websocket.ts'
 import { resetWorkspaceDocuments, WorkspaceRequestScope } from './workspaceState.ts'
 import { WorkbenchSettings } from './SettingsPanel.tsx'
 import { settingsHost } from './settingsHost.ts'
+import { applyFloatGesture, clampFloatRect, defaultFloatRect, FLOAT_BAR_HEIGHT, FLOAT_MAX_KEY, FLOAT_RECT_KEY, readFloatMax, readFloatRect, readOpenMode, writeOpenMode, type FloatGesture, type FloatRect, type WorkbenchOpenMode } from './floatWindow.ts'
 import type { CommitDetail, CommitLanguage, CommitMessagePreferences } from '../commit-message.ts'
 
 interface Tab extends FileDocument { instance?: symbol; dirty: boolean; draft: string; loaded?: boolean; line?: number; column?: number; highlight?: string; external?: boolean; preview?: boolean; title?: string; diff?: GitDiff; diffMode?: 'inline' | 'split'; diffSourcePath?:string; imageUrl?:string; documentPreview?:DocumentPreviewKind; documentUrl?:string }
@@ -44,6 +45,31 @@ type ResizeDirection = 1 | -1
 export const DSH_CHAT_MIN_WIDTH = 440
 export const DSH_CHAT_MAX_WIDTH = 720
 export const DSH_CHAT_DEFAULT_WIDTH = 440
+
+const FLOAT_HANDLES: readonly FloatGesture[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
+
+function viewportSize(): { width: number; height: number } {
+  return { width: globalThis.innerWidth, height: globalThis.innerHeight }
+}
+
+/** Reserve the DSH title bar and macOS traffic lights in a floating window. */
+function dshTitlebarHeight(): number {
+  if (typeof document === 'undefined') return 48
+  const value = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--dvw-titlebar-height'))
+  return Number.isFinite(value) && value >= 0 ? value : 48
+}
+
+function persistFloatRect(rect: FloatRect): void {
+  try { localStorage.setItem(FLOAT_RECT_KEY, JSON.stringify(rect)) } catch { /* Browser privacy settings may deny storage. */ }
+}
+
+function storedValue(key: string): string | null {
+  try { return localStorage.getItem(key) } catch { return null }
+}
+
+function persistFloatMax(max: boolean): void {
+  try { localStorage.setItem(FLOAT_MAX_KEY, max ? '1' : '0') } catch { /* Browser privacy settings may deny storage. */ }
+}
 
 /** Keep persisted or dragged widths inside the range the DSH composer can lay out cleanly. */
 export function clampChatWidth(width: number): number {
@@ -112,6 +138,19 @@ function unloadedTab(path:string):Tab{return {instance:Symbol(path),path,content
 
 function WorkbenchTitlebar({ name }: { name?: string }) {
   return <div className="dvw-titlebar"><strong>DSH Workbench</strong>{name !== undefined && <span>{name}</span>}</div>
+}
+
+/** Chrome for the floating layout: drag anywhere except the actions, double-click to toggle real fullscreen. */
+function FloatBar({ name, fullscreen, onPointerDown, onToggleFullscreen, onClose }: { name?: string; fullscreen: boolean; onPointerDown(event: React.PointerEvent): void; onToggleFullscreen(): void; onClose(): void }) {
+  return <div className="dvw-floatbar" data-dvw-floatbar="" onPointerDown={onPointerDown} onDoubleClick={onToggleFullscreen}>
+    <span className="dvw-floatbar-mark"><DshMark size={16}/></span>
+    <strong>DSH Workbench</strong>
+    {name !== undefined && name !== '' && <span className="dvw-floatbar-name">{name}</span>}
+    <div className="dvw-floatbar-actions" onPointerDown={event => event.stopPropagation()} onDoubleClick={event => event.stopPropagation()}>
+      <button type="button" className="dvw-icon" title={fullscreen?'退出全屏 (Esc)':'进入全屏'} aria-label={fullscreen?'退出全屏':'进入全屏'} aria-pressed={fullscreen} onClick={onToggleFullscreen}><Icon name={fullscreen?'screen-normal':'screen-full'}/></button>
+      <button type="button" className="dvw-icon" title="返回 DSH" aria-label="返回 DSH" onClick={onClose}><Icon name="close"/></button>
+    </div>
+  </div>
 }
 
 /** Restore tab headers without reading their file contents. */
@@ -478,6 +517,70 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   }
   const [defaultBrowser,setDefaultBrowser]=useState<DefaultBrowser>(()=>localStorage.getItem(DEFAULT_BROWSER_KEY)==='system'?'system':'builtin')
   useEffect(()=>localStorage.setItem(DEFAULT_BROWSER_KEY,defaultBrowser),[defaultBrowser])
+  const [openMode,setOpenMode]=useState<WorkbenchOpenMode>(()=>readOpenMode())
+  const floating=openMode==='floating'
+  useEffect(()=>writeOpenMode(openMode),[openMode])
+  const overlayRef=useRef<HTMLDivElement>(null)
+  const [floatFullscreen,setFloatFullscreen]=useState(false)
+  const [viewport,setViewport]=useState(viewportSize)
+  const [floatRect,setFloatRect]=useState<FloatRect>(()=>readFloatRect(storedValue(FLOAT_RECT_KEY),viewportSize(),dshTitlebarHeight()))
+  const [floatMax,setFloatMax]=useState(()=>readFloatMax(storedValue(FLOAT_MAX_KEY)))
+  useEffect(()=>{
+    const sync=()=>setFloatFullscreen(document.fullscreenElement!==null&&document.fullscreenElement===overlayRef.current)
+    sync()
+    document.addEventListener('fullscreenchange',sync)
+    return ()=>document.removeEventListener('fullscreenchange',sync)
+  },[])
+  useEffect(()=>{
+    const reflow=()=>{
+      setViewport(viewportSize())
+      // The native title bar disappears while fullscreen, so remeasuring the inset
+      // there would push the restored window under the traffic lights.
+      if(document.fullscreenElement===overlayRef.current)return
+      setFloatRect(current=>clampFloatRect(current,viewportSize(),dshTitlebarHeight()))
+    }
+    window.addEventListener('resize',reflow)
+    return ()=>window.removeEventListener('resize',reflow)
+  },[])
+  const toggleFloatFullscreen=useCallback(async()=>{
+    const overlay=overlayRef.current
+    if(overlay===null)return
+    try{
+      if(typeof document.exitFullscreen==='function'&&document.fullscreenElement!==null){await document.exitFullscreen();return}
+      if(typeof overlay.requestFullscreen!=='function'){
+        // Hosts can refuse the Fullscreen API (permissions, kiosk policy). Keep the
+        // workbench usable by falling back to the old in-window maximized layer.
+        setFloatMax(true);persistFloatMax(true)
+        return
+      }
+      await overlay.requestFullscreen()
+    }catch{
+      setFloatMax(true);persistFloatMax(true)
+    }
+  },[])
+  const resetFloatGeometry=()=>{
+    const next=defaultFloatRect(viewportSize(),dshTitlebarHeight())
+    setViewport(viewportSize())
+    setFloatRect(next)
+    persistFloatRect(next)
+    setFloatMax(false)
+    persistFloatMax(false)
+  }
+  const beginFloatGesture=(event:React.PointerEvent,mode:FloatGesture)=>{
+    if(event.button!==0||floatMax||floatFullscreen)return
+    event.preventDefault()
+    const start=floatRect,startX=event.clientX,startY=event.clientY,top=dshTitlebarHeight()
+    const target=event.currentTarget as HTMLElement
+    try{target.setPointerCapture(event.pointerId)}catch{/* Synthetic pointer events may lack a pointerId. */}
+    const move=(moveEvent:PointerEvent)=>setFloatRect(applyFloatGesture(mode,start,moveEvent.clientX-startX,moveEvent.clientY-startY,viewportSize(),top))
+    const up=()=>{
+      window.removeEventListener('pointermove',move)
+      window.removeEventListener('pointerup',up)
+      setFloatRect(current=>{persistFloatRect(current);return current})
+    }
+    window.addEventListener('pointermove',move)
+    window.addEventListener('pointerup',up)
+  }
   const openBrowserUrl=(url:string)=>{
     if(defaultBrowser==='system'||browser===undefined){window.open(url,'_blank','noopener,noreferrer');return}
     void newBrowser(url)
@@ -547,11 +650,28 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   },[dshTabActive,hostDshPanelId])
   useEffect(()=>{if(tabMenu===undefined)return;const close=()=>setTabMenu(undefined);const escape=(event:KeyboardEvent)=>{if(event.key==='Escape')close()};window.addEventListener('pointerdown',close);window.addEventListener('keydown',escape);return()=>{window.removeEventListener('pointerdown',close);window.removeEventListener('keydown',escape)}},[tabMenu])
   useEffect(() => {
-    if (!snapshot.visible) return
+    if (!snapshot.visible || openMode === 'floating') return
     document.body.setAttribute('data-dvw-workbench-active', '')
     return () => document.body.removeAttribute('data-dvw-workbench-active')
-  }, [snapshot.visible])
+  }, [snapshot.visible, openMode])
   useEffect(()=>{if(!snapshot.visible)return;const onKey=(event:KeyboardEvent)=>{if(event.isComposing||!event.ctrlKey||!event.altKey||event.shiftKey||event.code!=='KeyB')return;event.preventDefault();setChatVisible(value=>!value)};window.addEventListener('keydown',onKey,true);return()=>window.removeEventListener('keydown',onKey,true)},[snapshot.visible])
+  useEffect(()=>{
+    if(!floating||!snapshot.visible)return
+    const onKey=(event:KeyboardEvent)=>{
+      if(event.defaultPrevented||event.isComposing||event.repeat||event.altKey)return
+      const toggle=event.key==='F11'||(event.ctrlKey&&event.metaKey&&!event.shiftKey&&event.code==='KeyF')
+      if(!toggle)return
+      event.preventDefault()
+      event.stopPropagation()
+      void toggleFloatFullscreen()
+    }
+    window.addEventListener('keydown',onKey,true)
+    return ()=>window.removeEventListener('keydown',onKey,true)
+  },[floating,snapshot.visible,toggleFloatFullscreen])
+  useEffect(()=>{
+    if(openMode==='floating'||document.fullscreenElement===null||typeof document.exitFullscreen!=='function')return
+    void document.exitFullscreen().catch(()=>{})
+  },[openMode])
   // The conversation may still be attaching after the chat column opens, so retry for about a second.
   const addToDsh=useCallback((reference:string)=>{setChatVisible(true);let frames=0;const attempt=()=>{void insertIntoDshComposer(reference).then(done=>{if(done)return;if(++frames<60){requestAnimationFrame(attempt);return}alert('DSH 对话输入框当前不可用，请先选择会话或等待当前回复结束。')})};requestAnimationFrame(attempt)},[])
   const addEntryToDsh=useCallback((path:string,directory:boolean)=>addToDsh(dshReference(path,{directory})),[addToDsh])
@@ -791,18 +911,27 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   },[activityHidden])
   const selectHeading=(index:number)=>{if(activeTab===undefined)return;setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab));window.setTimeout(()=>window.dispatchEvent(new CustomEvent('dvw-markdown-heading',{detail:index})),50)}
   const suppressAttachmentDrop=(event:DragEvent)=>{if(!event.dataTransfer.types.includes('Files'))return;const target=event.target;const insideTree=target instanceof Element&&target.closest('.dvw-tree')!==null;if(!insideTree){event.preventDefault();event.stopPropagation()}}
-  const settingsPage=<WorkbenchSettings theme={theme} setTheme={setTheme} fontSize={fontSize} setFontSize={setFontSize} primarySideVisible={primarySideVisible} setPrimarySideVisible={setPrimarySideVisible} chatVisible={chatVisible} setChatVisible={setChatVisible} statusVisible={statusVisible} setStatusVisible={setStatusVisible} sideWidth={sideWidth} setSideWidth={setSideWidth} chatWidth={chatWidth} setChatWidth={setChatWidth} chatMinWidth={DSH_CHAT_MIN_WIDTH} chatMaxWidth={DSH_CHAT_MAX_WIDTH} markdownView={markdownView} setMarkdownView={setMarkdownView} defaultBrowser={defaultBrowser} setDefaultBrowser={setDefaultBrowser} commitDetail={commitDetail} setCommitDetail={setCommitDetail} commitLanguage={commitLanguage} setCommitLanguage={setCommitLanguage} tsIntellisense={tsIntellisense} setTsIntellisense={setTsIntellisense} tsIndex={tsIndex} lspServers={lspServers} lspBusy={lspBusy} lspError={lspError} changeLsp={changeLspAction} refreshLsp={refreshLspAction}/>
+  const settingsPage=<WorkbenchSettings theme={theme} setTheme={setTheme} fontSize={fontSize} setFontSize={setFontSize} primarySideVisible={primarySideVisible} setPrimarySideVisible={setPrimarySideVisible} chatVisible={chatVisible} setChatVisible={setChatVisible} statusVisible={statusVisible} setStatusVisible={setStatusVisible} sideWidth={sideWidth} setSideWidth={setSideWidth} chatWidth={chatWidth} setChatWidth={setChatWidth} chatMinWidth={DSH_CHAT_MIN_WIDTH} chatMaxWidth={DSH_CHAT_MAX_WIDTH} markdownView={markdownView} setMarkdownView={setMarkdownView} defaultBrowser={defaultBrowser} setDefaultBrowser={setDefaultBrowser} openMode={openMode} setOpenMode={setOpenMode} resetFloatWindow={resetFloatGeometry} commitDetail={commitDetail} setCommitDetail={setCommitDetail} commitLanguage={commitLanguage} setCommitLanguage={setCommitLanguage} tsIntellisense={tsIntellisense} setTsIntellisense={setTsIntellisense} tsIndex={tsIndex} lspServers={lspServers} lspBusy={lspBusy} lspError={lspError} changeLsp={changeLspAction} refreshLsp={refreshLspAction}/>
   if(!snapshot.visible)return settingsNode===undefined?null:createPortal(settingsPage,settingsNode)
-  if(sessionId===undefined)return <div className="dvw-overlay" data-dvw-theme={colorScheme} data-dvw-theme-name={theme}><WorkbenchTitlebar/><div className="dvw-empty" style={{gridColumn:'1/4'}}><div>请先选择或创建一个 DSH 会话。<br/><button onClick={()=>service.hide()}>返回 DSH</button></div></div></div>
+  const floatTop=dshTitlebarHeight()
+  const floatRectNow=floatMax
+    ?{left:0,top:floatTop,width:viewport.width,height:Math.max(320,viewport.height-floatTop)}
+    :{left:floatRect.x,top:floatRect.y,width:floatRect.width,height:floatRect.height}
+  const floatStyle=floating?{...floatRectNow,paddingTop:FLOAT_BAR_HEIGHT} as CSSProperties:undefined
+  if(sessionId===undefined)return <div ref={overlayRef} className="dvw-overlay" data-dvw-theme={colorScheme} data-dvw-theme-name={theme} data-dvw-float={floating||undefined} data-dvw-float-max={floating&&floatMax||undefined} data-dvw-float-fullscreen={floating&&floatFullscreen||undefined} style={floatStyle}>{floating&&<FloatBar fullscreen={floatFullscreen} onPointerDown={event=>beginFloatGesture(event,'move')} onToggleFullscreen={()=>void toggleFloatFullscreen()} onClose={()=>service.hide()}/>}<div className="dvw-empty" style={{gridColumn:'1/4'}}><div>请先选择或创建一个 DSH 会话。<br/><button onClick={()=>service.hide()}>返回 DSH</button></div></div></div>
   const showingDshPanel=dshTabId!==undefined&&dshTabActive
   const closeDshPanel=()=>{setDshTabActive(false);setDshTabId(undefined);onCloseDshPanel?.()}
   const openFromView=(path:string,line?:number,column?:number,highlight?:string)=>{leaveDshPanel();openPath(path,line,column,highlight)}
-  const chatShown=chatVisible&&!showingDshPanel
+  const chatShown=chatVisible&&!showingDshPanel&&!floating
   const markdown=activeTab!==undefined&&!activeTab.path.startsWith('diff:')&&/\.md$/i.test(activeTab.path)
   const diffMarkdown=activeTab?.diff!==undefined&&/\.md$/i.test(activeTab.diffSourcePath??'')
   const markdownPreview=markdown||(diffMarkdown&&activeTab?.preview===true)
   const headings=markdownPreview&&activeTab?markdownHeadings(activeTab.diff?.modified??activeTab.draft):[]
-  return <div className="dvw-overlay" data-dvw-theme={colorScheme} data-dvw-theme-name={theme} data-dvw-chat={chatShown||undefined} data-dvw-primary-side={primarySideVisible||undefined} data-dvw-status={statusVisible||undefined} data-dvw-bottom-panel={snapshot.bottomPanel||undefined} style={{'--dvw-side-width':`${sideWidth}px`,'--dvw-chat-width':`${chatWidth}px`} as CSSProperties} role="dialog" aria-label="VS Code 工作台" onDragEnterCapture={suppressAttachmentDrop} onDragOverCapture={suppressAttachmentDrop} onDropCapture={suppressAttachmentDrop}>
+  return <div ref={overlayRef} className="dvw-overlay" data-dvw-theme={colorScheme} data-dvw-theme-name={theme} data-dvw-chat={chatShown||undefined} data-dvw-primary-side={primarySideVisible||undefined} data-dvw-status={statusVisible||undefined} data-dvw-bottom-panel={snapshot.bottomPanel||undefined} data-dvw-float={floating||undefined} data-dvw-float-max={floating&&floatMax||undefined} data-dvw-float-fullscreen={floating&&floatFullscreen||undefined} style={{...(floatStyle??{}),'--dvw-side-width':`${sideWidth}px`,'--dvw-chat-width':`${chatWidth}px`} as CSSProperties} role="dialog" aria-label="VS Code 工作台" onDragEnterCapture={suppressAttachmentDrop} onDragOverCapture={suppressAttachmentDrop} onDropCapture={suppressAttachmentDrop}>
+    {floating&&<>
+      {!floatMax&&!floatFullscreen&&FLOAT_HANDLES.map(mode=><div key={mode} className="dvw-float-handle" data-handle={mode} onPointerDown={event=>beginFloatGesture(event,mode)}/>)}
+      <FloatBar name={workspace?.name} fullscreen={floatFullscreen} onPointerDown={event=>beginFloatGesture(event,'move')} onToggleFullscreen={()=>void toggleFloatFullscreen()} onClose={()=>service.hide()}/>
+    </>}
     <WorkbenchTitlebar name={workspace?.name}/>
     {dshTabId!==undefined&&<DshPanelPage panelId={dshTabId} active={showingDshPanel}/>}
     <DshConversationPanel visible={chatShown} width={chatWidth} statusHeight={statusVisible?30:6}/>
@@ -816,7 +945,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
           {id:'search',label:'搜索',icon:<Icon name="search"/>,active:primarySideVisible&&snapshot.view==='search',onActivate:()=>selectView('search')},
           {id:'git',label:'源代码管理',icon:<Icon name="source-control"/>,active:primarySideVisible&&snapshot.view==='git',onActivate:()=>selectView('git')},
           {id:'terminal',label:terminalAvailable?(snapshot.bottomPanel==='terminal'?'隐藏终端':'显示终端'):'终端适配器未安装',icon:<Icon name="terminal"/>,active:snapshot.bottomPanel==='terminal',disabled:!terminalAvailable,onActivate:()=>toggleTerminal(service)},
-          {id:'chat',label:chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)',icon:<DshMark size={22}/>,active:chatVisible,onActivate:()=>setChatVisible(value=>!value)},
+          ...(floating?[]:[{id:'chat',label:chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)',icon:<DshMark size={22}/>,active:chatVisible,onActivate:()=>setChatVisible(value=>!value)}]),
         ]}
         fixed={[{id:'workspaces',label:'打开工作区 / 切换会话',icon:<Icon name="folder-opened"/>,active:false,onActivate:openSwitcher}]}
         bottom={[

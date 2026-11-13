@@ -31,6 +31,7 @@
 - **Reliable and live**: atomic saves and revision checks prevent silent overwrites, while WebSocket updates flag external workspace changes.
 - **Visual Git workflow**: status, staging, commits, branches, diffs, commit files, a swimlane commit graph, and AI-generated commit messages from the current changes.
 - **Persistent workspace context**: restore tabs, tree, views, panels, and widths per workspace; terminals support multiple sessions, splits, and rename.
+- **Two ways to open**: fill the window as before, or float the workbench over DSH with dragging, eight-way resizing, and real fullscreen.
 - **Built for DSH**: reuse the DSH conversation surface on the right and manage theme and layout from the Workbench page in DSH settings.
 
 ## Demo
@@ -115,3 +116,5 @@ Requires Node.js `^22.19 || >=24`, pnpm 11.7 and system Git. The workbench no lo
 [MIT](LICENSE)
 
 Web links and HTML files open in the browser selected under Settings → Workbench → Default browser (built-in or system). Use Cmd+T on macOS or Ctrl+T to open another official browser page. Terminals retain the bottom layout, session list, rename and split controls. Old workbench terminal processes cannot migrate to the official controller; create new terminals after updating.
+
+Set Settings → Workbench → Window → Open mode to Floating window to keep the workbench as a layer over DSH, with the conversation and sidebar still visible around it: drag the title bar to move, drag an edge to resize, and double-click the title bar to maximize. The position and size are remembered, and Reset position and size restores the default. It reuses DSH's existing native window; it is not a second OS window.

@@ -6,6 +6,7 @@ import { settingsHost } from './settingsHost.ts'
 type WorkbenchTheme = 'dsh' | 'dark' | 'light' | 'white' | 'eyecare'
 type MarkdownView = 'preview' | 'source'
 type DefaultBrowser = 'builtin' | 'system'
+type OpenMode = 'current' | 'floating'
 type CommitDetail = 'concise' | 'standard' | 'detailed'
 type CommitLanguage = 'auto' | 'zh' | 'en'
 type TsIndex = { state: 'idle' | 'loading' | 'ready' | 'error'; files?: number; truncated?: boolean; error?: string }
@@ -32,6 +33,9 @@ export interface WorkbenchSettingsProps {
   setMarkdownView(value: MarkdownView): void
   defaultBrowser: DefaultBrowser
   setDefaultBrowser(value: DefaultBrowser): void
+  openMode: OpenMode
+  setOpenMode(value: OpenMode): void
+  resetFloatWindow(): void
   commitDetail: CommitDetail
   setCommitDetail(value: CommitDetail): void
   commitLanguage: CommitLanguage
@@ -49,6 +53,7 @@ export interface WorkbenchSettingsProps {
 const THEMES = [['dsh', '跟随 DSH'], ['dark', '深色'], ['light', '浅色'], ['white', '纯白'], ['eyecare', '护眼']] as const
 const MARKDOWN_VIEWS = [['preview', '预览'], ['source', '源码']] as const
 const DEFAULT_BROWSERS = [['builtin', '内置浏览器'], ['system', '系统浏览器']] as const
+const OPEN_MODES = [['current', '当前窗口'], ['floating', '浮动窗口']] as const
 const COMMIT_DETAILS = [['concise', '简洁'], ['standard', '标准'], ['detailed', '详细']] as const
 const COMMIT_LANGUAGES = [['auto', '跟随最近提交'], ['zh', '中文'], ['en', 'English']] as const
 
@@ -145,6 +150,16 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
       <Row title="默认浏览器" description="打开网页链接和 HTML 文件时使用的浏览器。">
         <Selector label="默认浏览器" value={props.defaultBrowser} options={DEFAULT_BROWSERS} onChange={props.setDefaultBrowser}/>
       </Row>
+    </section>
+
+    <section className="dvw-set-group">
+      <h3 className="dvw-set-group-title">窗口</h3>
+      <Row title="打开方式" description="工作台铺满窗口，或浮在 DSH 页面上；切换后立即生效。浮动窗口可以拖动、缩放，点全屏按钮会进入系统全屏并隐藏 DSH，按 Esc 退出。">
+        <Selector label="打开方式" value={props.openMode} options={OPEN_MODES} onChange={props.setOpenMode}/>
+      </Row>
+      {props.openMode==='floating'&&<Row title="重置浮动窗口" description="把窗口恢复到屏幕中央的默认大小；内嵌最大化状态也会一并清除。">
+        <button className="dvw-set-button" onClick={props.resetFloatWindow}>重置位置与大小</button>
+      </Row>}
     </section>
 
     <section className="dvw-set-group">

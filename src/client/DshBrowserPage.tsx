@@ -30,7 +30,7 @@ export function DshBrowserPage({ sessionId, tabId, active, colorScheme }: { sess
     // keep painting its chrome from stale geometry with no live controller behind it.
     const release = () => { restore?.(); restore = undefined; page = undefined }
     const place = () => {
-      const rect = document.querySelector('.dvw-editor')?.getBoundingClientRect()
+      const rect = (document.querySelector('.dvw-editor[data-dvw-focused-editor]') ?? document.querySelector('.dvw-editor'))?.getBoundingClientRect()
       // Adopt only while the workbench presents this tab. A browser page that stays in the sidebar
       // must remain DSH's alone, or switching to a file leaves its address bar drawn over the editor.
       if (!presenting || rect === undefined || rect.width <= 0 || rect.height <= 0) { release(); return }
@@ -69,7 +69,7 @@ export function DshBrowserPage({ sessionId, tabId, active, colorScheme }: { sess
     place()
     retry = window.setInterval(() => { if (page !== undefined || !presenting) { window.clearInterval(retry); return } place() }, 250)
     const resize = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(schedule)
-    const editor = document.querySelector('.dvw-editor')
+    const editor = document.querySelector('.dvw-editor[data-dvw-focused-editor]') ?? document.querySelector('.dvw-editor')
     if (editor !== null) resize?.observe(editor)
     const observer = new MutationObserver(schedule)
     observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-sidebar-right-tab', 'data-sidebar-right-session'] })

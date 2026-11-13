@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { CSSProperties, DragEvent, ReactNode } from 'react'
+import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { FileDocument, FileEntry, GitBranch, GitChange, GitCommit, GitCommitFile, GitDiff, GitStatus, SearchMatch } from '../types.ts'
 import { ApiError, api } from './api.ts'
@@ -14,6 +14,7 @@ import { DshConversationPanel, DshConversationTheme } from './DshConversationPan
 import { DshMark } from './DshMark.tsx'
 import { DshPanelPage } from './DshPanelPage.tsx'
 import { DshBrowserPage } from './DshBrowserPage.tsx'
+import { createLeaf, dropPosition, MAX_PANES, paneCount, normalizeLayout, removeGroup, setRatio, splitAt, type PaneNode, type SplitDirection, type SplitPosition } from './panes.ts'
 import type { NativeBrowser, BrowserSnapshot } from './browser.ts'
 import { dshPanelLabel } from './dshPanels.ts'
 import { ActivityBar, normalizeActivityOrder, type ActivityView } from './ActivityBar.tsx'
@@ -37,6 +38,9 @@ export type MarkdownDefaultView = 'preview' | 'source'
 export const MARKDOWN_DEFAULT_VIEW_KEY = 'dvw:markdown-default-view'
 export type DefaultBrowser = 'builtin' | 'system'
 export const DEFAULT_BROWSER_KEY = 'dvw:default-browser'
+/** One independent editor group: its own tabs, its own active tab. */
+export interface EditorGroup { id: string; tabs: Tab[]; active?: string }
+
 interface TreeProps { sessionId: string; root: string; path: string; depth: number; expanded: Set<string>; selected?: string; selectedDirectory: string; statuses: Map<string, string>; onToggle(path: string): void; onSelectDirectory(path: string): void; onOpen(path: string): void; onChange(): void; onUpload(directory: string, files: FileList): void; onAddToDsh(path: string, directory: boolean): void }
 interface CreatingEntry { kind: 'file' | 'directory'; directory: string; value: string; error?: string }
 
@@ -493,7 +497,21 @@ const GitView = memo(Git)
 export function Workbench({ service, browser, sessionId, cwd, navigation, dshPanelId: hostDshPanelId, onOpenDshPanel, onRestoreConversation, onCloseDshPanel, openSettings }: { service: VscodeWorkbench; browser?: NativeBrowser; sessionId?: string; cwd?: string; navigation?: DshNavigation; dshPanelId?: string; onOpenDshPanel?(panelId: string): void; onRestoreConversation?(): void; onCloseDshPanel?(): void; openSettings?(): void }) {
   const [snapshot, setSnapshot] = useState(() => service.getSnapshot()); const [panels, setPanels] = useState(() => service.getPanels())
   useEffect(() => service.subscribe(() => { setSnapshot(service.getSnapshot()); setPanels(service.getPanels()) }), [service])
-  const [workspace,setWorkspace]=useState<{cwd:string;name:string}>(); const [tabs,setTabs]=useState<Tab[]>([]); const [active,setActive]=useState<string>(); const [dshTabActive,setDshTabActive]=useState(hostDshPanelId!==undefined); const [dshTabId,setDshTabId]=useState<string|undefined>(hostDshPanelId); const dshPanelId=dshTabId; const [error,setError]=useState<string>(); const [panelHeight,setPanelHeight]=useState(260); const [sideWidth,setSideWidth]=useState(210); const [primarySideVisible,setPrimarySideVisible]=useState(()=>localStorage.getItem('dvw:primary-side-visible')!=='closed');const [statusVisible,setStatusVisible]=useState(()=>localStorage.getItem('dvw:status-bar-visible')==='open');const settingsNode=useSyncExternalStore(settingsHost.subscribe,settingsHost.getSnapshot);const settingsOpen=settingsNode!==undefined;const [chatWidth,setChatWidth]=useState(()=>clampChatWidth(Number(localStorage.getItem('dvw:dsh-chat-width'))||DSH_CHAT_DEFAULT_WIDTH));const [chatVisible,setChatVisible]=useState(()=>localStorage.getItem('dvw:dsh-chat-visible')!=='closed');const [outlineVisible,setOutlineVisible]=useState(()=>localStorage.getItem('dvw:outline')!=='closed');const [tsIntellisense,setTsIntellisense]=useState(tsIntellisenseEnabled);const [tsIndex,setTsIndex]=useState<{state:'idle'|'loading'|'ready'|'error';files?:number;truncated?:boolean;error?:string}>({state:'idle'});const [lspServers,setLspServers]=useState<LspServerStatus[]>([]);const [lspBusy,setLspBusy]=useState<string>();const [lspError,setLspError]=useState('');const lspManager=useRef<LspManager>();const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localStorage.getItem('dvw:font-size')));return Number.isFinite(saved)&&saved>=11&&saved<=20?saved:14});const [tabMenu,setTabMenu]=useState<{x:number;y:number;path:string}>()
+  const [workspace,setWorkspace]=useState<{cwd:string;name:string}>()
+  const [groups,setGroups]=useState<EditorGroup[]>(()=>[{id:'pane-1',tabs:[]}])
+  const [focusedId,setFocusedId]=useState('pane-1')
+  const [layout,setLayout]=useState<PaneNode>(()=>createLeaf('pane-1'))
+  // Reads and writes of the focused group go through this ref, so a handler that focuses a pane
+  // and then mutates tabs in the same tick still targets the pane it just focused.
+  const focusedRef=useRef('pane-1')
+  const focusedGroup=groups.find(group=>group.id===focusedId)??groups[0]!
+  const tabs=focusedGroup.tabs; const active=focusedGroup.active
+  const setTabsIn=useCallback((id:string,update:Tab[]|((rows:Tab[])=>Tab[]))=>setGroups(current=>current.map(group=>group.id===id?{...group,tabs:typeof update==='function'?update(group.tabs):update}:group)),[])
+  const setActiveIn=useCallback((id:string,value:string|undefined)=>setGroups(current=>current.map(group=>group.id===id?{...group,active:value}:group)),[])
+  const setTabs=useCallback((update:Tab[]|((rows:Tab[])=>Tab[]))=>setTabsIn(focusedRef.current,update),[setTabsIn])
+  const setActive=useCallback((value?:string)=>setActiveIn(focusedRef.current,value),[setActiveIn])
+  const focusGroup=useCallback((id:string)=>{if(focusedRef.current!==id){focusedRef.current=id;setFocusedId(id)}},[])
+  const [paneDrop,setPaneDrop]=useState<{group:string;direction:SplitDirection;position:SplitPosition}|undefined>(); const [dshTabActive,setDshTabActive]=useState(hostDshPanelId!==undefined); const [dshTabId,setDshTabId]=useState<string|undefined>(hostDshPanelId); const dshPanelId=dshTabId; const [error,setError]=useState<string>(); const [panelHeight,setPanelHeight]=useState(260); const [sideWidth,setSideWidth]=useState(210); const [primarySideVisible,setPrimarySideVisible]=useState(()=>localStorage.getItem('dvw:primary-side-visible')!=='closed');const [statusVisible,setStatusVisible]=useState(()=>localStorage.getItem('dvw:status-bar-visible')==='open');const settingsNode=useSyncExternalStore(settingsHost.subscribe,settingsHost.getSnapshot);const settingsOpen=settingsNode!==undefined;const [chatWidth,setChatWidth]=useState(()=>clampChatWidth(Number(localStorage.getItem('dvw:dsh-chat-width'))||DSH_CHAT_DEFAULT_WIDTH));const [chatVisible,setChatVisible]=useState(()=>localStorage.getItem('dvw:dsh-chat-visible')!=='closed');const [outlineVisible,setOutlineVisible]=useState(()=>localStorage.getItem('dvw:outline')!=='closed');const [tsIntellisense,setTsIntellisense]=useState(tsIntellisenseEnabled);const [tsIndex,setTsIndex]=useState<{state:'idle'|'loading'|'ready'|'error';files?:number;truncated?:boolean;error?:string}>({state:'idle'});const [lspServers,setLspServers]=useState<LspServerStatus[]>([]);const [lspBusy,setLspBusy]=useState<string>();const [lspError,setLspError]=useState('');const lspManager=useRef<LspManager>();const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localStorage.getItem('dvw:font-size')));return Number.isFinite(saved)&&saved>=11&&saved<=20?saved:14});const [tabMenu,setTabMenu]=useState<{x:number;y:number;path:string}>()
   const [browserSnapshot,setBrowserSnapshot]=useState<BrowserSnapshot>(()=>browser?.getSnapshot()??{available:false,tabs:[]})
   const [browserId,setBrowserId]=useState<string>()
   const browserTabs=browserSnapshot.tabs.filter(tab=>tab.sessionId===sessionId)
@@ -686,7 +704,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const epoch = workspaceRequests.current.begin()
     const cleared = resetWorkspaceDocuments<Tab>()
     loadingTabs.current.clear(); setWorkspace(undefined); setTabs(cleared.tabs)
-    tabsRef.current = cleared.tabs; setActive(cleared.active); setError(cleared.error)
+    tabsRef.current = cleared.tabs; focusedRef.current = 'pane-1'; setFocusedId('pane-1'); setGroups([{ id: 'pane-1', tabs: cleared.tabs, active: cleared.active }]); setLayout(createLeaf('pane-1')); setError(cleared.error)
     const controller = new AbortController()
     const load = async () => {
       try {
@@ -701,15 +719,33 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
             if (typeof parsed.panelHeight === 'number') setPanelHeight(parsed.panelHeight)
             if (typeof parsed.sideWidth === 'number') setSideWidth(Math.max(210, Math.min(640, Math.round(parsed.sideWidth))))
             restored = restoreTabPaths(parsed.paths ?? []); selected = parsed.active
+            const savedLayout = (parsed as { layout?: unknown }).layout
+            const savedGroups = (parsed as { groups?: Array<{ id?: string; paths?: string[]; active?: string }> }).groups
             const drafts: unknown = JSON.parse(localStorage.getItem(`dvw:drafts:${sessionId}:${value.cwd}`) ?? '[]')
+            const draftTabs: Tab[] = []
             if (Array.isArray(drafts)) for (const draft of drafts) {
               if (!draft || typeof draft.path !== 'string' || typeof draft.content !== 'string' || typeof draft.draft !== 'string' || typeof draft.revision !== 'string' || draft.path.startsWith('diff:')) continue
               const tab = { ...unloadedTab(draft.path), content: draft.content, draft: draft.draft, revision: draft.revision, dirty: draft.draft !== draft.content, loaded: true }
-              restored = [...restored.filter(row => row.path !== tab.path), tab]
+              draftTabs.push(tab as Tab)
+            }
+            const withDrafts = (rows: Tab[]): Tab[] => rows.map(row => draftTabs.find(tab => tab.path === row.path) ?? row)
+            if (Array.isArray(savedGroups) && savedGroups.length > 0) {
+              // A saved pane layout owns both the tabs and the actives; the flat `paths`/`active`
+              // above are only the legacy single-pane shape and must not overwrite the first pane.
+              const rebuilt: EditorGroup[] = savedGroups.map((row, index) => ({
+                id: typeof row.id === 'string' && row.id !== '' ? row.id : `pane-${index + 1}`,
+                tabs: withDrafts(restoreTabPaths(Array.isArray(row.paths) ? row.paths.filter((item): item is string => typeof item === 'string') : [])),
+                active: typeof row.active === 'string' ? row.active : undefined,
+              }))
+              focusedRef.current = rebuilt[0]!.id; setFocusedId(rebuilt[0]!.id)
+              setLayout(normalizeLayout(savedLayout, rebuilt.map(row => row.id), rebuilt[0]!.id))
+              setGroups(rebuilt)
+            } else {
+              for (const tab of draftTabs) restored = [...restored.filter(row => row.path !== tab.path), tab]
+              setTabs(restored)
+              setActive(restored.some(tab => tab.path === selected) ? selected : restored.at(-1)?.path)
             }
           } catch { /* Invalid saved state must not prevent opening the workspace. */ }
-          setTabs(restored)
-          setActive(restored.some(tab => tab.path === selected) ? selected : restored.at(-1)?.path)
           return
       } catch (error) {
         if (controller.signal.aborted || !workspaceRequests.current.isCurrent(epoch)) return
@@ -727,14 +763,14 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const persist = () => {
       persistWorkspace.current = undefined
       try {
-        localStorage.setItem(`dvw:${workspace.cwd}`, JSON.stringify({ view: snapshot.view, paths: tabs.filter(t => !t.path.startsWith('diff:')).map(t => t.path), active, panelHeight, sideWidth }))
+        localStorage.setItem(`dvw:${workspace.cwd}`, JSON.stringify({ view: snapshot.view, paths: tabs.filter(t => !t.path.startsWith('diff:')).map(t => t.path), active, panelHeight, sideWidth, layout, groups: groups.map(group => ({ id: group.id, paths: group.tabs.filter(t => !t.path.startsWith('diff:')).map(t => t.path), active: group.active })) }))
         localStorage.setItem(`dvw:drafts:${sessionId}:${workspace.cwd}`, JSON.stringify(tabs.filter(tab => tab.dirty).map(({ path, content, draft, revision }) => ({ path, content, draft, revision }))))
       } catch { setError('无法保存工作区草稿，请在离开页面前保存文件。') }
     }
     persistWorkspace.current = persist
     const timer = setTimeout(persist, 300)
     return () => clearTimeout(timer)
-  }, [workspace, sessionId, snapshot.view, tabs, active, panelHeight, sideWidth])
+  }, [workspace, sessionId, snapshot.view, tabs, active, panelHeight, sideWidth, layout, groups])
   useEffect(() => {
     const flush = () => persistWorkspace.current?.()
     window.addEventListener('pagehide', flush)
@@ -753,6 +789,8 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const loadTab = useCallback((path: string) => {
     if (sessionId === undefined) return
     const epoch = workspaceRequests.current.current()
+    // The read may finish after the user moved to another pane; keep writing to the pane that asked.
+    const groupId = focusedRef.current
     const token = Symbol(path)
     loadingTabs.current.set(path, token)
     const current = () => workspaceRequests.current.isCurrent(epoch) && loadingTabs.current.get(path) === token
@@ -760,15 +798,15 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const image = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp)$/i.test(path)
     if (documentPreview !== undefined || image) {
       const url = `/dsh-vscode/file?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}&v=${Date.now()}`
-      setTabs(rows => rows.map(row => row.path === path ? { ...row, loaded: true, ...(image ? { imageUrl: url } : { documentPreview, documentUrl: url }) } : row))
+      setTabsIn(groupId, rows => rows.map(row => row.path === path ? { ...row, loaded: true, ...(image ? { imageUrl: url } : { documentPreview, documentUrl: url }) } : row))
       loadingTabs.current.delete(path); return
     }
     void api<FileDocument>('fs.read', { sessionId, path }).then(doc => {
       if (!current()) return
       if (doc.binary || doc.tooLarge) {
-        setTabs(rows => rows.map(row => row.path === path ? { ...row, loaded: true, ...(row.dirty ? {} : { binary: doc.binary, tooLarge: doc.tooLarge }), external: true } : row)); return
+        setTabsIn(groupId, rows => rows.map(row => row.path === path ? { ...row, loaded: true, ...(row.dirty ? {} : { binary: doc.binary, tooLarge: doc.tooLarge }), external: true } : row)); return
       }
-      setTabs(rows => rows.map(row => row.path !== path ? row : row.dirty
+      setTabsIn(groupId, rows => rows.map(row => row.path !== path ? row : row.dirty
         ? { ...row, external: row.revision !== doc.revision }
         : { ...row, ...doc, draft: doc.content, loaded: true, external: false }))
     }).catch(error => { if (current()) setError(String(error)) })
@@ -883,13 +921,14 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const save = async (tab: Tab) => {
     if (sessionId === undefined || !tab.dirty || savingTabs.current.has(tab.path)) return
     const epoch = workspaceRequests.current.current()
+    const groupId = focusedRef.current
     savingTabs.current.add(tab.path)
     loadingTabs.current.delete(tab.path)
     try {
       const doc = await api<FileDocument>('fs.save', { sessionId, path: tab.path, content: tab.draft, revision: tab.revision })
       if (!workspaceRequests.current.isCurrent(epoch)) return
       loadingTabs.current.delete(tab.path)
-      setTabs(rows => rows.map(row => row.path === tab.path && row.instance === tab.instance ? { ...row, ...doc, draft: row.draft, dirty: row.draft !== doc.content, external: false } : row))
+      setTabsIn(groupId, rows => rows.map(row => row.path === tab.path && row.instance === tab.instance ? { ...row, ...doc, draft: row.draft, dirty: row.draft !== doc.content, external: false } : row))
     } catch (error) { if (workspaceRequests.current.isCurrent(epoch)) setError(String(error)) }
     finally { savingTabs.current.delete(tab.path) }
   }
@@ -927,6 +966,124 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const diffMarkdown=activeTab?.diff!==undefined&&/\.md$/i.test(activeTab.diffSourcePath??'')
   const markdownPreview=markdown||(diffMarkdown&&activeTab?.preview===true)
   const headings=markdownPreview&&activeTab?markdownHeadings(activeTab.diff?.modified??activeTab.draft):[]
+  const renderPaneChrome = (group: EditorGroup, tabs: Tab[], active: string | undefined, activeTab: Tab | undefined, focused: boolean, paneMarkdown: boolean, paneDiffMarkdown: boolean, markdownPreview: boolean) => {
+    const setActive = (value?: string) => { focusGroup(group.id); setActiveIn(group.id, value) }
+    const setTabs = (update: Tab[] | ((rows: Tab[]) => Tab[])) => setTabsIn(group.id, update)
+    const close = (tab: Tab) => closeInGroup(group.id, tab)
+    const openPath = (path: string, line?: number, column?: number, highlight?: string) => openInGroup(group.id, path, line, column, highlight)
+    const markdown = paneMarkdown
+    const diffMarkdown = paneDiffMarkdown
+    const headings = markdownPreview && activeTab ? markdownHeadings(activeTab.diff?.modified ?? activeTab.draft) : []
+    const selectHeading = (index: number) => { if (activeTab === undefined) return; setTabs(rows => rows.map(tab => tab.path === activeTab.path ? { ...tab, preview: true } : tab)); window.setTimeout(() => window.dispatchEvent(new CustomEvent('dvw-markdown-heading', { detail: index })), 50) }
+    return <><div className="dvw-tabs" data-empty={(tabs.length===0&&dshPanelId===undefined&&browserTabs.length===0)||undefined}><div className="dvw-tab-list" ref={focused?tabListRef:undefined}>{focused&&browserTabs.map(tab=><button className="dvw-tab" key={tab.id} data-dvw-browser-tab={tab.id} data-active={browserId===tab.id&&!dshTabActive} title={tab.title} onClick={()=>{leaveDshPanel();setBrowserId(tab.id)}}><Icon name="globe"/><span className="dvw-tab-name">{tab.title}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();browser?.close(tab.sessionId,tab.id)}}><Icon name="close"/></span></button>)}{focused&&dshPanelId!==undefined&&<button className="dvw-tab" data-active={dshTabActive} data-dvw-dsh-tab="" title={`${dshPanelLabel(dshPanelId)}（DSH 官方页面）`} onClick={()=>setDshTabActive(true)}><span className="dvw-dsh-tab-mark"/><span className="dvw-tab-name">{dshPanelLabel(dshPanelId)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();closeDshPanel()}}><Icon name="close"/></span></button>}{tabs.map(tab=><button className="dvw-tab" data-active={tab.path===active&&!dshTabActive&&browserId===undefined} key={tab.path} title={tab.diffSourcePath??tab.path} onClick={()=>{setBrowserId(undefined);setDshTabActive(false);setActive(tab.path)}} onAuxClick={event=>{if(event.button===1){event.preventDefault();close(tab)}}} onMouseDown={event=>{if(event.button===1)event.preventDefault()}} onContextMenu={event=>{event.preventDefault();setBrowserId(undefined);setDshTabActive(false);setActive(tab.path);setTabMenu({x:event.clientX,y:event.clientY,path:tab.path})}}><FileIcon name={tabLabel(tab)} className="dvw-tab-icon"/><span className="dvw-tab-name">{tab.dirty?'● ':''}{tabLabel(tab)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();close(tab)}}><Icon name="close"/></span></button>)}</div></div><div className="dvw-editor" data-dvw-focused-editor={focused||undefined} data-outline={markdownPreview&&outlineVisible&&headings.length>0} data-browser-active={focused&&browserId!==undefined||undefined}>{error&&<div className="dvw-error"><button className="dvw-icon" onClick={()=>setError(undefined)}><Icon name="close"/></button>{error}</div>}{markdownPreview&&outlineVisible&&headings.length>0&&<MarkdownOutline headings={headings} onClose={()=>setOutlineVisible(false)} onHeading={selectHeading}/>} {markdown&&activeTab&&<div className="dvw-editor-toolbar"><button className="dvw-icon dvw-outline-toggle" data-active={outlineVisible} title={outlineVisible?'关闭 Markdown 大纲':'显示 Markdown 大纲'} onClick={()=>setOutlineVisible(value=>!value)}><Icon name="list-tree"/></button><button className="dvw-mode-button" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="code"/> 源码</button><button className="dvw-mode-button" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{activeTab?.diff&&<div className="dvw-editor-toolbar dvw-diff-toolbar">{diffMarkdown&&<div className="dvw-diff-preview-switch"><button className="dvw-mode-button" data-diff-view="diff" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="diff"/> 差异</button><button className="dvw-mode-button" data-diff-view="preview" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{!activeTab.preview&&<><button className="dvw-mode-button dvw-diff-mode-button" data-mode="inline" data-active={activeTab.diffMode!=='split'} title="内联视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'inline'}:tab))}><Icon name="diff-single"/> 内联</button><button className="dvw-mode-button dvw-diff-mode-button" data-mode="split" data-active={activeTab.diffMode==='split'} title="并排视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'split'}:tab))}><Icon name="diff-sidebyside"/> 并排</button></>}</div>}<div className="dvw-editor-body" data-toolbar={markdown||activeTab?.diff!==undefined}>{activeTab===undefined?<div className="dvw-empty"><div><strong>DSH Workbench</strong><br/>从资源管理器或搜索结果打开文件<div className="dvw-start-tools"><button onClick={()=>{if(snapshot.bottomPanel!=='terminal')service.toggleBottomPanel('terminal');queueMicrotask(()=>service.runCommand('terminal.new'))}} disabled={!terminalAvailable}><Icon name="terminal"/>新建终端</button>{browser!==undefined&&<button onClick={()=>void newBrowser()} disabled={!browserSnapshot.available}><Icon name="globe"/>浏览器</button>}</div></div></div>:activeTab.diff?diffMarkdown&&activeTab.preview?<MarkdownPreview source={activeTab.diff.modified} sessionId={sessionId} path={activeTab.diffSourcePath??''}/>:<MonacoDiffEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} original={activeTab.diff.original} modified={activeTab.diff.modified} mode={activeTab.diffMode??'inline'} theme={colorScheme} fontSize={fontSize}/>:activeTab.imageUrl?<div className="dvw-image-preview"><img src={activeTab.imageUrl} alt={activeTab.path}/><span>{activeTab.path}</span></div>:activeTab.documentPreview&&activeTab.documentUrl?<DocumentPreview kind={activeTab.documentPreview} src={activeTab.documentUrl} path={activeTab.path}/>:markdown&&activeTab.preview?<MarkdownPreview source={activeTab.draft} sessionId={sessionId} path={activeTab.path}/>:activeTab.binary||activeTab.tooLarge?<div className="dvw-message">{activeTab.binary?'二进制文件无法在文本编辑器或差异视图中打开':`文件超过 5 MiB：${activeTab.path}`}{activeTab.binary&&activeTab.diffSourcePath!==undefined&&!activeTab.path.startsWith('diff:commit:')&&<button onClick={()=>void openPath(activeTab.diffSourcePath!)}>打开文件</button>}</div>:activeTab.loaded===false?<div className="dvw-message">正在加载文件…</div>:<MonacoEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} onAddToDsh={selection=>addToDsh(dshReference(activeTab.path,{selection}))} value={activeTab.draft} theme={colorScheme} fontSize={fontSize} line={activeTab.line} column={activeTab.column} highlight={activeTab.highlight} onChange={draft=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,draft,dirty:draft!==tab.content}:tab))} onSave={()=>void save(activeTab)}/>}</div></div></>
+  }
+
+  // ---- editor groups -------------------------------------------------------
+  const paneDragOver = (event: DragEvent) => {
+    if (draggedEntry === undefined) return
+    // A folder carries no editor content of its own: show the not-allowed cursor instead of ignoring the drag.
+    if (draggedEntry.kind !== "file") { if (event.target instanceof HTMLElement && event.target.closest(".dvw-pane") !== null) event.dataTransfer.dropEffect = "none"; return }
+    const pane = (event.target as HTMLElement | null)?.closest<HTMLElement>('.dvw-pane')
+    if (pane === null || pane === undefined) return
+    event.preventDefault(); event.dataTransfer.dropEffect = 'copy'
+    const rect = pane.getBoundingClientRect()
+    const hit = dropPosition(rect, event.clientX - rect.left, event.clientY - rect.top)
+    // At the cap only a split is refused; opening in the pane itself stays available.
+    if (hit !== undefined && paneCount(layout) >= MAX_PANES) {
+      event.dataTransfer.dropEffect = 'none'
+      if (paneDrop !== undefined) setPaneDrop(undefined)
+      return
+    }
+    const group = pane.dataset.group ?? ''
+    if (hit === undefined) { if (paneDrop !== undefined) setPaneDrop(undefined); return }
+    if (paneDrop?.group !== group || paneDrop.direction !== hit.direction || paneDrop.position !== hit.position) setPaneDrop({ group, ...hit })
+  }
+  const paneDragLeave = (event: DragEvent) => {
+    const host = (event.currentTarget as HTMLElement | null)
+    const next = event.relatedTarget as Node | null
+    if (host !== null && next !== null && host.contains(next)) return
+    if (next === null) return
+    setPaneDrop(undefined)
+  }
+  const openInGroup = (groupId: string, path: string, line?: number, column?: number, highlight?: string) => {
+    focusGroup(groupId)
+    requestAnimationFrame(() => openPath(path, line, column, highlight))
+  }
+  const splitGroup = (groupId: string, direction: SplitDirection, position: SplitPosition, path: string) => {
+    setPaneDrop(undefined)
+    if (paneCount(layout) >= MAX_PANES) return
+    const added = `pane-${Date.now().toString(36)}`
+    setGroups(current => [...current, { id: added, tabs: [] }])
+    setLayout(current => splitAt(current, groupId, direction, added, position, `split-${added}`))
+    openInGroup(added, path)
+  }
+  const paneDropHandler = (event: DragEvent) => {
+    const entry = draggedEntry
+    if (entry?.kind !== 'file') return
+    event.preventDefault(); endEntryDrag()
+    const pane = (event.target as HTMLElement | null)?.closest<HTMLElement>('.dvw-pane')
+    const groupId = pane?.dataset.group ?? focusedRef.current
+    const target = paneDrop
+    setPaneDrop(undefined)
+    if (target !== undefined && target.group === groupId) splitGroup(groupId, target.direction, target.position, entry.path)
+    else openInGroup(groupId, entry.path)
+  }
+  const closeInGroup = (groupId: string, tab: Tab) => {
+    const group = groups.find(row => row.id === groupId)
+    if (group === undefined) return
+    if (tab.dirty && !confirm(`${tab.path} 有未保存更改，确定关闭？`)) return
+    loadingTabs.current.delete(tab.path)
+    const rest = group.tabs.filter(row => row.path !== tab.path)
+    if (rest.length === 0 && groups.length > 1) {
+      const remaining = groups.filter(row => row.id !== groupId)
+      setGroups(remaining)
+      setLayout(current => removeGroup(current, groupId) ?? createLeaf(remaining[0]!.id))
+      if (focusedRef.current === groupId) focusGroup(remaining[0]!.id)
+      return
+    }
+    setGroups(current => current.map(row => row.id !== groupId ? row : { ...row, tabs: rest, active: row.active === tab.path ? rest.at(-1)?.path : row.active }))
+  }
+  const dragSplitter = (event: ReactPointerEvent<HTMLElement>, id: string, direction: SplitDirection) => {
+    if (event.button !== 0) return
+    event.preventDefault()
+    const parent = (event.currentTarget as HTMLElement).parentElement
+    if (parent === null) return
+    const rect = parent.getBoundingClientRect()
+    const move = (moveEvent: PointerEvent) => {
+      const ratio = direction === 'row'
+        ? (moveEvent.clientX - rect.left) / rect.width
+        : (moveEvent.clientY - rect.top) / rect.height
+      setLayout(current => setRatio(current, id, ratio))
+    }
+    const up = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up) }
+    window.addEventListener('pointermove', move); window.addEventListener('pointerup', up)
+  }
+  const renderNode = (node: PaneNode): ReactNode => {
+    if (node.kind === 'leaf') return groups.some(group => group.id === node.group) ? renderPane(node.group) : null
+    const splitter = <div className="dvw-splitter" data-direction={node.direction} onPointerDown={event => dragSplitter(event, node.id, node.direction)}/>
+    return (
+      <div className="dvw-split" data-direction={node.direction} key={node.id}>
+        <div className="dvw-slot" style={{ flexGrow: node.ratio }}>{renderNode(node.first)}</div>
+        {splitter}
+        <div className="dvw-slot" style={{ flexGrow: 1 - node.ratio }}>{renderNode(node.second)}</div>
+      </div>
+    )
+  }
+  const renderPane = (groupId: string) => {
+    const group = groups.find(row => row.id === groupId) ?? { id: groupId, tabs: [] }
+    const paneTab = group.tabs.find(row => row.path === group.active)
+    const focused = groupId === focusedId
+    const drop = paneDrop !== undefined && paneDrop.group === groupId ? paneDrop : undefined
+    const paneMarkdown = paneTab !== undefined && !paneTab.path.startsWith('diff:') && /\.md$/i.test(paneTab.path)
+    const paneDiffMarkdown = paneTab?.diff !== undefined && /\.md$/i.test(paneTab.diffSourcePath ?? '')
+    const panePreview = paneMarkdown || (paneDiffMarkdown && paneTab?.preview === true)
+    return (
+      <section className="dvw-pane" key={groupId} data-group={groupId} data-focused={focused || undefined} data-drop={drop === undefined ? undefined : `${drop.direction}-${drop.position}`} onMouseDown={() => { if (focusedRef.current !== groupId) window.requestAnimationFrame(() => focusGroup(groupId)) }}>
+        {drop !== undefined && <div className="dvw-pane-drop" data-direction={drop.direction} data-position={drop.position}/>}
+        {renderPaneChrome(group, group.tabs, group.active, paneTab, focused, paneMarkdown, paneDiffMarkdown, panePreview)}
+      </section>
+    )
+  }
   return <div ref={overlayRef} className="dvw-overlay" data-dvw-theme={colorScheme} data-dvw-theme-name={theme} data-dvw-chat={chatShown||undefined} data-dvw-primary-side={primarySideVisible||undefined} data-dvw-status={statusVisible||undefined} data-dvw-bottom-panel={snapshot.bottomPanel||undefined} data-dvw-float={floating||undefined} data-dvw-float-max={floating&&floatMax||undefined} data-dvw-float-fullscreen={floating&&floatFullscreen||undefined} style={{...(floatStyle??{}),'--dvw-side-width':`${sideWidth}px`,'--dvw-chat-width':`${chatWidth}px`} as CSSProperties} role="dialog" aria-label="VS Code 工作台" onDragEnterCapture={suppressAttachmentDrop} onDragOverCapture={suppressAttachmentDrop} onDropCapture={suppressAttachmentDrop}>
     {floating&&<>
       {!floatMax&&!floatFullscreen&&FLOAT_HANDLES.map(mode=><div key={mode} className="dvw-float-handle" data-handle={mode} onPointerDown={event=>beginFloatGesture(event,mode)}/>)}
@@ -956,7 +1113,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
         onOrderChange={setActivityOrder} onHiddenChange={setActivityHidden}/>
     <aside className="dvw-side" data-side-width={sideWidth}>{snapshot.view==='explorer'&&workspace!==undefined&&<ExplorerView sessionId={sessionId} cwd={workspace.cwd} selected={active} onOpen={openFromView} onAddToDsh={addEntryToDsh}/>} {snapshot.view==='search'&&<SearchView sessionId={sessionId} onOpen={openFromView}/>} {snapshot.view==='git'&&<GitView sessionId={sessionId} preferences={commitPreferences} onDiff={(path,diff,title,source)=>{leaveDshPanel();openDiff(path,diff,title,source)}}/>}</aside>
     <PanelResizer className="dvw-side-resizer" label="拖动调整源码管理侧边栏宽度" width={sideWidth} min={210} max={640} defaultWidth={210} direction={1} hideBelow={105} onHide={()=>setPrimarySideVisible(false)} onWidth={setSideWidth}/>
-    <main className="dvw-main" onDragOver={event => { if (draggedEntry?.kind !== 'file') return; event.preventDefault(); event.dataTransfer.dropEffect = 'copy' }} onDrop={event => { const entry = draggedEntry; if (entry?.kind !== 'file') return; event.preventDefault(); endEntryDrag(); openPath(entry.path) }}><div className="dvw-tabs" data-empty={(tabs.length===0&&dshPanelId===undefined&&browserTabs.length===0)||undefined}><div className="dvw-tab-list" ref={tabListRef}>{browserTabs.map(tab=><button className="dvw-tab" key={tab.id} data-dvw-browser-tab={tab.id} data-active={browserId===tab.id&&!dshTabActive} title={tab.title} onClick={()=>{leaveDshPanel();setBrowserId(tab.id)}}><Icon name="globe"/><span className="dvw-tab-name">{tab.title}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();browser?.close(tab.sessionId,tab.id)}}><Icon name="close"/></span></button>)}{dshPanelId!==undefined&&<button className="dvw-tab" data-active={dshTabActive} data-dvw-dsh-tab="" title={`${dshPanelLabel(dshPanelId)}（DSH 官方页面）`} onClick={()=>setDshTabActive(true)}><span className="dvw-dsh-tab-mark"/><span className="dvw-tab-name">{dshPanelLabel(dshPanelId)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();closeDshPanel()}}><Icon name="close"/></span></button>}{tabs.map(tab=><button className="dvw-tab" data-active={tab.path===active&&!dshTabActive&&browserId===undefined} key={tab.path} title={tab.diffSourcePath??tab.path} onClick={()=>{setBrowserId(undefined);setDshTabActive(false);setActive(tab.path)}} onAuxClick={event=>{if(event.button===1){event.preventDefault();close(tab)}}} onMouseDown={event=>{if(event.button===1)event.preventDefault()}} onContextMenu={event=>{event.preventDefault();setBrowserId(undefined);setDshTabActive(false);setActive(tab.path);setTabMenu({x:event.clientX,y:event.clientY,path:tab.path})}}><FileIcon name={tabLabel(tab)} className="dvw-tab-icon"/><span className="dvw-tab-name">{tab.dirty?'● ':''}{tabLabel(tab)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();close(tab)}}><Icon name="close"/></span></button>)}</div></div><div className="dvw-editor" data-outline={markdownPreview&&outlineVisible&&headings.length>0} data-browser-active={browserId!==undefined||undefined}>{error&&<div className="dvw-error"><button className="dvw-icon" onClick={()=>setError(undefined)}><Icon name="close"/></button>{error}</div>}{markdownPreview&&outlineVisible&&headings.length>0&&<MarkdownOutline headings={headings} onClose={()=>setOutlineVisible(false)} onHeading={selectHeading}/>} {markdown&&activeTab&&<div className="dvw-editor-toolbar"><button className="dvw-icon dvw-outline-toggle" data-active={outlineVisible} title={outlineVisible?'关闭 Markdown 大纲':'显示 Markdown 大纲'} onClick={()=>setOutlineVisible(value=>!value)}><Icon name="list-tree"/></button><button className="dvw-mode-button" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="code"/> 源码</button><button className="dvw-mode-button" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{activeTab?.diff&&<div className="dvw-editor-toolbar dvw-diff-toolbar">{diffMarkdown&&<div className="dvw-diff-preview-switch"><button className="dvw-mode-button" data-diff-view="diff" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="diff"/> 差异</button><button className="dvw-mode-button" data-diff-view="preview" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{!activeTab.preview&&<><button className="dvw-mode-button dvw-diff-mode-button" data-mode="inline" data-active={activeTab.diffMode!=='split'} title="内联视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'inline'}:tab))}><Icon name="diff-single"/> 内联</button><button className="dvw-mode-button dvw-diff-mode-button" data-mode="split" data-active={activeTab.diffMode==='split'} title="并排视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'split'}:tab))}><Icon name="diff-sidebyside"/> 并排</button></>}</div>}<div className="dvw-editor-body" data-toolbar={markdown||activeTab?.diff!==undefined}>{activeTab===undefined?<div className="dvw-empty"><div><strong>DSH Workbench</strong><br/>从资源管理器或搜索结果打开文件<div className="dvw-start-tools"><button onClick={()=>{if(snapshot.bottomPanel!=='terminal')service.toggleBottomPanel('terminal');queueMicrotask(()=>service.runCommand('terminal.new'))}} disabled={!terminalAvailable}><Icon name="terminal"/>新建终端</button>{browser!==undefined&&<button onClick={()=>void newBrowser()} disabled={!browserSnapshot.available}><Icon name="globe"/>浏览器</button>}</div></div></div>:activeTab.diff?diffMarkdown&&activeTab.preview?<MarkdownPreview source={activeTab.diff.modified} sessionId={sessionId} path={activeTab.diffSourcePath??''}/>:<MonacoDiffEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} original={activeTab.diff.original} modified={activeTab.diff.modified} mode={activeTab.diffMode??'inline'} theme={colorScheme} fontSize={fontSize}/>:activeTab.imageUrl?<div className="dvw-image-preview"><img src={activeTab.imageUrl} alt={activeTab.path}/><span>{activeTab.path}</span></div>:activeTab.documentPreview&&activeTab.documentUrl?<DocumentPreview kind={activeTab.documentPreview} src={activeTab.documentUrl} path={activeTab.path}/>:markdown&&activeTab.preview?<MarkdownPreview source={activeTab.draft} sessionId={sessionId} path={activeTab.path}/>:activeTab.binary||activeTab.tooLarge?<div className="dvw-message">{activeTab.binary?'二进制文件无法在文本编辑器或差异视图中打开':`文件超过 5 MiB：${activeTab.path}`}{activeTab.binary&&activeTab.diffSourcePath!==undefined&&!activeTab.path.startsWith('diff:commit:')&&<button onClick={()=>void openPath(activeTab.diffSourcePath!)}>打开文件</button>}</div>:activeTab.loaded===false?<div className="dvw-message">正在加载文件…</div>:<MonacoEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} onAddToDsh={selection=>addToDsh(dshReference(activeTab.path,{selection}))} value={activeTab.draft} theme={colorScheme} fontSize={fontSize} line={activeTab.line} column={activeTab.column} highlight={activeTab.highlight} onChange={draft=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,draft,dirty:draft!==tab.content}:tab))} onSave={()=>void save(activeTab)}/>}</div></div>{snapshot.bottomPanel===undefined&&<div className="dvw-bottom-reveal" title="向上拖动打开终端" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();service.toggleBottomPanel('terminal');const statusHeight=statusVisible?24:0;const heightAt=(clientY:number)=>Math.max(120,Math.min(window.innerHeight-160,window.innerHeight-clientY-statusHeight));const move=(e:PointerEvent)=>setPanelHeight(heightAt(e.clientY));const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>}</main>
+    <main className="dvw-main" onDragOver={paneDragOver} onDragLeave={paneDragLeave} onDrop={paneDropHandler}><div className="dvw-panes">{renderNode(layout)}</div>{snapshot.bottomPanel===undefined&&<div className="dvw-bottom-reveal" title="向上拖动打开终端" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();service.toggleBottomPanel('terminal');const statusHeight=statusVisible?24:0;const heightAt=(clientY:number)=>Math.max(120,Math.min(window.innerHeight-160,window.innerHeight-clientY-statusHeight));const move=(e:PointerEvent)=>setPanelHeight(heightAt(e.clientY));const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>}</main>
     {tabMenu&&menuTab&&<div className="dvw-context-menu dvw-tab-menu" role="menu" style={{left:Math.min(tabMenu.x,window.innerWidth-240),top:Math.min(tabMenu.y,window.innerHeight-180)}} onPointerDown={event=>event.stopPropagation()}>
       <button role="menuitem" onClick={()=>{setTabMenu(undefined);close(menuTab)}}>关闭<span>Ctrl+F4</span></button>
       <button role="menuitem" disabled={tabs.length<=1} onClick={()=>removeTabs(tabs.filter(row=>row.path!==menuTab.path),'关闭其他标签页')}>关闭其他</button>

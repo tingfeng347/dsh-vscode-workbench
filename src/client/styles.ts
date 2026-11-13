@@ -1,6 +1,10 @@
 import { DSH_MARK_PATH, DSH_MARK_VIEWBOX } from './DshMark.tsx'
+import { WORKBENCH_MARK_SVG } from './WorkbenchMark.ts'
 
-/** The bundled DSH whale as a CSS mask, so the empty state stays in sync with the logo component. */
+/** The plugin's own brand mark, inlined so the empty editor state needs no extra asset request. */
+const WORKBENCH_MARK = `url("data:image/svg+xml,${encodeURIComponent(WORKBENCH_MARK_SVG)}")`
+
+/** The bundled DSH whale as a CSS mask, used by the DSH tab marker. */
 const DSH_MARK_MASK = `url("data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="${DSH_MARK_VIEWBOX}"><path d="${DSH_MARK_PATH}" fill="#000"/></svg>`)}")`
 
 const CSS = String.raw`
@@ -82,8 +86,7 @@ body[data-dvw-workbench-active] [data-sidebar-toggle]{display:none!important}
 .dvw-tree-rename,.dvw-tree-create-input{height:22px}
 /* Branded empty state: a soft accent tile with the DSH whale. */
 .dvw-empty>div{position:relative}
-.dvw-empty>div::before{content:"";display:block;width:96px;height:96px;margin:0 auto 20px;border-radius:24px;background:color-mix(in srgb,var(--dvw-accent) 12%,var(--dvw-surface-1))}
-.dvw-empty>div::after{content:"";position:absolute;top:26px;left:50%;width:60px;height:44px;transform:translateX(-50%);background:var(--dvw-accent);-webkit-mask:${DSH_MARK_MASK} center/contain no-repeat;mask:${DSH_MARK_MASK} center/contain no-repeat}
+.dvw-empty>div::before{content:"";display:block;width:104px;height:104px;margin:0 auto 18px;background:${WORKBENCH_MARK} center/contain no-repeat}
 /* Activity bar glyphs sized like VS Code's 24px icons in a 48px slot. */
 .dvw-act::before{width:40px;height:40px;border-radius:8px}
 /* Host styles set the codicon base size later in the cascade, so the rail needs the extra weight. */

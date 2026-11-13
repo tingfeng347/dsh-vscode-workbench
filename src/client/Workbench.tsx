@@ -15,6 +15,7 @@ import { DshMark } from './DshMark.tsx'
 import { DshPanelPage } from './DshPanelPage.tsx'
 import { DshBrowserPage } from './DshBrowserPage.tsx'
 import { createLeaf, dropPosition, MAX_PANES, paneCount, normalizeLayout, removeGroup, setRatio, splitAt, type PaneNode, type SplitDirection, type SplitPosition } from './panes.ts'
+import { moveTabToGroup, swapActiveTab } from './tabs.ts'
 import type { NativeBrowser, BrowserSnapshot } from './browser.ts'
 import { dshPanelLabel } from './dshPanels.ts'
 import { ActivityBar, normalizeActivityOrder, type ActivityView } from './ActivityBar.tsx'
@@ -226,6 +227,19 @@ const ENTRY_DRAG_TYPE = 'application/x-dvw-entry'
 const DRAG_EXPAND_DELAY = 500
 // Only one Explorer drag can be active; dragover cannot read dataTransfer payloads, so keep the entry here.
 let draggedEntry: FileEntry | undefined
+const TAB_DRAG_TYPE = 'application/x-dvw-tab'
+/** An already-open tab being dragged, with the group it currently lives in. */
+let draggedTab: { group: string; path: string } | undefined
+function startTabDrag(event: DragEvent, group: string, tab: Tab) {
+  // The close button lives inside the draggable tab. Without this, a click that moves by a pixel
+  // starts a drag and the click never fires, so closing a tab "sometimes" needed several tries.
+  if (event.target instanceof Element && event.target.closest('.dvw-tab-close') !== null) { event.preventDefault(); return }
+  draggedTab = { group, path: tab.path }
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData(TAB_DRAG_TYPE, tab.path)
+  event.dataTransfer.setData('text/plain', tab.path)
+}
+function endTabDrag() { draggedTab = undefined }
 let moveTarget: HTMLElement | undefined
 let expandTimer: ReturnType<typeof setTimeout> | undefined
 
@@ -511,7 +525,17 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const setTabs=useCallback((update:Tab[]|((rows:Tab[])=>Tab[]))=>setTabsIn(focusedRef.current,update),[setTabsIn])
   const setActive=useCallback((value?:string)=>setActiveIn(focusedRef.current,value),[setActiveIn])
   const focusGroup=useCallback((id:string)=>{if(focusedRef.current!==id){focusedRef.current=id;setFocusedId(id)}},[])
-  const [paneDrop,setPaneDrop]=useState<{group:string;direction:SplitDirection;position:SplitPosition}|undefined>(); const [dshTabActive,setDshTabActive]=useState(hostDshPanelId!==undefined); const [dshTabId,setDshTabId]=useState<string|undefined>(hostDshPanelId); const dshPanelId=dshTabId; const [error,setError]=useState<string>(); const [panelHeight,setPanelHeight]=useState(260); const [sideWidth,setSideWidth]=useState(210); const [primarySideVisible,setPrimarySideVisible]=useState(()=>localStorage.getItem('dvw:primary-side-visible')!=='closed');const [statusVisible,setStatusVisible]=useState(()=>localStorage.getItem('dvw:status-bar-visible')==='open');const settingsNode=useSyncExternalStore(settingsHost.subscribe,settingsHost.getSnapshot);const settingsOpen=settingsNode!==undefined;const [chatWidth,setChatWidth]=useState(()=>clampChatWidth(Number(localStorage.getItem('dvw:dsh-chat-width'))||DSH_CHAT_DEFAULT_WIDTH));const [chatVisible,setChatVisible]=useState(()=>localStorage.getItem('dvw:dsh-chat-visible')!=='closed');const [outlineVisible,setOutlineVisible]=useState(()=>localStorage.getItem('dvw:outline')!=='closed');const [tsIntellisense,setTsIntellisense]=useState(tsIntellisenseEnabled);const [tsIndex,setTsIndex]=useState<{state:'idle'|'loading'|'ready'|'error';files?:number;truncated?:boolean;error?:string}>({state:'idle'});const [lspServers,setLspServers]=useState<LspServerStatus[]>([]);const [lspBusy,setLspBusy]=useState<string>();const [lspError,setLspError]=useState('');const lspManager=useRef<LspManager>();const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localStorage.getItem('dvw:font-size')));return Number.isFinite(saved)&&saved>=11&&saved<=20?saved:14});const [tabMenu,setTabMenu]=useState<{x:number;y:number;path:string}>()
+  const [paneDrop,setPaneDrop]=useState<{group:string;direction:SplitDirection;position:SplitPosition}|undefined>()
+  const [tabDrop,setTabDrop]=useState<{group:string;index:number}|undefined>()
+  // A cancelled drag (Esc) or a drop outside the panes never reaches the drop handler, and a
+  // highlight left behind would then describe a position that is no longer true.
+  useEffect(() => {
+    const clear = () => { setPaneDrop(undefined); setTabDrop(undefined) }
+    window.addEventListener('dragend', clear)
+    window.addEventListener('drop', clear)
+    return () => { window.removeEventListener('dragend', clear); window.removeEventListener('drop', clear) }
+  }, []);
+  const [dshTabActive,setDshTabActive]=useState(hostDshPanelId!==undefined); const [dshTabId,setDshTabId]=useState<string|undefined>(hostDshPanelId); const dshPanelId=dshTabId; const [error,setError]=useState<string>(); const [panelHeight,setPanelHeight]=useState(260); const [sideWidth,setSideWidth]=useState(210); const [primarySideVisible,setPrimarySideVisible]=useState(()=>localStorage.getItem('dvw:primary-side-visible')!=='closed');const [statusVisible,setStatusVisible]=useState(()=>localStorage.getItem('dvw:status-bar-visible')==='open');const settingsNode=useSyncExternalStore(settingsHost.subscribe,settingsHost.getSnapshot);const settingsOpen=settingsNode!==undefined;const [chatWidth,setChatWidth]=useState(()=>clampChatWidth(Number(localStorage.getItem('dvw:dsh-chat-width'))||DSH_CHAT_DEFAULT_WIDTH));const [chatVisible,setChatVisible]=useState(()=>localStorage.getItem('dvw:dsh-chat-visible')!=='closed');const [outlineVisible,setOutlineVisible]=useState(()=>localStorage.getItem('dvw:outline')!=='closed');const [tsIntellisense,setTsIntellisense]=useState(tsIntellisenseEnabled);const [tsIndex,setTsIndex]=useState<{state:'idle'|'loading'|'ready'|'error';files?:number;truncated?:boolean;error?:string}>({state:'idle'});const [lspServers,setLspServers]=useState<LspServerStatus[]>([]);const [lspBusy,setLspBusy]=useState<string>();const [lspError,setLspError]=useState('');const lspManager=useRef<LspManager>();const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localStorage.getItem('dvw:font-size')));return Number.isFinite(saved)&&saved>=11&&saved<=20?saved:14});const [tabMenu,setTabMenu]=useState<{x:number;y:number;path:string}>()
   const [browserSnapshot,setBrowserSnapshot]=useState<BrowserSnapshot>(()=>browser?.getSnapshot()??{available:false,tabs:[]})
   const [browserId,setBrowserId]=useState<string>()
   const browserTabs=browserSnapshot.tabs.filter(tab=>tab.sessionId===sessionId)
@@ -983,11 +1007,38 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const diffMarkdown = paneDiffMarkdown
     const headings = markdownPreview && activeTab ? markdownHeadings(activeTab.diff?.modified ?? activeTab.draft) : []
     const selectHeading = (index: number) => { if (activeTab === undefined) return; setTabs(rows => rows.map(tab => tab.path === activeTab.path ? { ...tab, preview: true } : tab)); window.setTimeout(() => window.dispatchEvent(new CustomEvent('dvw-markdown-heading', { detail: index })), 50) }
-    return <><div className="dvw-tabs" data-empty={(tabs.length===0&&dshPanelId===undefined&&browserTabs.length===0)||undefined}><div className="dvw-tab-list" ref={focused?tabListRef:undefined}>{focused&&browserTabs.map(tab=><button className="dvw-tab" key={tab.id} data-dvw-browser-tab={tab.id} data-active={browserId===tab.id&&!dshTabActive} title={tab.title} onClick={()=>{leaveDshPanel();setBrowserId(tab.id)}}><Icon name="globe"/><span className="dvw-tab-name">{tab.title}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();browser?.close(tab.sessionId,tab.id)}}><Icon name="close"/></span></button>)}{focused&&dshPanelId!==undefined&&<button className="dvw-tab" data-active={dshTabActive} data-dvw-dsh-tab="" title={`${dshPanelLabel(dshPanelId)}（DSH 官方页面）`} onClick={()=>setDshTabActive(true)}><span className="dvw-dsh-tab-mark"/><span className="dvw-tab-name">{dshPanelLabel(dshPanelId)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();closeDshPanel()}}><Icon name="close"/></span></button>}{tabs.map(tab=><button className="dvw-tab" data-active={tab.path===active&&!dshTabActive&&browserId===undefined} key={tab.path} title={tab.diffSourcePath??tab.path} onClick={()=>{setBrowserId(undefined);setDshTabActive(false);setActive(tab.path)}} onAuxClick={event=>{if(event.button===1){event.preventDefault();close(tab)}}} onMouseDown={event=>{if(event.button===1)event.preventDefault()}} onContextMenu={event=>{event.preventDefault();setBrowserId(undefined);setDshTabActive(false);setActive(tab.path);setTabMenu({x:event.clientX,y:event.clientY,path:tab.path})}}><FileIcon name={tabLabel(tab)} className="dvw-tab-icon"/><span className="dvw-tab-name">{tab.dirty?'● ':''}{tabLabel(tab)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();close(tab)}}><Icon name="close"/></span></button>)}</div></div><div className="dvw-editor" data-dvw-focused-editor={focused||undefined} data-outline={markdownPreview&&outlineVisible&&headings.length>0} data-browser-active={focused&&browserId!==undefined||undefined}>{error&&<div className="dvw-error"><button className="dvw-icon" onClick={()=>setError(undefined)}><Icon name="close"/></button>{error}</div>}{markdownPreview&&outlineVisible&&headings.length>0&&<MarkdownOutline headings={headings} onClose={()=>setOutlineVisible(false)} onHeading={selectHeading}/>} {markdown&&activeTab&&<div className="dvw-editor-toolbar"><button className="dvw-icon dvw-outline-toggle" data-active={outlineVisible} title={outlineVisible?'关闭 Markdown 大纲':'显示 Markdown 大纲'} onClick={()=>setOutlineVisible(value=>!value)}><Icon name="list-tree"/></button><button className="dvw-mode-button" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="code"/> 源码</button><button className="dvw-mode-button" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{activeTab?.diff&&<div className="dvw-editor-toolbar dvw-diff-toolbar">{diffMarkdown&&<div className="dvw-diff-preview-switch"><button className="dvw-mode-button" data-diff-view="diff" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="diff"/> 差异</button><button className="dvw-mode-button" data-diff-view="preview" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{!activeTab.preview&&<><button className="dvw-mode-button dvw-diff-mode-button" data-mode="inline" data-active={activeTab.diffMode!=='split'} title="内联视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'inline'}:tab))}><Icon name="diff-single"/> 内联</button><button className="dvw-mode-button dvw-diff-mode-button" data-mode="split" data-active={activeTab.diffMode==='split'} title="并排视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'split'}:tab))}><Icon name="diff-sidebyside"/> 并排</button></>}</div>}<div className="dvw-editor-body" data-toolbar={markdown||activeTab?.diff!==undefined}>{activeTab===undefined?<div className="dvw-empty"><div><strong>DSH Workbench</strong><br/>从资源管理器或搜索结果打开文件<div className="dvw-start-tools"><button onClick={()=>{if(snapshot.bottomPanel!=='terminal')service.toggleBottomPanel('terminal');queueMicrotask(()=>service.runCommand('terminal.new'))}} disabled={!terminalAvailable}><Icon name="terminal"/>新建终端</button>{browser!==undefined&&<button onClick={()=>void newBrowser()} disabled={!browserSnapshot.available}><Icon name="globe"/>浏览器</button>}</div></div></div>:activeTab.diff?diffMarkdown&&activeTab.preview?<MarkdownPreview source={activeTab.diff.modified} sessionId={sessionId} path={activeTab.diffSourcePath??''}/>:<MonacoDiffEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} original={activeTab.diff.original} modified={activeTab.diff.modified} mode={activeTab.diffMode??'inline'} theme={colorScheme} fontSize={fontSize}/>:activeTab.imageUrl?<div className="dvw-image-preview"><img src={activeTab.imageUrl} alt={activeTab.path}/><span>{activeTab.path}</span></div>:activeTab.documentPreview&&activeTab.documentUrl?<DocumentPreview kind={activeTab.documentPreview} src={activeTab.documentUrl} path={activeTab.path}/>:markdown&&activeTab.preview?<MarkdownPreview source={activeTab.draft} sessionId={sessionId} path={activeTab.path}/>:activeTab.binary||activeTab.tooLarge?<div className="dvw-message">{activeTab.binary?'二进制文件无法在文本编辑器或差异视图中打开':`文件超过 5 MiB：${activeTab.path}`}{activeTab.binary&&activeTab.diffSourcePath!==undefined&&!activeTab.path.startsWith('diff:commit:')&&<button onClick={()=>void openPath(activeTab.diffSourcePath!)}>打开文件</button>}</div>:activeTab.loaded===false?<div className="dvw-message">正在加载文件…</div>:<MonacoEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} onAddToDsh={selection=>addToDsh(dshReference(activeTab.path,{selection}))} value={activeTab.draft} theme={colorScheme} fontSize={fontSize} line={activeTab.line} column={activeTab.column} highlight={activeTab.highlight} onChange={draft=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,draft,dirty:draft!==tab.content}:tab))} onSave={()=>void save(activeTab)}/>}</div></div></>
+    return <><div className="dvw-tabs" data-empty={(tabs.length===0&&dshPanelId===undefined&&browserTabs.length===0)||undefined}><div className="dvw-tab-list" ref={focused?tabListRef:undefined}>{focused&&browserTabs.map(tab=><button className="dvw-tab" key={tab.id} data-dvw-browser-tab={tab.id} data-active={browserId===tab.id&&!dshTabActive} title={tab.title} onClick={()=>{leaveDshPanel();setBrowserId(tab.id)}}><Icon name="globe"/><span className="dvw-tab-name">{tab.title}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();browser?.close(tab.sessionId,tab.id)}}><Icon name="close"/></span></button>)}{focused&&dshPanelId!==undefined&&<button className="dvw-tab" data-active={dshTabActive} data-dvw-dsh-tab="" title={`${dshPanelLabel(dshPanelId)}（DSH 官方页面）`} onClick={()=>setDshTabActive(true)}><span className="dvw-dsh-tab-mark"/><span className="dvw-tab-name">{dshPanelLabel(dshPanelId)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();closeDshPanel()}}><Icon name="close"/></span></button>}{tabs.map(tab=><button className="dvw-tab" data-active={tab.path===active&&!dshTabActive&&browserId===undefined} key={tab.path} data-tab-path={tab.path} draggable onDragStart={event=>startTabDrag(event,group.id,tab)} onDragEnd={endTabDrag} title={tab.diffSourcePath??tab.path} onClick={()=>{setBrowserId(undefined);setDshTabActive(false);setActive(tab.path)}} onAuxClick={event=>{if(event.button===1){event.preventDefault();close(tab)}}} onMouseDown={event=>{if(event.button===1)event.preventDefault()}} onContextMenu={event=>{event.preventDefault();setBrowserId(undefined);setDshTabActive(false);setActive(tab.path);setTabMenu({x:event.clientX,y:event.clientY,path:tab.path})}}><FileIcon name={tabLabel(tab)} className="dvw-tab-icon"/><span className="dvw-tab-name">{tab.dirty?'● ':''}{tabLabel(tab)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();close(tab)}}><Icon name="close"/></span></button>)}</div></div><div className="dvw-editor" data-dvw-focused-editor={focused||undefined} data-outline={markdownPreview&&outlineVisible&&headings.length>0} data-browser-active={focused&&browserId!==undefined||undefined}>{error&&<div className="dvw-error"><button className="dvw-icon" onClick={()=>setError(undefined)}><Icon name="close"/></button>{error}</div>}{markdownPreview&&outlineVisible&&headings.length>0&&<MarkdownOutline headings={headings} onClose={()=>setOutlineVisible(false)} onHeading={selectHeading}/>} {markdown&&activeTab&&<div className="dvw-editor-toolbar"><button className="dvw-icon dvw-outline-toggle" data-active={outlineVisible} title={outlineVisible?'关闭 Markdown 大纲':'显示 Markdown 大纲'} onClick={()=>setOutlineVisible(value=>!value)}><Icon name="list-tree"/></button><button className="dvw-mode-button" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="code"/> 源码</button><button className="dvw-mode-button" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{activeTab?.diff&&<div className="dvw-editor-toolbar dvw-diff-toolbar">{diffMarkdown&&<div className="dvw-diff-preview-switch"><button className="dvw-mode-button" data-diff-view="diff" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="diff"/> 差异</button><button className="dvw-mode-button" data-diff-view="preview" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{!activeTab.preview&&<><button className="dvw-mode-button dvw-diff-mode-button" data-mode="inline" data-active={activeTab.diffMode!=='split'} title="内联视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'inline'}:tab))}><Icon name="diff-single"/> 内联</button><button className="dvw-mode-button dvw-diff-mode-button" data-mode="split" data-active={activeTab.diffMode==='split'} title="并排视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'split'}:tab))}><Icon name="diff-sidebyside"/> 并排</button></>}</div>}<div className="dvw-editor-body" data-toolbar={markdown||activeTab?.diff!==undefined}>{activeTab===undefined?<div className="dvw-empty"><div><strong>DSH Workbench</strong><br/>从资源管理器或搜索结果打开文件<div className="dvw-start-tools"><button onClick={()=>{if(snapshot.bottomPanel!=='terminal')service.toggleBottomPanel('terminal');queueMicrotask(()=>service.runCommand('terminal.new'))}} disabled={!terminalAvailable}><Icon name="terminal"/>新建终端</button>{browser!==undefined&&<button onClick={()=>void newBrowser()} disabled={!browserSnapshot.available}><Icon name="globe"/>浏览器</button>}</div></div></div>:activeTab.diff?diffMarkdown&&activeTab.preview?<MarkdownPreview source={activeTab.diff.modified} sessionId={sessionId} path={activeTab.diffSourcePath??''}/>:<MonacoDiffEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} original={activeTab.diff.original} modified={activeTab.diff.modified} mode={activeTab.diffMode??'inline'} theme={colorScheme} fontSize={fontSize}/>:activeTab.imageUrl?<div className="dvw-image-preview" key={activeTab.path}><img key={activeTab.path} src={`/dsh-vscode/file?sessionId=${encodeURIComponent(sessionId??'')}&path=${encodeURIComponent(activeTab.path)}&v=${encodeURIComponent(activeTab.revision??'')}`} alt={activeTab.path}/><span>{activeTab.path}</span></div>:activeTab.documentPreview&&activeTab.documentUrl?<DocumentPreview key={activeTab.path} kind={activeTab.documentPreview} src={activeTab.documentUrl} path={activeTab.path}/>:markdown&&activeTab.preview?<MarkdownPreview source={activeTab.draft} sessionId={sessionId} path={activeTab.path}/>:activeTab.binary||activeTab.tooLarge?<div className="dvw-message">{activeTab.binary?'二进制文件无法在文本编辑器或差异视图中打开':`文件超过 5 MiB：${activeTab.path}`}{activeTab.binary&&activeTab.diffSourcePath!==undefined&&!activeTab.path.startsWith('diff:commit:')&&<button onClick={()=>void openPath(activeTab.diffSourcePath!)}>打开文件</button>}</div>:activeTab.loaded===false?<div className="dvw-message">正在加载文件…</div>:<MonacoEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} onAddToDsh={selection=>addToDsh(dshReference(activeTab.path,{selection}))} value={activeTab.draft} theme={colorScheme} fontSize={fontSize} line={activeTab.line} column={activeTab.column} highlight={activeTab.highlight} onChange={draft=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,draft,dirty:draft!==tab.content}:tab))} onSave={()=>void save(activeTab)}/>}</div></div></>
   }
 
   // ---- editor groups -------------------------------------------------------
   const paneDragOver = (event: DragEvent) => {
+    if (draggedTab === undefined && draggedEntry === undefined) return
+    // The drop target is usually an open editor, and Monaco handles drag-and-drop itself: claim the
+    // gesture here so its dragover/drop never sees it, and the pane logic below still runs.
+    event.stopPropagation()
+    // A drop is only delivered when dragover cancelled the default; do it before any early return,
+    // or a valid-looking preview ends with a browser-refused drop.
+    event.preventDefault()
+    if (draggedTab !== undefined) {
+      const pane = (event.target as HTMLElement | null)?.closest<HTMLElement>('.dvw-pane')
+      if (pane === null || pane === undefined) return
+      event.preventDefault(); event.dataTransfer.dropEffect = 'move'
+      const group = pane.dataset.group ?? ''
+      const rect = pane.getBoundingClientRect()
+      const hit = dropPosition(rect, event.clientX - rect.left, event.clientY - rect.top)
+      if (hit !== undefined) {
+        if (paneCount(layout) >= MAX_PANES) { event.dataTransfer.dropEffect = 'none'; setPaneDrop(undefined); setTabDrop(undefined); return }
+        setTabDrop(undefined)
+        if (paneDrop?.group !== group || paneDrop.direction !== hit.direction || paneDrop.position !== hit.position) setPaneDrop({ group, ...hit })
+        return
+      }
+      // Inside the body: insert into this group at the position the pointer implies.
+      setPaneDrop(undefined)
+      const marks = [...pane.querySelectorAll<HTMLElement>('[data-tab-path]')]
+      const index = marks.filter(mark => { const box = mark.getBoundingClientRect(); return event.clientX > box.left + box.width / 2 }).length
+      if (tabDrop?.group !== group || tabDrop.index !== index) setTabDrop({ group, index })
+      return
+    }
     if (draggedEntry === undefined) return
     // A folder carries no editor content of its own: show the not-allowed cursor instead of ignoring the drag.
     if (draggedEntry.kind !== "file") { if (event.target instanceof HTMLElement && event.target.closest(".dvw-pane") !== null) event.dataTransfer.dropEffect = "none"; return }
@@ -1011,7 +1062,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const next = event.relatedTarget as Node | null
     if (host !== null && next !== null && host.contains(next)) return
     if (next === null) return
-    setPaneDrop(undefined)
+    setPaneDrop(undefined); setTabDrop(undefined)
   }
   const openInGroup = (groupId: string, path: string, line?: number, column?: number, highlight?: string) => {
     focusGroup(groupId)
@@ -1025,17 +1076,86 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     setLayout(current => splitAt(current, groupId, direction, added, position, `split-${added}`))
     openInGroup(added, path)
   }
+  const moveTabInto = (from: string, path: string, to: string, index: number | undefined, split?: { direction: SplitDirection; position: SplitPosition }) => {
+    const source = groups.find(row => row.id === from)
+    const tab = source?.tabs.find(row => row.path === path)
+    if (source === undefined || tab === undefined) return
+    if (split === undefined) {
+      const moved = moveTabToGroup(groups, from, path, to, index)
+      if (moved === undefined) {
+        // Nothing to reorder, or the file is already open there: hand the user that pane instead.
+        if (to !== from) { focusGroup(to); setActiveIn(to, path) }
+        return
+      }
+      const emptied = moved.some(row => row.id === from && row.tabs.length === 0)
+      const next = emptied && moved.length > 1 ? moved.filter(row => row.id !== from) : moved
+      if (emptied && moved.length > 1) setLayout(current => removeGroup(current, from) ?? createLeaf(next[0]!.id))
+      setGroups(next)
+      focusGroup(to)
+      return
+    }
+    if (paneCount(layout) >= MAX_PANES) return
+    const targetId = `pane-${Date.now().toString(36)}`
+    const rest = source.tabs.filter(row => row.path !== path)
+    const collapses = rest.length === 0
+    let next: EditorGroup[] = groups.map(row => row.id !== from ? row : { ...row, tabs: rest, active: row.active === path ? rest.at(-1)?.path : row.active })
+    next = [...next, { id: targetId, tabs: [tab], active: path }]
+    if (collapses) next = next.filter(row => row.id !== from)
+    setLayout(current => {
+      const tree = splitAt(current, from, split.direction, targetId, split.position, `split-${targetId}`)
+      return collapses ? (removeGroup(tree, from) ?? createLeaf(targetId)) : tree
+    })
+    setGroups(next)
+    focusGroup(targetId)
+  }
+  // Two panes, two files: dropping one on the other trades places, which is what comparing them
+  // looks like. A target with no file, or one already showing this file, falls through to a move.
+  const swapTabs = (from: string, path: string, to: string) => {
+    const next = swapActiveTab(groups, from, path, to)
+    if (next === undefined) { moveTabInto(from, path, to, undefined); return }
+    setGroups(next)
+    focusGroup(to)
+  }
+
+  // Where the pointer is now, not where the preview last rendered. A quick release can arrive
+  // before the final dragover commits, and reading that state dropped the file one zone away.
+  const dropTargetAt = (event: DragEvent) => {
+    const pane = (event.target as HTMLElement | null)?.closest<HTMLElement>('.dvw-pane') ?? null
+    const rect = pane?.getBoundingClientRect()
+    const hit = rect === undefined ? undefined : dropPosition(rect, event.clientX - rect.left, event.clientY - rect.top)
+    let index: number | undefined
+    if (hit === undefined && pane !== null) {
+      const marks = [...pane.querySelectorAll<HTMLElement>('[data-tab-path]')]
+      index = marks.filter(mark => { const box = mark.getBoundingClientRect(); return event.clientX > box.left + box.width / 2 }).length
+    }
+    return { pane, hit, index }
+  }
+
   const paneDropHandler = (event: DragEvent) => {
+    if (draggedTab === undefined && draggedEntry === undefined) return
+    event.stopPropagation()
+    event.preventDefault()
+    if (draggedTab !== undefined) {
+      const tab = draggedTab
+      endTabDrag()
+      const { pane, hit, index } = dropTargetAt(event)
+      const groupId = pane?.dataset.group ?? tab.group
+      setPaneDrop(undefined); setTabDrop(undefined)
+      if (hit !== undefined) moveTabInto(tab.group, tab.path, groupId, undefined, { direction: hit.direction, position: hit.position })
+      else if (groupId !== tab.group) swapTabs(tab.group, tab.path, groupId)
+      else moveTabInto(tab.group, tab.path, groupId, index)
+      return
+    }
     const entry = draggedEntry
     if (entry?.kind !== 'file') return
-    event.preventDefault(); endEntryDrag()
-    const pane = (event.target as HTMLElement | null)?.closest<HTMLElement>('.dvw-pane')
+    endEntryDrag()
+    const { pane, hit } = dropTargetAt(event)
     const groupId = pane?.dataset.group ?? focusedRef.current
-    const target = paneDrop
-    setPaneDrop(undefined)
-    if (target !== undefined && target.group === groupId) splitGroup(groupId, target.direction, target.position, entry.path)
+    setPaneDrop(undefined); setTabDrop(undefined)
+    if (hit !== undefined) splitGroup(groupId, hit.direction, hit.position, entry.path)
     else openInGroup(groupId, entry.path)
   }
+
   const closeInGroup = (groupId: string, tab: Tab) => {
     const group = groups.find(row => row.id === groupId)
     if (group === undefined) return
@@ -1086,7 +1206,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const paneDiffMarkdown = paneTab?.diff !== undefined && /\.md$/i.test(paneTab.diffSourcePath ?? '')
     const panePreview = paneMarkdown || (paneDiffMarkdown && paneTab?.preview === true)
     return (
-      <section className="dvw-pane" key={groupId} data-group={groupId} data-focused={focused || undefined} data-drop={drop === undefined ? undefined : `${drop.direction}-${drop.position}`} onMouseDown={() => { if (focusedRef.current !== groupId) window.requestAnimationFrame(() => focusGroup(groupId)) }}>
+      <section className="dvw-pane" key={groupId} data-group={groupId} data-focused={focused || undefined} data-drop={drop === undefined ? undefined : `${drop.direction}-${drop.position}`} data-tab-target={tabDrop?.group === groupId || undefined} onClickCapture={() => { if (focusedRef.current !== groupId) focusGroup(groupId) }}>
         {drop !== undefined && <div className="dvw-pane-drop" data-direction={drop.direction} data-position={drop.position}/>}
         {renderPaneChrome(group, group.tabs, group.active, paneTab, focused, paneMarkdown, paneDiffMarkdown, panePreview)}
       </section>
@@ -1121,7 +1241,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
         onOrderChange={setActivityOrder} onHiddenChange={setActivityHidden}/>
     <aside className="dvw-side" data-side-width={sideWidth}>{snapshot.view==='explorer'&&workspace!==undefined&&<ExplorerView sessionId={sessionId} cwd={workspace.cwd} selected={active} onOpen={openFromView} onAddToDsh={addEntryToDsh}/>} {snapshot.view==='search'&&<SearchView sessionId={sessionId} onOpen={openFromView}/>} {snapshot.view==='git'&&<GitView sessionId={sessionId} preferences={commitPreferences} onDiff={(path,diff,title,source)=>{leaveDshPanel();openDiff(path,diff,title,source)}}/>}</aside>
     <PanelResizer className="dvw-side-resizer" label="拖动调整源码管理侧边栏宽度" width={sideWidth} min={210} max={640} defaultWidth={210} direction={1} hideBelow={105} onHide={()=>setPrimarySideVisible(false)} onWidth={setSideWidth}/>
-    <main className="dvw-main" onDragOver={paneDragOver} onDragLeave={paneDragLeave} onDrop={paneDropHandler}><div className="dvw-panes">{renderNode(layout)}</div>{snapshot.bottomPanel===undefined&&<div className="dvw-bottom-reveal" title="向上拖动打开终端" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();service.toggleBottomPanel('terminal');const statusHeight=statusVisible?24:0;const heightAt=(clientY:number)=>Math.max(120,Math.min(window.innerHeight-160,window.innerHeight-clientY-statusHeight));const move=(e:PointerEvent)=>setPanelHeight(heightAt(e.clientY));const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>}</main>
+    <main className="dvw-main" onDragOverCapture={paneDragOver} onDragLeaveCapture={paneDragLeave} onDropCapture={paneDropHandler}><div className="dvw-panes">{renderNode(layout)}</div>{snapshot.bottomPanel===undefined&&<div className="dvw-bottom-reveal" title="向上拖动打开终端" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();service.toggleBottomPanel('terminal');const statusHeight=statusVisible?24:0;const heightAt=(clientY:number)=>Math.max(120,Math.min(window.innerHeight-160,window.innerHeight-clientY-statusHeight));const move=(e:PointerEvent)=>setPanelHeight(heightAt(e.clientY));const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>}</main>
     {tabMenu&&menuTab&&<div className="dvw-context-menu dvw-tab-menu" role="menu" style={{left:Math.min(tabMenu.x,window.innerWidth-240),top:Math.min(tabMenu.y,window.innerHeight-180)}} onPointerDown={event=>event.stopPropagation()}>
       <button role="menuitem" onClick={()=>{setTabMenu(undefined);close(menuTab)}}>关闭<span>Ctrl+F4</span></button>
       <button role="menuitem" disabled={tabs.length<=1} onClick={()=>removeTabs(tabs.filter(row=>row.path!==menuTab.path),'关闭其他标签页')}>关闭其他</button>

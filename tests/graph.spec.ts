@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { GitCommit } from '../src/types.ts'
-import { canMoveTo, createdEntryPath, downloadUrlData, movedPath, parentPath, directoryAffected, graphParentPath, graphRows, graphTrackPath, renamedPath, restoreTabPaths, tabLabel, tabScrollLeft, uploadDestination } from '../src/client/Workbench.tsx'
+import { absoluteEntryPath, canMoveTo, createdEntryPath, downloadUrlData, movedPath, parentPath, directoryAffected, graphParentPath, graphRows, graphTrackPath, renamedPath, restoreTabPaths, tabLabel, tabScrollLeft, uploadDestination } from '../src/client/Workbench.tsx'
 import { markdownHeadings, markdownWorkspacePath } from '../src/client/MarkdownPreview.tsx'
 
 function commit(hash: string, parents: string[]): GitCommit {
@@ -77,6 +77,13 @@ describe('Explorer drag and drop',()=>{
 })
 
 describe('Explorer inline creation',()=>{it('creates entries in the selected directory or workspace root',()=>{expect(createdEntryPath('docs/assets','logo.svg')).toBe('docs/assets/logo.svg');expect(createdEntryPath('','README.md')).toBe('README.md')})})
+
+describe('Explorer absolute paths',()=>{it('joins the workspace root with the entry path on both platforms',()=>{
+  expect(absoluteEntryPath('/Users/me/project','src/main.ts')).toBe('/Users/me/project/src/main.ts')
+  expect(absoluteEntryPath('/Users/me/project/','src/main.ts')).toBe('/Users/me/project/src/main.ts')
+  expect(absoluteEntryPath('/Users/me/project','')).toBe('/Users/me/project')
+  expect(absoluteEntryPath('C:\\work\\project','src/main.ts')).toBe('C:\\work\\project\\src\\main.ts')
+})})
 
 describe('Explorer targeted refresh',()=>{it('reloads only the directory containing a changed path',()=>{expect(directoryAffected('src/client',['src/client/App.tsx'])).toBe(true);expect(directoryAffected('src',['src/client/App.tsx'])).toBe(false);expect(directoryAffected('src',['src'])).toBe(true)})})
 

@@ -68,7 +68,7 @@
 
 ## Installation
 
-Plugin 0.2.7 supports DeepSeek Harness `0.2.1-rc.1` and newer (default baseline `0.2.2-rc.1`, Cordis `4.1.0`). Anything below `0.2.1-rc.1` is rejected by the install gate:
+Plugin 0.2.8 supports DeepSeek Harness `0.2.1-rc.1` and newer (default baseline `0.2.2-rc.1`, Cordis `4.1.0`). Anything below `0.2.1-rc.1` is rejected by the install gate:
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.1

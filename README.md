@@ -68,7 +68,7 @@
 
 ## 安装
 
-插件 0.2.7 支持 DeepSeek Harness `0.2.1-rc.1` 及以上（默认验证基线 `0.2.2-rc.1`，Cordis `4.1.0`）。Harness 低于 `0.2.1-rc.1` 时会被安装闸门拒绝：
+插件 0.2.8 支持 DeepSeek Harness `0.2.1-rc.1` 及以上（默认验证基线 `0.2.2-rc.1`，Cordis `4.1.0`）。Harness 低于 `0.2.1-rc.1` 时会被安装闸门拒绝：
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.1

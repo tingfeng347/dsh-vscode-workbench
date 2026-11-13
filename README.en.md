@@ -31,7 +31,7 @@
 - **Reliable and live**: atomic saves and revision checks prevent silent overwrites, while WebSocket updates flag external workspace changes.
 - **Visual Git workflow**: status, staging, commits, branches, diffs, commit files, a swimlane commit graph, and AI-generated commit messages from the current changes.
 - **Persistent workspace context**: restore tabs, tree, views, panels, and widths per workspace; terminals support multiple sessions, splits, and rename.
-- **Built for DSH**: reuse the DSH conversation surface on the right and manage theme and layout from workbench settings.
+- **Built for DSH**: reuse the DSH conversation surface on the right and manage theme and layout from the Workbench page in DSH settings.
 
 ## Demo
 
@@ -56,8 +56,8 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/settings-light.png" width="800" alt="Workbench settings for theme, font size, and layout">
-  <br><em>Workbench settings for theme, font size, and layout</em>
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/settings-light.png" width="800" alt="The DSH Workbench page inside DSH settings: theme, font size, layout, commit messages, and language services">
+  <br><em>Settings live in DSH's own dialog: theme, font size, layout, commit messages, and language services</em>
 </p>
 
 <p align="center">
@@ -114,4 +114,4 @@ Requires Node.js `^22.19 || >=24`, pnpm 11.7 and system Git. The workbench no lo
 
 [MIT](LICENSE)
 
-The Browser activity button opens official browser pages in the editor tab area. Use Cmd+T on macOS or Ctrl+T to open another page. Terminals retain the bottom layout, session list, rename and split controls. Old workbench terminal processes cannot migrate to the official controller; create new terminals after updating.
+Web links and HTML files open in the browser selected under Settings → Workbench → Default browser (built-in or system). Use Cmd+T on macOS or Ctrl+T to open another official browser page. Terminals retain the bottom layout, session list, rename and split controls. Old workbench terminal processes cannot migrate to the official controller; create new terminals after updating.

@@ -31,7 +31,7 @@
 - **可靠且实时**：原子保存与版本校验避免静默覆盖，WebSocket 会及时标记工作区的外部变更。
 - **可视化 Git 工作流**：覆盖状态、暂存、提交、分支、差异、提交文件与泳道式提交图，并可用 AI 根据当前更改生成提交信息。
 - **可持续的工作上下文**：按工作区恢复标签、目录、视图、面板与栏宽；终端支持多会话、分屏与重命名。
-- **贴合 DSH**：右侧直接复用 DSH 对话能力，主题与布局集中在工作台设置中管理。
+- **贴合 DSH**：右侧直接复用 DSH 对话能力，主题与布局集中在 DSH 设置的 Workbench 页。
 
 ## 演示
 
@@ -56,8 +56,8 @@
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/settings-light.png" width="800" alt="工作台设置：主题、字号与布局">
-  <br><em>工作台设置：主题、字号与布局</em>
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/settings-light.png" width="800" alt="DSH 设置里的 DSH Workbench 页：主题、字号、布局、提交信息与语言服务">
+  <br><em>设置直接开在 DSH 官方设置里：主题、字号、布局、提交信息与语言服务</em>
 </p>
 
 <p align="center">
@@ -88,7 +88,7 @@ dsh plugin --profile web add dsh-vscode-workbench
 | `Ctrl+\`` | 显示或隐藏终端 |
 | `Ctrl+Shift+\`` | 新建终端 |
 
-左侧活动栏的终端按钮可切换底部面板，浏览器按钮在中间打开官方浏览器标签；`Cmd+T`（macOS）或 `Ctrl+T` 新建浏览器。终端保留右侧列表、重命名和分屏。升级前运行的旧终端不能迁移，更新后请新建终端。
+左侧活动栏的终端按钮可切换底部面板。打开网页链接或 HTML 文件时会按设置里的「默认浏览器」在官方浏览器标签或系统浏览器中打开；`Cmd+T`（macOS）或 `Ctrl+T` 新建浏览器。终端保留右侧列表、重命名和分屏。升级前运行的旧终端不能迁移，更新后请新建终端。
 
 ## 安全
 

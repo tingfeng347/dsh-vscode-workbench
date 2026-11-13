@@ -51,4 +51,4 @@ Harness `0.2.0-rc.2` 上没有可用的插件版本：0.1.9 依赖 Harness `0.2.
 
 ## 官方工具接入
 
-终端通过隔离的官方 `ClientTerminals` 管理进程、恢复和输入控制，工作台只保存 Session 内的终端标签身份及布局。删除自建 `/dsh-vscode-terminal/*` 接口和 `node-pty` 依赖。普通浏览器由官方 `sidebarRight` 导航和渲染，在工作台中间展示原页面，不移动 React 管理的 DOM，也不重建 Electron webview。退出工作台后恢复原页面样式。详细范围与验证见[官方工具接入](native-tools.md)。
+终端通过隔离的官方 `ClientTerminals` 管理进程、恢复和输入控制，工作台只保存 Session 内的终端标签身份及布局。删除自建 `/dsh-vscode-terminal/*` 接口和 `node-pty` 依赖。普通浏览器由官方 `sidebarRight` 导航和渲染，在工作台中间展示原页面，不移动 React 管理的 DOM，也不重建 Electron webview。退出工作台后恢复原页面样式。网页链接和 HTML 文件按设置里的默认浏览器分流；HTML 由带随机令牌的 localhost 静态服务加载，因此相对样式、脚本和图片可用。详细范围与验证见[官方工具接入](native-tools.md)。

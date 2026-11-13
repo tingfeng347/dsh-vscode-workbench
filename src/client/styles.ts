@@ -175,7 +175,7 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-splitter[data-direction=column]{cursor:row-resize}
 .dvw-splitter:hover,.dvw-splitter:active{background:var(--dvw-accent)}
 .dvw-pane{position:relative;display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;outline:1px solid transparent;outline-offset:-1px}
-.dvw-pane[data-focused]{outline-color:var(--dvw-border-soft)}
+.dvw-pane[data-focused]{outline-color:var(--dvw-border-soft)}.dvw-pane[data-tab-target]{outline-color:var(--dvw-accent)}
 .dvw-pane-drop{position:absolute;z-index:6;pointer-events:none;background:color-mix(in srgb,var(--dvw-accent) 20%,transparent);border:1px solid var(--dvw-accent)}
 .dvw-pane-drop[data-direction=row][data-position=first]{inset:0 50% 0 0}
 .dvw-pane-drop[data-direction=row][data-position=second]{inset:0 0 0 50%}

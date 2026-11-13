@@ -8,4 +8,16 @@ describe('terminal panel', () => {
     // xterm's selection layer is opaque and sits at z-index 1; without this rule every selected cell is covered.
     expect(read('src/client/styles.ts')).toContain('.dvw-terminal-host .xterm-decoration-top{z-index:2;position:relative}')
   })
+
+  it('gives the selection an explicit foreground in both themes', () => {
+    const panel = read('src/client/TerminalPanel.tsx')
+    expect(panel).toContain('selectionBackground: \'#add6ff\', selectionForeground: \'#1d2025\'')
+    expect(panel).toContain('selectionBackground: \'#264f78\', selectionForeground: \'#ffffff\'')
+  })
+
+  it('replaces the native terminal menu with Chinese items', () => {
+    const panel = read('src/client/TerminalPanel.tsx')
+    expect(panel).toContain("addEventListener('contextmenu'")
+    for (const label of ['复制', '粘贴', '全选', '清屏']) expect(panel).toContain(`>${label}</button>`)
+  })
 })

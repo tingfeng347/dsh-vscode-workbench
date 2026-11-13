@@ -7,7 +7,11 @@ import { terminalIssue, type TerminalWorkspaceController } from './terminal.ts'
 
 // VS Code Light+ ANSI palette: the default xterm colors (e.g. yellow #e5e510) vanish on a light background.
 const LIGHT_ANSI = { black: '#000000', red: '#cd3131', green: '#107c10', yellow: '#949800', blue: '#0451a5', magenta: '#bc05bc', cyan: '#0598bc', white: '#555555', brightBlack: '#666666', brightRed: '#cd3131', brightGreen: '#14ce14', brightYellow: '#b5ba00', brightBlue: '#0451a5', brightMagenta: '#bc05bc', brightCyan: '#0598bc', brightWhite: '#a5a5a5' }
-function terminalTheme(colorScheme: 'dark' | 'light' | 'white' | 'eyecare') { return colorScheme === 'dark' ? { background: '#191a1b', foreground: '#bfbfbf', cursor: '#bfbfbf', selectionBackground: '#264f78' } : { background: '#ffffff', foreground: '#1d2025', cursor: '#4b515b', selectionBackground: '#add6ff', ...LIGHT_ANSI } }
+function terminalTheme(colorScheme: 'dark' | 'light' | 'white' | 'eyecare') {
+  return colorScheme === 'dark'
+    ? { background: '#191a1b', foreground: '#bfbfbf', cursor: '#bfbfbf', selectionBackground: '#264f78', selectionForeground: '#ffffff' }
+    : { background: '#ffffff', foreground: '#1d2025', cursor: '#4b515b', selectionBackground: '#add6ff', selectionForeground: '#1d2025', ...LIGHT_ANSI }
+}
 
 function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspaceController; id: string; colorScheme: BottomPanelProps['colorScheme'] }) {
   const model = workspace.view(id)
@@ -16,6 +20,7 @@ function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspac
   const screen = useRef<Terminal>()
   const fit = useRef<FitAddon>()
   const revision = useRef(0)
+  const [menu, setMenu] = useState<{ x: number; y: number }>()
   const current = useRef(state)
   current.current = state
   const measure = () => {
@@ -36,11 +41,28 @@ function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspac
     terminal.open(root.current)
     terminal.textarea?.setAttribute('aria-label', '终端输入')
     screen.current = terminal; fit.current = addon; revision.current = 0
+    // xterm 自带的是 Electron 英文菜单，这里接管右键，换成与资源管理器一致的中文菜单。
+    const contextmenu = (event: MouseEvent) => {
+      event.preventDefault()
+      event.stopPropagation()
+      setMenu({ x: Math.min(event.clientX, window.innerWidth - 172), y: Math.min(event.clientY, window.innerHeight - 152) })
+    }
+    root.current.addEventListener('contextmenu', contextmenu, true)
     const input = terminal.onData(data => model.write(data))
     const observer = new ResizeObserver(measure)
     observer.observe(root.current)
-    return () => { observer.disconnect(); input.dispose(); terminal.dispose(); screen.current = undefined; fit.current = undefined }
+    return () => { root.current?.removeEventListener('contextmenu', contextmenu, true); observer.disconnect(); input.dispose(); terminal.dispose(); screen.current = undefined; fit.current = undefined }
   }, [model])
+  useEffect(() => {
+    if (menu === undefined) return
+    const close = () => setMenu(undefined)
+    // 捕获阶段监听：xterm 的输入框会吞掉冒泡阶段的按键，Escape 到不了 window。
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close() } }
+    window.addEventListener('pointerdown', close)
+    window.addEventListener('keydown', escape, true)
+    window.addEventListener('blur', close)
+    return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('keydown', escape, true); window.removeEventListener('blur', close) }
+  }, [menu])
   useEffect(() => model.mount(), [model])
   useLayoutEffect(() => {
     const terminal = screen.current
@@ -61,12 +83,20 @@ function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspac
   const retry = state.phase === 'failed' || state.phase === 'disconnected'
   const readOnly = state.phase === 'connected' && state.info?.state === 'running' && !state.writable
   const ended = state.info?.state === 'exited'
+  const terminal = screen.current
+  const run = (action: () => void) => { setMenu(undefined); action(); terminal?.focus() }
   return <section className="dvw-terminal-pane">
     {(error || retry || readOnly || ended || state.info === undefined) && <div className="dvw-terminal-notice" role="status">
       <span>{error ?? (ended ? `进程已退出（${state.info?.exitCode ?? '—'}）` : readOnly ? '其他页面正在控制此终端' : retry ? '终端连接已断开' : '正在启动终端…')}</span>
       {(retry || readOnly) && <button onClick={() => state.info === undefined ? void model.refresh() : model.connect()}>{readOnly ? '接管输入' : '重新连接'}</button>}
     </div>}
     <div ref={root} className="dvw-terminal-host"/>
+    {menu !== undefined && <div className="dvw-context-menu dvw-terminal-menu" role="menu" style={{ left: menu.x, top: menu.y }} onPointerDown={event => event.stopPropagation()}>
+      <button role="menuitem" disabled={terminal === undefined || !terminal.hasSelection()} onClick={() => run(() => { const text = terminal?.getSelection() ?? ''; if (text !== '') void navigator.clipboard.writeText(text) })}>复制</button>
+      <button role="menuitem" disabled={terminal === undefined || !state.writable} onClick={() => run(() => { void navigator.clipboard.readText().then(text => { if (text !== '') terminal?.paste(text) }).catch(() => undefined) })}>粘贴</button>
+      <button role="menuitem" disabled={terminal === undefined} onClick={() => run(() => terminal?.selectAll())}>全选</button>
+      <button role="menuitem" disabled={terminal === undefined || !state.writable} onClick={() => run(() => model.write('\x0c'))}>清屏</button>
+    </div>}
   </section>
 }
 

@@ -1,7 +1,7 @@
 <h1 align="center">DSH VS Code Workbench</h1>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/dsh-neon-workbench-core.svg" width="220" alt="DSH VS Code Workbench Logo">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/branding/dsh-official-style-v3/dsh-workbench.gif" width="220" alt="DSH VS Code Workbench Logo">
 </p>
 
 <p align="center">在 DeepSeek Harness 中叠加 VS Code 风格的本地开发工作台。</p>
@@ -67,7 +67,7 @@
 
 ## 安装
 
-插件 0.2.6 适配 DeepSeek Harness `0.2.2-rc.1`（Cordis `4.1.0`）。请先更新 Harness，再安装插件：
+插件 0.2.7 支持 DeepSeek Harness `0.2.1-rc.1` 及以上（默认验证基线 `0.2.2-rc.1`，Cordis `4.1.0`）。Harness 低于 `0.2.1-rc.1` 时会被安装闸门拒绝：
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.1

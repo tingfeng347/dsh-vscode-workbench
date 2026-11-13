@@ -1,7 +1,7 @@
 <h1 align="center">DSH VS Code Workbench</h1>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/dsh-neon-workbench-core.svg" width="220" alt="DSH VS Code Workbench Logo">
+  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/branding/dsh-official-style-v3/dsh-workbench.gif" width="220" alt="DSH VS Code Workbench Logo">
 </p>
 
 <p align="center">A VS Code-style local development workbench for DeepSeek Harness.</p>
@@ -67,7 +67,7 @@
 
 ## Installation
 
-Plugin 0.2.6 targets DeepSeek Harness `0.2.2-rc.1` (Cordis `4.1.0`). Update Harness before installing:
+Plugin 0.2.7 supports DeepSeek Harness `0.2.1-rc.1` and newer (default baseline `0.2.2-rc.1`, Cordis `4.1.0`). Anything below `0.2.1-rc.1` is rejected by the install gate:
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.1

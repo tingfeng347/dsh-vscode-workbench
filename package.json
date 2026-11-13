@@ -1,7 +1,18 @@
 {
   "name": "dsh-vscode-workbench",
   "version": "0.2.7",
-  "description": "Explorer, Monaco editor, search and local Git overlay for DSH",
+  "description": "VS Code-style workbench for DeepSeek Harness: editor, search, Git, terminal, document and web preview",
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "vscode",
+    "workbench",
+    "monaco",
+    "editor",
+    "terminal",
+    "browser",
+    "git"
+  ],
   "type": "module",
   "license": "MIT",
   "repository": {

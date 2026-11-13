@@ -4,7 +4,7 @@
   <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/branding/dsh-official-style-v3/dsh-workbench.gif" width="220" alt="DSH VS Code Workbench Logo">
 </p>
 
-<p align="center">在 DeepSeek Harness 中叠加 VS Code 风格的本地开发工作台。</p>
+<p align="center">在 DeepSeek Harness 里开一个 VS Code 风格的本地工作台：编辑、搜索、Git、终端、文档与网页预览都在同一界面。</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/v/dsh-vscode-workbench?logo=npm&label=npm" alt="npm 版本"></a>

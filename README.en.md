@@ -4,7 +4,7 @@
   <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/branding/dsh-official-style-v3/dsh-workbench.gif" width="220" alt="DSH VS Code Workbench Logo">
 </p>
 
-<p align="center">A VS Code-style local development workbench for DeepSeek Harness.</p>
+<p align="center">A VS Code-style local workbench inside DeepSeek Harness: editor, search, Git, terminal, document and web preview in one place.</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/v/dsh-vscode-workbench?logo=npm&label=npm" alt="npm version"></a>

@@ -22,7 +22,7 @@ import { ActivityBar, normalizeActivityOrder, type ActivityView } from './Activi
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.tsx'
 import type { DshNavigation, WorkspaceChoice } from './dshNavigation.ts'
 import { LspManager, type LspServerStatus } from './lsp.ts'
-import { TS_INTELLISENSE_KEY, disposeTypeScriptProject, indexTypeScriptProject, refreshIndexedFiles, tsIntellisenseEnabled, workspacePathFromModel } from './typescriptProject.ts'
+import { TS_INTELLISENSE_KEY, disposeTypeScriptProject, indexTypeScriptProject, refreshIndexedFiles, tsIntellisenseEnabled, typeScriptProjectStatus, workspacePathFromModel } from './typescriptProject.ts'
 import { ADD_TO_DSH_SHORTCUT, dshReference, insertIntoDshComposer, isAddToDshShortcut } from './dshComposer.ts'
 import { DocumentPreview, documentPreviewKind, type DocumentPreviewKind } from './documentPreview.tsx'
 import { toggleTerminal } from './shortcuts.ts'
@@ -168,7 +168,6 @@ export function directoryAffected(directory:string,changedPaths:string[]):boolea
 export function tabLabel(tab:Pick<Tab,'path'|'title'|'diffSourcePath'>):string{const path=tab.title??tab.diffSourcePath??tab.path.replace(/^diff:/,'');return path.split(/[\\/]/).at(-1)??path}
 
 function readActivityJSON(key: string): unknown { try { return JSON.parse(localStorage.getItem(key) ?? '[]') } catch { return [] } }
-function readActivityHidden(id: string): boolean { return false }
 
 /** Return the horizontal scroll offset that keeps an active tab inside the tab strip. */
 export function tabScrollLeft(scrollLeft:number,viewport:{left:number;right:number},tab:{left:number;right:number}):number{
@@ -267,32 +266,40 @@ function entryDragOver(event: DragEvent, directory: string, element: HTMLElement
   event.preventDefault(); event.dataTransfer.dropEffect = 'move'; markMoveTarget(element, expand)
   return true
 }
-async function dropEntry(event: DragEvent, sessionId: string, directory: string, onMoved: () => void) {
+async function dropEntry(event: DragEvent, sessionId: string, directory: string) {
   const entry = draggedEntry
   if (entry === undefined) return
   event.preventDefault(); event.stopPropagation(); endEntryDrag()
   if (!canMoveTo(entry.path, directory)) return
   const nextPath = movedPath(entry.path, directory)
-  try { await api('fs.rename', { sessionId, path: entry.path, nextPath }); onMoved(); window.dispatchEvent(new CustomEvent('dvw-files-changed', { detail: [entry.path, nextPath] })) } catch (error) { alert(error instanceof Error ? error.message : String(error)) }
+  try { await api('fs.rename', { sessionId, path: entry.path, nextPath }); window.dispatchEvent(new CustomEvent('dvw-files-changed', { detail: [entry.path, nextPath] })) } catch (error) { alert(error instanceof Error ? error.message : String(error)) }
 }
 
 function Tree({ sessionId, root, path, depth, expanded, selected, selectedDirectory, statuses, onToggle, onSelectDirectory, onOpen, onChange, onUpload, onAddToDsh, creating, onCreatingChange, onCreatingCancel, onCreatingSubmit }: TreeProps & { creating?: CreatingEntry; onCreatingChange(value: string): void; onCreatingCancel(): void; onCreatingSubmit(): void }) {
   const [rows, setRows] = useState<FileEntry[]>([]); const [error, setError] = useState<string>(); const [dropTarget, setDropTarget] = useState(false); const [context, setContext] = useState<{ entry: FileEntry; x: number; y: number }>(); const [renaming, setRenaming] = useState<{ path: string; value: string }>(); const [pendingDelete, setPendingDelete] = useState<FileEntry>()
-  const load = useCallback(() => { void api<FileEntry[]>('fs.list', { sessionId, path }).then(value => { setRows(value); setError(undefined) }).catch(error => setError(String(error))) }, [sessionId, path])
+  const listing = useRef<AbortController>()
+  const load = useCallback(() => {
+    listing.current?.abort()
+    const controller = listing.current = new AbortController()
+    void api<FileEntry[]>('fs.list', { sessionId, path }, controller.signal)
+      .then(value => { if (!controller.signal.aborted) { setRows(value); setError(undefined) } })
+      .catch(error => { if (!controller.signal.aborted) setError(String(error)) })
+  }, [sessionId, path])
+  useEffect(() => () => listing.current?.abort(), [load])
   useEffect(load, [load])
   useEffect(() => {
     const handler = (event:Event) => { const paths=(event as CustomEvent<string[]>).detail; if(!Array.isArray(paths)||directoryAffected(path,paths))load() }; window.addEventListener('dvw-files-changed', handler); return () => window.removeEventListener('dvw-files-changed', handler)
   }, [load])
   useEffect(() => { if (context === undefined) return; const close = () => setContext(undefined); const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') close() }; window.addEventListener('pointerdown', close); window.addEventListener('keydown', escape); return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('keydown', escape) } }, [context])
   useEffect(() => { if (pendingDelete === undefined) return; const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setPendingDelete(undefined) }; window.addEventListener('keydown', escape); return () => window.removeEventListener('keydown', escape) }, [pendingDelete])
-  const rename = async (entry: FileEntry) => { const value = renaming?.path === entry.path ? renaming.value.trim() : ''; setRenaming(undefined); if (value === '' || value === entry.name) return; try { await api('fs.rename', { sessionId, path: entry.path, nextPath: renamedPath(entry.path, value) }); load(); onChange() } catch (error) { alert(error instanceof Error ? error.message : String(error)) } }
-  const remove = async () => { if (pendingDelete === undefined) return; const entry = pendingDelete; setPendingDelete(undefined); try { await api('fs.delete', { sessionId, path: entry.path }); load(); onChange() } catch (error) { alert(error instanceof Error ? error.message : String(error)) } }
+  const rename = async (entry: FileEntry) => { const value = renaming?.path === entry.path ? renaming.value.trim() : ''; setRenaming(undefined); if (value === '' || value === entry.name) return; try { await api('fs.rename', { sessionId, path: entry.path, nextPath: renamedPath(entry.path, value) }); onChange() } catch (error) { alert(error instanceof Error ? error.message : String(error)) } }
+  const remove = async () => { if (pendingDelete === undefined) return; const entry = pendingDelete; setPendingDelete(undefined); try { await api('fs.delete', { sessionId, path: entry.path }); onChange() } catch (error) { alert(error instanceof Error ? error.message : String(error)) } }
   const entryDirectory = (row: FileEntry) => row.kind === 'directory' ? row.path : parentPath(row.path)
   // A folder highlights its whole block like VS Code; a file targets its parent folder's block (or the tree root).
   const entryTarget = (event: DragEvent, row: FileEntry) => { const entry = (event.currentTarget as HTMLElement).parentElement; return row.kind === 'directory' ? entry : entry?.parentElement?.closest<HTMLElement>('.dvw-tree-entry,.dvw-tree') }
   const drop = (event: DragEvent, directory: string) => { event.preventDefault(); event.stopPropagation(); setDropTarget(false); if (event.dataTransfer.files.length > 0) onUpload(directory, event.dataTransfer.files) }
   return <>{error && <div className="dvw-error">{error}</div>}{creating?.directory === path && <><div className="dvw-tree-row dvw-tree-create-row" style={{ paddingLeft: 6 + depth * 13 }}><span className="dvw-chevron"/><Icon name={creating.kind === 'directory' ? 'folder' : 'new-file'} className={`dvw-file-icon ${creating.kind === 'directory' ? 'folder' : ''}`}/><input className="dvw-tree-create-input" value={creating.value} autoFocus aria-label={creating.kind === 'directory' ? '新建文件夹名称' : '新建文件名称'} aria-invalid={creating.error !== undefined} placeholder={creating.kind === 'directory' ? '文件夹名称' : '文件名称'} onChange={event => onCreatingChange(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); onCreatingSubmit() } if (event.key === 'Escape') { event.preventDefault(); onCreatingCancel() } }} onBlur={onCreatingCancel}/></div>{creating.error && <div className="dvw-tree-create-error" style={{ paddingLeft: 42 + depth * 13 }}>{creating.error}</div>}</>}{rows.map(row => <div className="dvw-tree-entry" key={row.path}>
-    <div className="dvw-tree-row" data-dvw-upload-directory={row.kind === 'directory' ? row.path : undefined} data-selected={selected === row.path || selectedDirectory === row.path} data-drop-target={dropTarget && row.kind === 'directory'} style={{ paddingLeft: 6 + depth * 13 }} onClick={() => row.kind === 'directory' ? (onSelectDirectory(row.path), onToggle(row.path)) : onOpen(row.path)} onContextMenu={(event) => { event.preventDefault(); if (row.kind === 'directory') onSelectDirectory(row.path); setContext({ entry: row, x: event.clientX, y: event.clientY }) }} draggable={renaming?.path !== row.path} onDragStart={event => startEntryDrag(event, sessionId, row)} onDragEnd={endEntryDrag} onDragEnter={event => { if (entryDragOver(event, entryDirectory(row), entryTarget(event, row), row.kind === 'directory' && !expanded.has(row.path) ? () => onToggle(row.path) : undefined)) return; if (row.kind === 'directory' && event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); setDropTarget(true) } }} onDragOver={event => { if (entryDragOver(event, entryDirectory(row), entryTarget(event, row))) return; if (row.kind === 'directory' && event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); setDropTarget(true) } }} onDragLeave={() => setDropTarget(false)} onDrop={event => { if (draggedEntry !== undefined) { void dropEntry(event, sessionId, entryDirectory(row), onChange); return } if (row.kind === 'directory') drop(event, row.path) }}>
+    <div className="dvw-tree-row" data-dvw-upload-directory={row.kind === 'directory' ? row.path : undefined} data-selected={selected === row.path || selectedDirectory === row.path} data-drop-target={dropTarget && row.kind === 'directory'} style={{ paddingLeft: 6 + depth * 13 }} onClick={() => row.kind === 'directory' ? (onSelectDirectory(row.path), onToggle(row.path)) : onOpen(row.path)} onContextMenu={(event) => { event.preventDefault(); if (row.kind === 'directory') onSelectDirectory(row.path); setContext({ entry: row, x: event.clientX, y: event.clientY }) }} draggable={renaming?.path !== row.path} onDragStart={event => startEntryDrag(event, sessionId, row)} onDragEnd={endEntryDrag} onDragEnter={event => { if (entryDragOver(event, entryDirectory(row), entryTarget(event, row), row.kind === 'directory' && !expanded.has(row.path) ? () => onToggle(row.path) : undefined)) return; if (row.kind === 'directory' && event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); setDropTarget(true) } }} onDragOver={event => { if (entryDragOver(event, entryDirectory(row), entryTarget(event, row))) return; if (row.kind === 'directory' && event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); setDropTarget(true) } }} onDragLeave={() => setDropTarget(false)} onDrop={event => { if (draggedEntry !== undefined) { void dropEntry(event, sessionId, entryDirectory(row)); return } if (row.kind === 'directory') drop(event, row.path) }}>
       <span className="dvw-chevron">{row.kind === 'directory' && <Icon name={expanded.has(row.path) ? 'chevron-down' : 'chevron-right'}/>}</span><FileIcon name={row.name} directory={row.kind === 'directory'} expanded={expanded.has(row.path)}/>{renaming?.path === row.path ? <input className="dvw-tree-rename" value={renaming.value} autoFocus onClick={event => event.stopPropagation()} onChange={event => setRenaming({ path: row.path, value: event.target.value })} onKeyDown={event => { if (event.key === 'Enter') void rename(row); if (event.key === 'Escape') setRenaming(undefined) }} onBlur={() => setRenaming(undefined)}/> : <span className="dvw-tree-name">{row.name}</span>}{row.kind === 'file' && statuses.has(row.path) && <span className="dvw-tree-status" data-status={statuses.get(row.path)}>{statuses.get(row.path)}</span>}
     </div>
     {row.kind === 'directory' && expanded.has(row.path) && <Tree {...{ sessionId, root, path: row.path, depth: depth + 1, expanded, selected, selectedDirectory, statuses, onToggle, onSelectDirectory, onOpen, onChange, onUpload, onAddToDsh, creating, onCreatingChange, onCreatingCancel, onCreatingSubmit }} />}
@@ -302,7 +309,7 @@ function Tree({ sessionId, root, path, depth, expanded, selected, selectedDirect
 function Explorer(props: { sessionId: string; cwd?: string; selected?: string; onOpen(path: string): void; onAddToDsh(path: string, directory: boolean): void }) {
   // The row the user last clicked, which the Explorer shortcut adds to the DSH chat.
   const lastEntry = useRef<{ path: string; directory: boolean }>()
-  const [expanded, setExpanded] = useState<Set<string>>(new Set()); const [revision, setRevision] = useState(0); const [statuses, setStatuses] = useState<Map<string, string>>(new Map()); const [dropTarget, setDropTarget] = useState(false); const [selectedDirectory, setSelectedDirectory] = useState(''); const [creating, setCreating] = useState<CreatingEntry>(); const picker = useRef<HTMLInputElement>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set()); const [statuses, setStatuses] = useState<Map<string, string>>(new Map()); const [dropTarget, setDropTarget] = useState(false); const [selectedDirectory, setSelectedDirectory] = useState(''); const [creating, setCreating] = useState<CreatingEntry>(); const picker = useRef<HTMLInputElement>(null)
   useEffect(() => { if (props.cwd) { try { setExpanded(new Set(JSON.parse(localStorage.getItem(`dvw:tree:${props.cwd}`) ?? '[]') as string[])) } catch { setExpanded(new Set()) } } }, [props.cwd])
   useEffect(() => { if (props.cwd) localStorage.setItem(`dvw:tree:${props.cwd}`, JSON.stringify([...expanded])) }, [props.cwd, expanded])
   const refreshStatus = useCallback(() => {
@@ -313,8 +320,8 @@ function Explorer(props: { sessionId: string; cwd?: string; selected?: string; o
   const refreshStatusDebounced = useDebouncedCallback(refreshStatus, 500)
   useEffect(() => { refreshStatus(); const handler = () => refreshStatusDebounced(); window.addEventListener('dvw-files-changed', handler); return () => window.removeEventListener('dvw-files-changed', handler) }, [refreshStatus, refreshStatusDebounced])
   const startCreating = (kind: 'file' | 'directory') => { const directory = selectedDirectory; if (directory) setExpanded(current => new Set(current).add(directory)); setCreating({ kind, directory, value: '' }) }
-  const submitCreating = async () => { if (creating === undefined) return; const value = creating.value.trim(); if (value === '') { setCreating(current => current && ({ ...current, error: '请输入名称' })); return } const path = createdEntryPath(creating.directory, value); try { await api('fs.create', { sessionId: props.sessionId, path, kind: creating.kind }); const created = path; setCreating(undefined); setSelectedDirectory(creating.kind === 'directory' ? created : creating.directory); setRevision(x => x + 1); window.dispatchEvent(new Event('dvw-files-changed')) } catch (error) { setCreating(current => current && ({ ...current, error: error instanceof Error ? error.message : String(error) })) } }
-  const upload = useCallback(async (directory: string, files: FileList) => { try { await Promise.all([...files].map(async file => { const query = new URLSearchParams({ sessionId: props.sessionId, directory, name: file.name }); const response = await fetch(`/dsh-vscode/upload?${query}`, { method: 'POST', headers: { 'content-type': file.type || 'application/octet-stream' }, body: file }); const answer = await response.json() as { ok: boolean; error?: { message?: string } }; if (!response.ok || !answer.ok) throw new Error(answer.error?.message ?? 'upload failed') })); setRevision(value => value + 1); window.dispatchEvent(new Event('dvw-files-changed')) } catch (error) { alert(error instanceof Error ? error.message : String(error)) } }, [props.sessionId])
+  const submitCreating = async () => { if (creating === undefined) return; const value = creating.value.trim(); if (value === '') { setCreating(current => current && ({ ...current, error: '请输入名称' })); return } const path = createdEntryPath(creating.directory, value); try { await api('fs.create', { sessionId: props.sessionId, path, kind: creating.kind }); const created = path; setCreating(undefined); setSelectedDirectory(creating.kind === 'directory' ? created : creating.directory); window.dispatchEvent(new Event('dvw-files-changed')) } catch (error) { setCreating(current => current && ({ ...current, error: error instanceof Error ? error.message : String(error) })) } }
+  const upload = useCallback(async (directory: string, files: FileList) => { try { await Promise.all([...files].map(async file => { const query = new URLSearchParams({ sessionId: props.sessionId, directory, name: file.name }); const response = await fetch(`/dsh-vscode/upload?${query}`, { method: 'POST', headers: { 'content-type': file.type || 'application/octet-stream' }, body: file }); const answer = await response.json() as { ok: boolean; error?: { message?: string } }; if (!response.ok || !answer.ok) throw new Error(answer.error?.message ?? 'upload failed') })); window.dispatchEvent(new Event('dvw-files-changed')) } catch (error) { alert(error instanceof Error ? error.message : String(error)) } }, [props.sessionId])
   useEffect(() => {
     let activeTarget: HTMLElement | undefined
     const filesDragged = (event: globalThis.DragEvent) => Array.from(event.dataTransfer?.types ?? []).includes('Files')
@@ -345,7 +352,7 @@ function Explorer(props: { sessionId: string; cwd?: string; selected?: string; o
   const drop = (event: DragEvent) => { event.preventDefault(); setDropTarget(false); if (event.dataTransfer.files.length > 0) void upload('', event.dataTransfer.files) }
   const destination = uploadDestination(selectedDirectory)
   const treeDrag = (event: DragEvent) => { if (entryDragOver(event, '', event.currentTarget as HTMLElement)) return; if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); setDropTarget(true) } }
-  return <><div className="dvw-side-head">资源管理器<div className="dvw-toolbar"><input ref={picker} className="dvw-file-picker" type="file" accept="*/*" multiple onChange={event => { if (event.currentTarget.files) void upload(destination, event.currentTarget.files); event.currentTarget.value = '' }}/><button className="dvw-icon" title={`上传文件到 ${destination || '工作区根目录'}`} onClick={() => picker.current?.click()}><Icon name="cloud-upload"/></button><button className="dvw-icon" title="新建文件" onClick={() => startCreating('file')}><Icon name="new-file"/></button><button className="dvw-icon" title="新建文件夹" onClick={() => startCreating('directory')}><Icon name="new-folder"/></button><button className="dvw-icon" title="刷新" onClick={() => { setRevision(x => x + 1); window.dispatchEvent(new Event('dvw-files-changed')) }}><Icon name="refresh"/></button></div></div><div className="dvw-tree" tabIndex={-1} data-dvw-upload-directory="" data-drop-target={dropTarget} key={revision} onKeyDown={event => { if (!isAddToDshShortcut(event.nativeEvent) || lastEntry.current === undefined) return; event.preventDefault(); props.onAddToDsh(lastEntry.current.path, lastEntry.current.directory) }} onDragEnter={treeDrag} onDragOver={treeDrag} onDragLeave={event => { setDropTarget(false); if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) clearMoveTarget() }} onDrop={event => { if (draggedEntry !== undefined) { void dropEntry(event, props.sessionId, '', () => setRevision(x => x + 1)); return } drop(event) }}><Tree sessionId={props.sessionId} root={props.cwd ?? ''} path="" depth={0} expanded={expanded} selected={props.selected} selectedDirectory={selectedDirectory} statuses={statuses} onToggle={path => setExpanded(current => { const next = new Set(current); next.has(path) ? next.delete(path) : next.add(path); return next })} onSelectDirectory={path => { lastEntry.current = { path, directory: true }; setSelectedDirectory(path) }} onOpen={path => { lastEntry.current = { path, directory: false }; props.onOpen(path) }} onAddToDsh={props.onAddToDsh} onChange={() => setRevision(x => x + 1)} onUpload={(directory, files) => void upload(directory, files)} creating={creating} onCreatingChange={value => setCreating(current => current && ({ ...current, value, error: undefined }))} onCreatingCancel={() => setCreating(undefined)} onCreatingSubmit={() => void submitCreating()} /></div></>
+  return <><div className="dvw-side-head">资源管理器<div className="dvw-toolbar"><input ref={picker} className="dvw-file-picker" type="file" accept="*/*" multiple onChange={event => { if (event.currentTarget.files) void upload(destination, event.currentTarget.files); event.currentTarget.value = '' }}/><button className="dvw-icon" title={`上传文件到 ${destination || '工作区根目录'}`} onClick={() => picker.current?.click()}><Icon name="cloud-upload"/></button><button className="dvw-icon" title="新建文件" onClick={() => startCreating('file')}><Icon name="new-file"/></button><button className="dvw-icon" title="新建文件夹" onClick={() => startCreating('directory')}><Icon name="new-folder"/></button><button className="dvw-icon" title="刷新" onClick={() => { window.dispatchEvent(new Event('dvw-files-changed')) }}><Icon name="refresh"/></button></div></div><div className="dvw-tree" tabIndex={-1} data-dvw-upload-directory="" data-drop-target={dropTarget} onKeyDown={event => { if (!isAddToDshShortcut(event.nativeEvent) || lastEntry.current === undefined) return; event.preventDefault(); props.onAddToDsh(lastEntry.current.path, lastEntry.current.directory) }} onDragEnter={treeDrag} onDragOver={treeDrag} onDragLeave={event => { setDropTarget(false); if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) clearMoveTarget() }} onDrop={event => { if (draggedEntry !== undefined) { void dropEntry(event, props.sessionId, ''); return } drop(event) }}><Tree sessionId={props.sessionId} root={props.cwd ?? ''} path="" depth={0} expanded={expanded} selected={props.selected} selectedDirectory={selectedDirectory} statuses={statuses} onToggle={path => setExpanded(current => { const next = new Set(current); next.has(path) ? next.delete(path) : next.add(path); return next })} onSelectDirectory={path => { lastEntry.current = { path, directory: true }; setSelectedDirectory(path) }} onOpen={path => { lastEntry.current = { path, directory: false }; props.onOpen(path) }} onAddToDsh={props.onAddToDsh} onChange={() => window.dispatchEvent(new Event('dvw-files-changed'))} onUpload={(directory, files) => void upload(directory, files)} creating={creating} onCreatingChange={value => setCreating(current => current && ({ ...current, value, error: undefined }))} onCreatingCancel={() => setCreating(undefined)} onCreatingSubmit={() => void submitCreating()} /></div></>
 }
 
 /** Return the workspace-relative directory used by the file picker. */
@@ -642,6 +649,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     return ()=>window.removeEventListener('dvw-open-external-url',open)
   },[defaultBrowser,browser,sessionId])
   useEffect(()=>{if(hostDshPanelId!==undefined)setBrowserId(undefined)},[hostDshPanelId])
+  const groupsRef=useRef(groups);groupsRef.current=groups
   const tabsRef=useRef(tabs);tabsRef.current=tabs
   // DSH unmounts its conversation while a global panel (Plugins…) is selected,
   // so the tab outlives the panel: opening a file hands the centre back to the
@@ -814,15 +822,14 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const handle = requestIdleCallback(preloadMonaco, { timeout: 2000 })
     return () => cancelIdleCallback(handle)
   }, [snapshot.visible])
-  const openTabPaths = tabs.filter(tab => !tab.path.startsWith('diff:')).map(tab => tab.path).join('\0')
+  const openTabPaths = groups.flatMap(group => group.tabs).filter(tab => !tab.path.startsWith('diff:')).map(tab => tab.path).join('\0')
   useEffect(() => {
     if (workspace !== undefined) retainEditorModels(openTabPaths === '' ? [] : openTabPaths.split('\0').map(path => `${workspace.cwd}/${path}`))
   }, [workspace, openTabPaths])
-  const loadTab = useCallback((path: string) => {
+  const loadTab = useCallback((path: string, groupId = focusedRef.current) => {
     if (sessionId === undefined) return
     const epoch = workspaceRequests.current.current()
     // The read may finish after the user moved to another pane; keep writing to the pane that asked.
-    const groupId = focusedRef.current
     const token = Symbol(path)
     loadingTabs.current.set(path, token)
     const current = () => workspaceRequests.current.isCurrent(epoch) && loadingTabs.current.get(path) === token
@@ -854,9 +861,9 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const refresh = (paths?: string[]) => {
       if (closed) return
       window.dispatchEvent(new CustomEvent('dvw-files-changed', { detail: paths }))
-      for (const tab of tabsRef.current) {
+      for (const group of groupsRef.current) for (const tab of group.tabs) {
         if (tab.path.startsWith('diff:') || tab.loaded === false) continue
-        if (paths === undefined || paths.some(path => tab.path === path || tab.path.startsWith(`${path}/`))) loadTab(tab.path)
+        if (paths === undefined || paths.some(path => tab.path === path || tab.path.startsWith(`${path}/`))) loadTab(tab.path, group.id)
       }
     }
     ws.onopen = () => refresh()
@@ -866,10 +873,12 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     return () => { closed = true; ws.close() }
   }, [snapshot.visible, sessionId, workspace, loadTab])
   useEffect(() => {
-    if (sessionId === undefined || active === undefined || workspace === undefined) return
-    const tab = tabsRef.current.find(row => row.path === active)
-    if (tab?.loaded === false && !loadingTabs.current.has(active)) loadTab(active)
-  }, [active, sessionId, workspace, tabs, loadTab])
+    if (!snapshot.visible || sessionId === undefined || workspace === undefined) return
+    for (const group of groups) {
+      const tab = group.tabs.find(row => row.path === group.active)
+      if (tab?.loaded === false && !loadingTabs.current.has(tab.path)) loadTab(tab.path, group.id)
+    }
+  }, [snapshot.visible, sessionId, workspace, groups, loadTab])
   useEffect(() => {
     const list = tabListRef.current
     const selected = list?.querySelector<HTMLElement>('.dvw-tab[data-active="true"]')
@@ -920,32 +929,45 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   useEffect(()=>{if(!snapshot.visible||sessionId===undefined||workspace===undefined)return;void refreshLsp()},[snapshot.visible,sessionId,workspace,refreshLsp])
   useEffect(()=>()=>{lspManager.current?.dispose()},[])
   useEffect(()=>{try{localStorage.setItem(TS_INTELLISENSE_KEY,tsIntellisense?'on':'off')}catch{}},[tsIntellisense])
+  const hasTextTabs = groups.some(group => group.tabs.some(tab => tab.loaded && !tab.documentPreview && !tab.imageUrl))
   // Definition and reference jumps land in workbench tabs for every language, including LSP servers
   // that are independent of Monaco's built-in TypeScript index.
   useEffect(()=>{
     if(!snapshot.visible||sessionId===undefined||workspace===undefined)return
+    if (!hasTextTabs) return
     let cancelled=false;let disposable:{dispose():void}|undefined
     void loadMonaco().then(monaco=>{
       if(cancelled)return
       const cwd=workspace.cwd
       disposable=monaco.editor.registerEditorOpener({openCodeEditor:(_source,resource,selection)=>{const path=workspacePathFromModel(cwd,resource.toString());if(path===undefined)return false;const position=selection===undefined?undefined:'startLineNumber' in selection?{line:selection.startLineNumber,column:selection.startColumn}:{line:selection.lineNumber,column:selection.column};openPath(path,position?.line,position?.column);return true}})
-    })
+    }).catch(error => { if (!cancelled) setError(String(error)) })
     return()=>{cancelled=true;disposable?.dispose()}
-  },[snapshot.visible,sessionId,workspace,openPath])
+  },[snapshot.visible,sessionId,workspace,openPath,hasTextTabs])
   useEffect(()=>{
-    if(!snapshot.visible||sessionId===undefined||workspace===undefined)return
+    if(sessionId===undefined||workspace===undefined)return
+    const cwd=workspace.cwd
     // Not installed: never load Monaco just for this, only release an index a previous install built.
     if(!tsIntellisense){if(window.monaco!==undefined)disposeTypeScriptProject(window.monaco);setTsIndex({state:'idle'});return}
-    let cancelled=false;const cwd=workspace.cwd;const disposables:{dispose():void}[]=[]
+    const existing=typeScriptProjectStatus(cwd)
+    if(existing!==undefined){
+      setTsIndex(current=>current.state==='ready'&&current.files===existing.files&&current.truncated===existing.truncated?current:{state:'ready',...existing})
+      if(!snapshot.visible)return
+      const changed=(event:Event)=>{const paths=(event as CustomEvent<string[]|undefined>).detail;if(Array.isArray(paths)&&window.monaco!==undefined)void refreshIndexedFiles(window.monaco,sessionId,cwd,paths)}
+      window.addEventListener('dvw-files-changed',changed);return()=>window.removeEventListener('dvw-files-changed',changed)
+    }
+    if(!snapshot.visible)return
+    let cancelled=false
+    let changed: ((event: Event) => void) | undefined
     void loadMonaco().then(monaco=>{
       if(cancelled)return
       setTsIndex({state:'loading'})
-      const changed=(event:Event)=>{const paths=(event as CustomEvent<string[]|undefined>).detail;if(Array.isArray(paths))void refreshIndexedFiles(monaco,sessionId,cwd,paths)}
-      window.addEventListener('dvw-files-changed',changed);disposables.push({dispose:()=>window.removeEventListener('dvw-files-changed',changed)})
+      changed=(event:Event)=>{const paths=(event as CustomEvent<string[]|undefined>).detail;if(Array.isArray(paths))void refreshIndexedFiles(monaco,sessionId,cwd,paths)}
+      window.addEventListener('dvw-files-changed',changed)
       void indexTypeScriptProject(monaco,sessionId,cwd).then(result=>{if(!cancelled)setTsIndex({state:'ready',...result})}).catch(error=>{if(!cancelled)setTsIndex({state:'error',error:error instanceof Error?error.message:String(error)})})
-    })
-    return()=>{cancelled=true;for(const disposable of disposables)disposable.dispose()}
+    }).catch(error => { if (!cancelled) setTsIndex({state:"error",error:String(error)}) })
+    return()=>{cancelled=true;if(changed!==undefined)window.removeEventListener('dvw-files-changed',changed)}
   },[snapshot.visible,sessionId,workspace,tsIntellisense])
+  useEffect(()=>()=>{if(window.monaco!==undefined)disposeTypeScriptProject(window.monaco)},[])
   const openDiff=useCallback((path:string,diff:GitDiff,title?:string,diffSourcePath?:string)=>{const key=`diff:${path}`;const source=diffSourcePath??path;// Previewable documents open like VS Code's PDF/Office editors; history diffs keep the binary notice.
     if(isPreviewDocumentPath(source)&&!path.startsWith('commit:')){openPath(source);return}const binary=isBinaryDiffPath(source);setTabs(rows=>[...rows.filter(row=>row.path!==key),{path:key,title,content:diff.diff,draft:diff.diff,revision:'',size:diff.diff.length,binary,tooLarge:false,dirty:false,diff:binary?undefined:diff,diffMode:'inline',diffSourcePath:source}]);leaveDshPanel();setActive(key)},[openPath,leaveDshPanel])
   useEffect(()=>{const listener=(event:Event)=>void open((event as CustomEvent<string>).detail);window.addEventListener('dvw-open-workspace-path',listener);return()=>window.removeEventListener('dvw-open-workspace-path',listener)},[sessionId,tabs])
@@ -980,7 +1002,6 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     if(activityHidden.includes('terminal')&&snapshot.bottomPanel==='terminal')toggleTerminal(service)
     if(primarySideVisible&&(snapshot.view==='explorer'||snapshot.view==='search'||snapshot.view==='git')&&activityHidden.includes(snapshot.view))setPrimarySideVisible(false)
   },[activityHidden])
-  const selectHeading=(index:number)=>{if(activeTab===undefined)return;setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab));window.setTimeout(()=>window.dispatchEvent(new CustomEvent('dvw-markdown-heading',{detail:index})),50)}
   const suppressAttachmentDrop=(event:DragEvent)=>{if(!event.dataTransfer.types.includes('Files'))return;const target=event.target;const insideTree=target instanceof Element&&target.closest('.dvw-tree')!==null;if(!insideTree){event.preventDefault();event.stopPropagation()}}
   const settingsPage=<WorkbenchSettings theme={theme} setTheme={setTheme} fontSize={fontSize} setFontSize={setFontSize} primarySideVisible={primarySideVisible} setPrimarySideVisible={setPrimarySideVisible} chatVisible={chatVisible} setChatVisible={setChatVisible} statusVisible={statusVisible} setStatusVisible={setStatusVisible} sideWidth={sideWidth} setSideWidth={setSideWidth} chatWidth={chatWidth} setChatWidth={setChatWidth} chatMinWidth={DSH_CHAT_MIN_WIDTH} chatMaxWidth={DSH_CHAT_MAX_WIDTH} markdownView={markdownView} setMarkdownView={setMarkdownView} defaultBrowser={defaultBrowser} setDefaultBrowser={setDefaultBrowser} openMode={openMode} setOpenMode={setOpenMode} resetFloatWindow={resetFloatGeometry} commitDetail={commitDetail} setCommitDetail={setCommitDetail} commitLanguage={commitLanguage} setCommitLanguage={setCommitLanguage} tsIntellisense={tsIntellisense} setTsIntellisense={setTsIntellisense} tsIndex={tsIndex} lspServers={lspServers} lspBusy={lspBusy} lspError={lspError} changeLsp={changeLspAction} refreshLsp={refreshLspAction}/>
   if(!snapshot.visible)return settingsNode===undefined?null:createPortal(settingsPage,settingsNode)
@@ -992,12 +1013,8 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   if(sessionId===undefined)return <div ref={overlayRef} className="dvw-overlay" data-dvw-theme={colorScheme} data-dvw-theme-name={theme} data-dvw-float={floating||undefined} data-dvw-float-max={floating&&floatMax||undefined} data-dvw-float-fullscreen={floating&&floatFullscreen||undefined} style={floatStyle}>{floating&&<FloatBar fullscreen={floatFullscreen} onPointerDown={event=>beginFloatGesture(event,'move')} onToggleFullscreen={()=>void toggleFloatFullscreen()} onClose={()=>service.hide()}/>}<div className="dvw-empty" style={{gridColumn:'1/4'}}><div>请先选择或创建一个 DSH 会话。<br/><button onClick={()=>service.hide()}>返回 DSH</button></div></div></div>
   const showingDshPanel=dshTabId!==undefined&&dshTabActive
   const closeDshPanel=()=>{setDshTabActive(false);setDshTabId(undefined);onCloseDshPanel?.()}
-  const openFromView=(path:string,line?:number,column?:number,highlight?:string)=>{leaveDshPanel();openPath(path,line,column,highlight)}
+  const openFromView=openPath
   const chatShown=chatVisible&&!showingDshPanel&&!floating
-  const markdown=activeTab!==undefined&&!activeTab.path.startsWith('diff:')&&/\.md$/i.test(activeTab.path)
-  const diffMarkdown=activeTab?.diff!==undefined&&/\.md$/i.test(activeTab.diffSourcePath??'')
-  const markdownPreview=markdown||(diffMarkdown&&activeTab?.preview===true)
-  const headings=markdownPreview&&activeTab?markdownHeadings(activeTab.diff?.modified??activeTab.draft):[]
   const renderPaneChrome = (group: EditorGroup, tabs: Tab[], active: string | undefined, activeTab: Tab | undefined, focused: boolean, paneMarkdown: boolean, paneDiffMarkdown: boolean, markdownPreview: boolean) => {
     const setActive = (value?: string) => { focusGroup(group.id); setActiveIn(group.id, value) }
     const setTabs = (update: Tab[] | ((rows: Tab[]) => Tab[])) => setTabsIn(group.id, update)

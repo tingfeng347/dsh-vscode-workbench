@@ -29,7 +29,7 @@ const COMPILER = (monaco: Monaco) => ({
   esModuleInterop: true, resolveJsonModule: true, noEmit: true, skipLibCheck: true, strict: true,
 })
 
-let indexed: { cwd: string; uris: string[] } | undefined
+let indexed: { cwd: string; uris: string[]; files: number; truncated: boolean } | undefined
 let request = 0
 
 /** Configure Monaco's TypeScript worker and load the workspace's TS/JS files so definitions, references, Peek and signature help resolve across files. */
@@ -44,7 +44,7 @@ export async function indexTypeScriptProject(monaco: Monaco, sessionId: string, 
   const id = ++request
   const { files, truncated } = await api<{ files: { path: string; content: string }[]; truncated: boolean }>('project.sources', { sessionId })
   if (id !== request) return { files: 0, truncated }
-  disposeTypeScriptProject(monaco)
+  clearIndex(monaco)
   const uris: string[] = []
   for (const file of files) {
     const uri = monaco.Uri.parse(projectModelPath(cwd, file.path))
@@ -53,12 +53,23 @@ export async function indexTypeScriptProject(monaco: Monaco, sessionId: string, 
     monaco.editor.createModel(file.content, undefined, uri)
     uris.push(uri.toString())
   }
-  indexed = { cwd, uris }
+  indexed = { cwd, uris, files: files.length, truncated }
   return { files: files.length, truncated }
+}
+
+/** Status of the current project index, or undefined when it belongs to another workspace. */
+export function typeScriptProjectStatus(cwd: string): { files: number; truncated: boolean } | undefined {
+  if (indexed?.cwd !== cwd) return undefined
+  return { files: indexed.files, truncated: indexed.truncated }
 }
 
 /** Drop the index models that no editor or tab is using. */
 export function disposeTypeScriptProject(monaco: Monaco): void {
+  request++
+  clearIndex(monaco)
+}
+
+function clearIndex(monaco: Monaco): void {
   if (indexed === undefined) return
   for (const uri of indexed.uris) { const model = monaco.editor.getModel(monaco.Uri.parse(uri)); if (model !== null && !model.isAttachedToEditor()) model.dispose() }
   indexed = undefined
@@ -70,11 +81,13 @@ export function isIndexedModel(uri: string): boolean { return indexed?.uris.incl
 /** Refresh index models for files changed on disk, unless an editor is showing them. */
 export async function refreshIndexedFiles(monaco: Monaco, sessionId: string, cwd: string, paths: string[]): Promise<void> {
   if (indexed === undefined || indexed.cwd !== cwd) return
+  const index = indexed
   for (const path of paths) {
     const uri = monaco.Uri.parse(projectModelPath(cwd, path))
     const model = monaco.editor.getModel(uri)
     if (model === null || model.isAttachedToEditor() || !isIndexedModel(uri.toString())) continue
     const document = await api<{ content: string }>('fs.read', { sessionId, path }).catch(() => undefined)
+    if (indexed !== index || model.isDisposed()) return
     if (document === undefined) { model.dispose(); indexed.uris = indexed.uris.filter(value => value !== uri.toString()); continue }
     if (model.getValue() !== document.content) model.setValue(document.content)
   }

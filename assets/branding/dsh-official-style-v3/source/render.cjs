@@ -54,7 +54,7 @@ function svgAt(t=0, animated=false){
 (async()=>{
   fs.writeFileSync(path.join(OUT,'dsh-workbench.svg'),svgAt());
   const canvas=createCanvas(SIZE,SIZE), c=canvas.getContext('2d');
-  async function render(t,background='#FFFFFF'){
+  async function render(t,background=null){
     c.clearRect(0,0,SIZE,SIZE);
     if(background){c.fillStyle=background;c.fillRect(0,0,SIZE,SIZE);}
     c.drawImage(await loadImage(Buffer.from(svgAt(t))),0,0,SIZE,SIZE);
@@ -65,10 +65,11 @@ function svgAt(t=0, animated=false){
   fs.writeFileSync(path.join(OUT,'dsh-workbench.png'),hi.toBuffer('image/png'));
   await render(0);fs.writeFileSync(path.join(OUT,'dsh-workbench-preview.png'),canvas.toBuffer('image/png'));
   const samples=[];
-  for(let i=0;i<N;i+=6){const pixels=await render(i/(N-1));for(let p=0;p<pixels.length;p+=40)samples.push(pixels[p],pixels[p+1],pixels[p+2],255);}
-  const palette=quantize(Uint8Array.from(samples),256,{format:'rgb565'});
+  for(let i=0;i<N;i+=6){const pixels=await render(i/(N-1));for(let p=0;p<pixels.length;p+=40)samples.push(pixels[p],pixels[p+1],pixels[p+2],pixels[p+3]);}
+  const palette=quantize(Uint8Array.from(samples),256,{format:'rgba4444',oneBitAlpha:true,clearAlpha:true,clearAlphaThreshold:0,clearAlphaColor:0});
+  const transparentIndex=palette.findIndex(color=>color[3]===0);
   const gif=GIFEncoder();
-  for(let i=0;i<N;i++){const pixels=await render(i/(N-1));gif.writeFrame(applyPalette(pixels,palette,'rgb565'),SIZE,SIZE,{palette:i===0?palette:undefined,delay:50,repeat:0});}
+  for(let i=0;i<N;i++){const pixels=await render(i/(N-1));gif.writeFrame(applyPalette(pixels,palette,'rgba4444'),SIZE,SIZE,{palette:i===0?palette:undefined,delay:50,repeat:0,...(transparentIndex<0?{}:{transparent:true,transparentIndex}),dispose:2});}
   gif.finish();const dest=path.join(OUT,'dsh-workbench.gif');fs.writeFileSync(dest,gif.bytes());
   const board=createCanvas(1280,1280),bc=board.getContext('2d');
   for(const [i,t] of [0,.25,.5,.7].entries()){await render(t);bc.drawImage(canvas,(i%2)*640,Math.floor(i/2)*640);}
@@ -77,9 +78,9 @@ function svgAt(t=0, animated=false){
   const im=await loadImage(Buffer.from(svgAt()));
   for(const [i,size] of [128,64,32].entries()){sc.drawImage(im,20+i*100,70,size,size);sc.drawImage(im,340+i*100,70,size,size);}
   fs.writeFileSync(path.join(QA,'scale-check.png'),small.toBuffer('image/png'));
-  const reader=new GifReader(fs.readFileSync(dest));let first,last,duration=0;
-  for(let i=0;i<reader.numFrames();i++){const p=new Uint8Array(SIZE*SIZE*4);reader.decodeAndBlitFrameRGBA(i,p);if(!i)first=p;if(i===reader.numFrames()-1)last=p;duration+=reader.frameInfo(i).delay*10;}
+  const reader=new GifReader(fs.readFileSync(dest));let first,last,duration=0,transparentCorners=true;
+  for(let i=0;i<reader.numFrames();i++){const p=new Uint8Array(SIZE*SIZE*4);reader.decodeAndBlitFrameRGBA(i,p);if(!i)first=p;if(i===reader.numFrames()-1)last=p;if(p[3]!==0)transparentCorners=false;duration+=reader.frameInfo(i).delay*10;}
   let seam=0;for(let i=0;i<first.length;i+=4)if(first[i]!==last[i]||first[i+1]!==last[i+1]||first[i+2]!==last[i+2])seam++;
-  const report={width:reader.width,height:reader.height,frames:reader.numFrames(),durationMs:duration,loopCount:reader.loopCount(),seamChangedPixels:seam,bytes:fs.statSync(dest).size};
+  const report={width:reader.width,height:reader.height,frames:reader.numFrames(),durationMs:duration,loopCount:reader.loopCount(),transparentCorners,seamChangedPixels:seam,bytes:fs.statSync(dest).size};
   fs.writeFileSync(path.join(OUT,'source/export-check.json'),JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify(report));
 })();

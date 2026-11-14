@@ -17,6 +17,9 @@ describe('workbench dark theme', () => {
     expect(read('src/client/Workbench.tsx')).toContain('data-dvw-theme={colorScheme}')
     expect(read('src/client/Workbench.tsx')).toContain('followDsh={false}')
     expect(styles).toContain('body[data-dvw-palette=dark] [data-dvw-conversation-panel]')
+    expect(styles).toContain('--dsw-specific-input-major:#252526')
+    expect(styles).toContain('--dsw-alias-markdown-inline-code:#303132')
+    expect(styles).toContain('--dsw-alias-label-tertiary:#92969c')
   })
 
   it('keeps the open file highlighted while hovering another row', () => {
@@ -155,9 +158,12 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('html[data-windows-titlebar] .dvw-overlay{top:var(--dvw-titlebar-height);padding-top:6px}')
     expect(styles).toContain('.dvw-overlay:not([data-dvw-primary-side=true]) .dvw-activity{border-radius:8px}')
     expect(styles).not.toContain('.dvw-status{grid-column:1/4;grid-row:3;background:var(--dvw-base);color:var(--dvw-text);border-top')
-    expect(styles).toContain('[data-dvw-conversation-panel]{position:fixed!important;top:calc(var(--dvw-titlebar-height) + 6px)!important;right:3px!important;bottom:var(--dvw-status-height,30px)!important')
+    expect(styles).toContain('[data-dvw-conversation-panel]{--dvw-chat-line:')
+    expect(styles).toContain('position:fixed!important;top:calc(var(--dvw-titlebar-height) + 6px)!important;right:3px!important;bottom:var(--dvw-status-height,30px)!important')
     expect(read('src/client/Workbench.tsx')).toContain('statusHeight={statusVisible?30:6}')
     expect(styles).toContain('body[data-dvw-palette=light] [data-dvw-conversation-panel]{--dsw-alias-bg-base:#f9fafb;--dsw-specific-sidebar-fill:#f9fafb;--dsw-alias-border-l2:#e5e5e5;background:#f9fafb!important}')
+    expect(styles).toContain('border-radius:12px!important;background:var(--dvw-chat-soft)!important')
+    expect(styles).toContain('[data-dvw-conversation-panel] [data-composer-card]{border:1px solid var(--dvw-chat-line)!important;border-radius:14px!important')
     expect(styles).toContain('.dvw-tabs{height:35px')
     expect(styles).toContain('.dvw-tab{position:relative;height:35px')
     expect(styles).toContain('.dvw-tree-row{display:flex;align-items:center;height:22px;')

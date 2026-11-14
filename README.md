@@ -84,6 +84,13 @@ dsh plugin --profile web add dsh-vscode-workbench
 | `Ctrl+Shift+E` | 打开资源管理器 |
 | `Ctrl+Shift+F` | 打开搜索 |
 | `Ctrl+Shift+G` | 打开源代码管理 |
+| `Ctrl/⌘+点击` | 在资源管理器中切换单个项目的选中状态 |
+| `Shift+点击` | 连续选择从锚点到当前项目的可见条目 |
+| `Ctrl/⌘+A` | 选择资源管理器当前可见的全部项目 |
+| `Shift+↑/↓` | 按可见顺序扩展或收缩连续选择 |
+| `Ctrl/⌘+C` | 复制选中项目的相对路径，每行一个 |
+| `Delete` / `Backspace` | 删除资源管理器中的选中项目 |
+| `Esc` | 清空资源管理器多选或关闭删除确认 |
 | `Ctrl+S` | 保存当前文件 |
 | `Ctrl+Alt+B` | 显示或隐藏 DSH 对话栏 |
 | `Ctrl+\`` | 显示或隐藏终端 |

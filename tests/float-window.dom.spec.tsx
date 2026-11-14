@@ -12,7 +12,7 @@ vi.mock('../src/client/MonacoEditor.tsx', () => ({
   retainEditorModels: () => {},
   loadMonaco: () => Promise.resolve({ editor: { registerEditorOpener: () => ({ dispose() {} }) } }),
 }))
-vi.mock('../src/client/DshConversationPanel.tsx', () => ({ DshConversationPanel: () => null, DshConversationTheme: () => null }))
+vi.mock('../src/client/DshConversationPanel.tsx', () => ({ DshConversationPanel: () => null, DshConversationTheme: () => null, DshReviewActions: () => null }))
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 

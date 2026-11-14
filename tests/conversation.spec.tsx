@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
-import { DshConversationPanel, findDshConversationRoot } from '../src/client/DshConversationPanel.tsx'
+import { DshConversationPanel, DshReviewActions, findDshConversationRoot } from '../src/client/DshConversationPanel.tsx'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -43,4 +43,37 @@ it('ignores workbench-only DOM churn and re-attaches once per frame', async () =
   expect(query).toHaveBeenCalledTimes(1)
   expect(document.getElementById('main')!.hasAttribute('data-dvw-conversation-panel')).toBe(true)
   query.mockRestore(); await act(async () => { root.unmount() })
+})
+
+it('puts project review actions immediately above the DSH composer', async () => {
+  document.body.innerHTML = '<div id="composer-stack"><div data-slot="conversation.composer.bar"><div data-composer-card="true"></div></div></div><div id="plugin"></div>'
+  const root = createRoot(document.getElementById('plugin')!)
+  const open = vi.fn()
+  const accept = vi.fn()
+  const reject = vi.fn()
+  await act(async () => {
+    root.render(<DshReviewActions
+      visible
+      files={[{ path: 'src/a.ts', count: 2 }]}
+      count={2}
+      onOpen={open}
+      onAcceptAll={accept}
+      onRejectAll={reject}
+    />)
+  })
+
+  const stack = document.getElementById('composer-stack')!
+  expect(stack.firstElementChild?.className).toBe('dvw-review-composer-host')
+  expect(stack.textContent).toContain('1 个文件')
+  expect(stack.textContent).toContain('2 处 AI 改动待审阅')
+  const buttons = [...stack.querySelectorAll<HTMLButtonElement>('button')]
+  expect(buttons.map(button => button.textContent?.trim())).toEqual(['src/a.ts2', '全部拒绝', '全部接受'])
+  await act(async () => buttons[0]!.click())
+  await act(async () => buttons[1]!.click())
+  await act(async () => buttons[2]!.click())
+  expect(open).toHaveBeenCalledWith('src/a.ts')
+  expect(reject).toHaveBeenCalledTimes(1)
+  expect(accept).toHaveBeenCalledTimes(1)
+  await act(async () => root.unmount())
+  expect(document.querySelector('.dvw-review-composer-host')).toBeNull()
 })

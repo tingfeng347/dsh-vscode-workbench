@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { locateReviewChange, type ReviewChange } from './aiReview.ts'
 import { searchHighlightRange } from './searchHighlight.ts'
 import type { EditorSelection } from './dshComposer.ts'
 import { isIndexedModel } from './typescriptProject.ts'
@@ -201,10 +202,118 @@ function editorSelection(instance: import('monaco-editor').editor.IStandaloneCod
   return { text: model.getValueInRange(range), startLine: range.startLineNumber, endLine }
 }
 
-export function MonacoEditor(props: { uri: string; value: string; theme: MonacoColorScheme; line?: number; column?: number; fontSize?: number; highlight?: string; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
+export interface EditorReviewChange extends ReviewChange { conflict?: string }
+
+export interface ReviewLinePresentation {
+  readonly addedLines: number[]
+  readonly deletedGroups: Array<{ afterLineNumber: number; lines: string[] }>
+  readonly controlAfterLine: number
+}
+
+type LineOperation =
+  | { kind: 'same' | 'insert'; text: string }
+  | { kind: 'delete'; text: string }
+
+function lineOperations(before: string | null, after: string): LineOperation[] {
+  if (before === null || before === '') {
+    return after === '' ? [] : after.split('\n').map(text => ({ kind: 'insert', text }))
+  }
+  const left = before.split('\n')
+  const right = after.split('\n')
+  let prefix = 0
+  while (prefix < left.length && prefix < right.length && left[prefix] === right[prefix]) prefix++
+  let suffix = 0
+  while (
+    suffix < left.length - prefix
+    && suffix < right.length - prefix
+    && left[left.length - 1 - suffix] === right[right.length - 1 - suffix]
+  ) suffix++
+  const leftMiddle = left.slice(prefix, left.length - suffix)
+  const rightMiddle = right.slice(prefix, right.length - suffix)
+  const operations: LineOperation[] = left.slice(0, prefix).map(text => ({ kind: 'same', text }))
+
+  if (leftMiddle.length * rightMiddle.length > 1_000_000) {
+    operations.push(...leftMiddle.map(text => ({ kind: 'delete' as const, text })))
+    operations.push(...rightMiddle.map(text => ({ kind: 'insert' as const, text })))
+  } else {
+    const rows = leftMiddle.length + 1
+    const columns = rightMiddle.length + 1
+    const lcs = new Uint32Array(rows * columns)
+    for (let i = leftMiddle.length - 1; i >= 0; i--) {
+      for (let j = rightMiddle.length - 1; j >= 0; j--) {
+        const at = i * columns + j
+        lcs[at] = leftMiddle[i] === rightMiddle[j]
+          ? 1 + lcs[(i + 1) * columns + j + 1]!
+          : Math.max(lcs[(i + 1) * columns + j]!, lcs[i * columns + j + 1]!)
+      }
+    }
+    let i = 0
+    let j = 0
+    while (i < leftMiddle.length || j < rightMiddle.length) {
+      if (i < leftMiddle.length && j < rightMiddle.length && leftMiddle[i] === rightMiddle[j]) {
+        operations.push({ kind: 'same', text: leftMiddle[i]! })
+        i++
+        j++
+      } else if (j >= rightMiddle.length || (i < leftMiddle.length && lcs[(i + 1) * columns + j]! >= lcs[i * columns + j + 1]!)) {
+        operations.push({ kind: 'delete', text: leftMiddle[i++]! })
+      } else {
+        operations.push({ kind: 'insert', text: rightMiddle[j++]! })
+      }
+    }
+  }
+  operations.push(...left.slice(left.length - suffix).map(text => ({ kind: 'same' as const, text })))
+  return operations
+}
+
+/** Present only the changed lines inside a tool hunk, anchored to the current file. */
+export function reviewLinePresentation(
+  content: string,
+  change: Pick<ReviewChange, 'before' | 'after'>,
+): ReviewLinePresentation | undefined {
+  const location = locateReviewChange(content, change)
+  if (location === undefined) return undefined
+  const addedLines: number[] = []
+  const deletedGroups: Array<{ afterLineNumber: number; lines: string[] }> = []
+  let afterOffset = 0
+  let deleted: string[] = []
+  const flushDeleted = () => {
+    if (deleted.length === 0) return
+    deletedGroups.push({ afterLineNumber: Math.max(0, location.startLine + afterOffset - 1), lines: deleted })
+    deleted = []
+  }
+  for (const operation of lineOperations(change.before, change.after)) {
+    if (operation.kind === 'delete') {
+      deleted.push(operation.text)
+      continue
+    }
+    flushDeleted()
+    if (operation.kind === 'insert') addedLines.push(location.startLine + afterOffset)
+    afterOffset++
+  }
+  flushDeleted()
+  const controlAfterLine = addedLines.at(-1)
+    ?? deletedGroups.at(-1)?.afterLineNumber
+    ?? location.startLine
+  return { addedLines, deletedGroups, controlAfterLine }
+}
+
+export interface MonacoReviewProps {
+  changes: EditorReviewChange[]
+  activeId?: string
+  rejectDisabled?: boolean
+  onFocus(id: string): void
+  onKeep(id: string): void
+  onReject(id: string): void
+}
+
+export function MonacoEditor(props: { uri: string; value: string; theme: MonacoColorScheme; line?: number; column?: number; fontSize?: number; highlight?: string; focusOnReveal?: boolean; review?: MonacoReviewProps; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
   const root = useRef<HTMLDivElement>(null)
   const editor = useRef<import('monaco-editor').editor.IStandaloneCodeEditor>()
   const decorations = useRef<import('monaco-editor').editor.IEditorDecorationsCollection>()
+  const reviewDecorations = useRef<import('monaco-editor').editor.IEditorDecorationsCollection>()
+  const reviewZoneIds = useRef<string[]>([])
+  const reviewWidgets = useRef<Array<import('monaco-editor').editor.IContentWidget>>([])
+  const reviewLineIds = useRef(new Map<number, string>())
   const cleanupListeners = useRef<(() => void) | undefined>(undefined)
   const latest = useRef(props)
   latest.current = props
@@ -224,8 +333,149 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
     const range = new monaco.Range(line, startColumn, line, endColumn)
     instance.setSelection(range)
     instance.revealLineInCenter(line)
-    instance.focus()
+    if (latest.current.focusOnReveal !== false) instance.focus()
     decorations.current = needle === '' ? undefined : instance.createDecorationsCollection([{ range, options: { inlineClassName: 'dvw-search-hit' } }])
+  }
+  /** Paint current-file review hunks and their per-block controls without changing the model. */
+  const paintReview = (monaco: Monaco, instance: import('monaco-editor').editor.IStandaloneCodeEditor) => {
+    reviewDecorations.current?.clear()
+    reviewDecorations.current = undefined
+    for (const widget of reviewWidgets.current) instance.removeContentWidget(widget)
+    reviewWidgets.current = []
+    reviewLineIds.current.clear()
+    const model = instance.getModel()
+    if (model === null) return
+    const review = latest.current.review
+    const changes = review?.changes ?? []
+    const decorations: import('monaco-editor').editor.IModelDeltaDecoration[] = []
+    const editorFont = (() => {
+      const line = typeof instance.getDomNode === 'function'
+        ? instance.getDomNode()?.querySelector<HTMLElement>('.view-line') ?? null
+        : null
+      if (line === null) return undefined
+      const style = getComputedStyle(line)
+      return { family: style.fontFamily, size: style.fontSize, lineHeight: style.lineHeight, spacing: style.letterSpacing }
+    })()
+    const applyEditorFont = (node: HTMLElement) => {
+      if (editorFont === undefined) return
+      node.style.fontFamily = editorFont.family
+      node.style.fontSize = editorFont.size
+      node.style.lineHeight = editorFont.lineHeight
+      node.style.letterSpacing = editorFont.spacing
+    }
+    const markState = (node: HTMLElement, change: EditorReviewChange, active: boolean) => {
+      if (change.conflict !== undefined) node.dataset.conflict = ''
+      if (active) node.dataset.active = ''
+    }
+    const zones: Array<{
+      afterLineNumber: number
+      heightInLines: number
+      domNode: HTMLElement
+      suppressMouseDown?: boolean
+    }> = []
+    const contentWidgets: import('monaco-editor').editor.IContentWidget[] = []
+    const actionsFor = (change: EditorReviewChange): HTMLElement => {
+      const actions = document.createElement('div')
+      actions.className = 'dvw-review-zone-actions'
+      const label = document.createElement('span')
+      label.className = 'dvw-review-zone-label'
+      label.textContent = change.conflict ?? ''
+      const keep = document.createElement('button')
+      keep.type = 'button'
+      keep.dataset.action = 'accept'
+      keep.textContent = '^Y'
+      keep.title = '接受这一处 AI 修改 (Alt+Y)'
+      keep.addEventListener('click', () => latest.current.review?.onKeep(change.id))
+      const reject = document.createElement('button')
+      reject.type = 'button'
+      reject.dataset.action = 'reject'
+      reject.textContent = '^N'
+      reject.disabled = change.conflict !== undefined || review?.rejectDisabled === true
+      reject.title = reject.disabled ? (change.conflict ?? '当前无法撤销') : '拒绝这一处 AI 修改 (Alt+N)'
+      reject.addEventListener('click', () => latest.current.review?.onReject(change.id))
+      actions.append(label, keep, reject)
+      return actions
+    }
+    const addActionWidget = (change: EditorReviewChange, afterLineNumber: number) => {
+      const node = document.createElement('div')
+      node.className = 'dvw-review-widget'
+      node.dataset.reviewId = change.id
+      markState(node, change, change.id === review?.activeId)
+      // Monaco starts mouse tracking from pointerdown. Keep the gesture inside the
+      // review controls so its pointerup cannot be captured by the editor before
+      // the button receives click.
+      node.addEventListener('pointerdown', event => {
+        event.stopPropagation()
+        review?.onFocus(change.id)
+      })
+      node.addEventListener('mousedown', event => event.stopPropagation())
+      node.append(actionsFor(change))
+      const line = Math.max(1, Math.min(afterLineNumber, model.getLineCount()))
+      contentWidgets.push({
+        getId: () => `dvw-review-${change.id}`,
+        getDomNode: () => node,
+        getPosition: () => ({
+          position: { lineNumber: line, column: model.getLineMaxColumn(line) },
+          preference: [monaco.editor.ContentWidgetPositionPreference.ABOVE, monaco.editor.ContentWidgetPositionPreference.BELOW],
+        }),
+        allowEditorOverflow: true,
+        suppressMouseDown: true,
+      })
+    }
+    for (const change of changes) {
+      const presentation = reviewLinePresentation(model.getValue(), change)
+      const active = review?.activeId === change.id
+      if (presentation === undefined) {
+        if (active || change.conflict !== undefined) addActionWidget(change, 1)
+        continue
+      }
+
+      for (let index = 0; index < presentation.addedLines.length;) {
+        const startLine = presentation.addedLines[index]!
+        let endLine = startLine
+        reviewLineIds.current.set(startLine, change.id)
+        index++
+        while (index < presentation.addedLines.length && presentation.addedLines[index] === endLine + 1) {
+          endLine = presentation.addedLines[index]!
+          reviewLineIds.current.set(endLine, change.id)
+          index++
+        }
+        decorations.push({
+          range: new monaco.Range(startLine, 1, endLine, model.getLineMaxColumn(endLine)),
+          options: {
+            isWholeLine: true,
+            className: change.conflict !== undefined ? 'dvw-review-line-conflict' : active ? 'dvw-review-line-added dvw-review-line-active' : 'dvw-review-line-added',
+            linesDecorationsClassName: change.conflict !== undefined ? 'dvw-review-gutter-conflict' : 'dvw-review-gutter-added',
+          },
+        })
+      }
+
+      for (const group of presentation.deletedGroups) {
+        const Zone = document.createElement('div')
+        Zone.className = 'dvw-review-zone'
+        Zone.dataset.reviewId = change.id
+        markState(Zone, change, active)
+        Zone.addEventListener('pointerdown', () => review?.onFocus(change.id))
+        const removed = document.createElement('pre')
+        removed.className = 'dvw-review-removed'
+        removed.textContent = group.lines.join('\n')
+        applyEditorFont(removed)
+        Zone.append(removed)
+        zones.push({
+          afterLineNumber: group.afterLineNumber,
+          heightInLines: group.lines.length,
+          domNode: Zone,
+        })
+      }
+      addActionWidget(change, presentation.controlAfterLine)
+    }
+    if (decorations.length > 0) reviewDecorations.current = instance.createDecorationsCollection(decorations)
+    instance.changeViewZones?.(accessor => {
+      for (const id of reviewZoneIds.current) accessor.removeZone(id)
+      reviewZoneIds.current = zones.map(zone => accessor.addZone(zone))
+    })
+    reviewWidgets.current = contentWidgets
+    for (const widget of contentWidgets) instance.addContentWidget(widget)
   }
   /** Show the current tab's model in the shared editor, restoring where the user left it. */
   const attach = (monaco: Monaco, instance: import('monaco-editor').editor.IStandaloneCodeEditor) => {
@@ -242,6 +492,7 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
     if (saved !== undefined) instance.restoreViewState(saved)
     if (saved === undefined || revealedHits.get(next.toString()) !== hitKey(latest.current)) reveal(monaco, instance)
     else { decorations.current?.clear(); decorations.current = undefined }
+    paintReview(monaco, instance)
   }
   // One editor instance serves every text tab: switching tabs swaps its model
   // instead of rebuilding Monaco's DOM, workers and services.
@@ -253,6 +504,10 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
       const instance = monaco.editor.create(root.current, { model: null, automaticLayout: true, theme: monacoThemeFor(props.theme), fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off' })
       editor.current = instance
       instance.onDidChangeModelContent(() => latest.current.onChange(instance.getValue()))
+      instance.onMouseDown(event => {
+        const id = reviewLineIds.current.get(event.target.position?.lineNumber ?? 0)
+        if (id !== undefined) latest.current.review?.onFocus(id)
+      })
       instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => latest.current.onSave())
       instance.addAction({ id: 'dvw.addToDsh', label: '添加到 DSH 对话', contextMenuGroupId: 'navigation', contextMenuOrder: 0, keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyK], run: () => latest.current.onAddToDsh?.(editorSelection(instance)) })
       // Monaco maps go-to-definition to Cmd-click on macOS; also honor the usual Ctrl-click.
@@ -293,6 +548,12 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
       const instance = editor.current
       const model = instance?.getModel(); const state = instance?.saveViewState()
       if (model && state) viewStates.set(model.uri.toString(), state)
+      reviewDecorations.current?.clear(); reviewDecorations.current = undefined
+      for (const widget of reviewWidgets.current) instance?.removeContentWidget(widget)
+      reviewWidgets.current = []
+      instance?.changeViewZones?.(accessor => { for (const id of reviewZoneIds.current) accessor.removeZone(id) })
+      reviewZoneIds.current = []
+      reviewLineIds.current.clear()
       instance?.dispose(); editor.current = undefined
     }
   }, [])
@@ -303,6 +564,10 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
   useEffect(() => {
     const model = editor.current?.getModel(); if (model !== null && model !== undefined && model.getValue() !== props.value) model.setValue(props.value)
   }, [props.value])
+  useEffect(() => {
+    const instance = editor.current; const monaco = window.monaco
+    if (instance !== undefined && monaco !== undefined) paintReview(monaco, instance)
+  }, [props.uri, props.value, props.fontSize, props.review, props.review?.activeId, props.review?.changes])
   useEffect(() => { if (window.monaco !== undefined) window.monaco.editor.setTheme(monacoThemeFor(props.theme)) }, [props.theme])
   useEffect(() => { editor.current?.updateOptions({ fontSize: props.fontSize ?? 14 }) }, [props.fontSize])
   useEffect(() => {

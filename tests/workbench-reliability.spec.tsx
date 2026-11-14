@@ -45,7 +45,7 @@ vi.mock('../src/client/MonacoEditor.tsx', () => ({
   MonacoDiffEditor: () => null, preloadMonaco: () => {}, retainEditorModels: () => {},
   loadMonaco: () => Promise.resolve(state.monaco),
 }))
-vi.mock('../src/client/DshConversationPanel.tsx', () => ({ DshConversationPanel: () => null, DshConversationTheme: () => null }))
+vi.mock('../src/client/DshConversationPanel.tsx', () => ({ DshConversationPanel: () => null, DshConversationTheme: () => null, DshReviewActions: () => null }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 let root: Root | undefined
 let disk = 'disk'
@@ -53,6 +53,14 @@ let revision = 'r1'
 let completeSave: (() => void) | undefined
 let projectSource = 'export const a = 1'
 let projectReads = 0
+let reviewChanges: Array<{
+  id: string
+  seq: number
+  path: string
+  before: string | null
+  after: string
+  created: boolean
+}> = []
 const sockets: FakeSocket[] = []
 class FakeSocket {
   onmessage?: (event: { data: string }) => void
@@ -66,6 +74,7 @@ afterEach(async () => {
   disposeTypeScriptProject(state.monaco as never)
   state.models.clear()
   vi.unstubAllGlobals(); localStorage.clear(); document.body.replaceChildren(); sockets.length = 0
+  vi.useRealTimers()
 })
 async function mount(service = new WorkbenchController(), visible = true, dshPanelId?: string, handlers: { open?(panelId: string): void; restore?(): void } = {}) {
   if (visible) service.show()
@@ -73,13 +82,14 @@ async function mount(service = new WorkbenchController(), visible = true, dshPan
   await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" dshPanelId={dshPanelId} onOpenDshPanel={handlers.open} onRestoreConversation={handlers.restore}/>) })
   return service
 }
-async function setup(binary = false, saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' }) {
+async function setup(binary = false, saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' }, changes: typeof reviewChanges = []) {
   disk = 'disk'; revision = 'r1'; completeSave = undefined; state.editor = undefined
-  projectSource = 'export const a = 1'; projectReads = 0
+  projectSource = 'export const a = 1'; projectReads = 0; reviewChanges = changes
   localStorage.setItem('dvw:/tmp/audit', JSON.stringify(saved))
   vi.stubGlobal('WebSocket', FakeSocket)
   vi.stubGlobal('fetch', vi.fn(async (url: string, options: { body: string }) => {
     const method = url.split('/').at(-1)
+    const body = JSON.parse(options.body) as Record<string, unknown>
     const doc = () => ({ path: 'a.txt', content: binary ? '' : disk, revision, size: binary ? 0 : disk.length, binary, tooLarge: false })
     let value: unknown
     if (method === 'workspace') value = { cwd: '/tmp/audit', name: 'audit' }
@@ -87,9 +97,22 @@ async function setup(binary = false, saved: Record<string, unknown> = { paths: [
     else if (method === 'git.status') value = { changes: [] }
     else if (method === 'fs.read') value = doc()
     else if (method === 'project.sources') { projectReads++; value = { files: [{ path: 'a.ts', content: projectSource }], truncated: false } }
+    else if (method === 'review.feed') value = { cursor: 9, changes: reviewChanges, busy: false }
+    else if (method === 'review.inspect') value = {
+      path: 'a.txt',
+      revision,
+      content: disk,
+      changes: (body.ids as string[]).map(id => ({ id })),
+    }
+    else if (method === 'review.reject') value = {
+      path: 'a.txt',
+      deleted: false,
+      rejectedIds: body.ids,
+      document: doc(),
+    }
     else if (method === 'fs.save') return new Promise(resolve => {
-      const body = JSON.parse(options.body)
-      completeSave = () => { disk = body.content; revision = 'r2'; resolve({ ok: true, json: async () => ({ ok: true, value: doc() }) }) }
+      const content = String(body.content)
+      completeSave = () => { disk = content; revision = 'r2'; resolve({ ok: true, json: async () => ({ ok: true, value: doc() }) }) }
     })
     return { ok: true, json: async () => ({ ok: true, value }) }
   }))
@@ -101,6 +124,82 @@ it('preserves an unsaved draft when returning to DSH and reopening', async () =>
   await act(async () => service.hide())
   await act(async () => service.show())
   expect(state.editor!.value).toBe('unsaved draft')
+})
+
+it('opens a DSH generated-file link at its requested line in the workbench editor', async () => {
+  await setup()
+  await act(async () => {
+    window.dispatchEvent(new CustomEvent('dvw-open-generated-file', {
+      detail: { sessionId: 's', path: 'a.txt', line: 2 },
+    }))
+  })
+  expect(state.editor).toMatchObject({ value: 'disk', line: 2, focusOnReveal: true })
+  expect(document.querySelector<HTMLElement>('.dvw-tab[data-active="true"]')?.textContent).toContain('a.txt')
+})
+
+it('follows a newly discovered AI change after the one and a half second idle delay', async () => {
+  vi.useFakeTimers()
+  localStorage.setItem('dvw:ai-review', 'on')
+  await setup(false, { paths: ['a.txt'], active: 'a.txt' }, [{
+    id: '8:0',
+    seq: 8,
+    path: 'a.txt',
+    before: 'old',
+    after: 'disk',
+    created: false,
+  }])
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  expect(state.editor?.review?.changes).toHaveLength(1)
+  expect(document.querySelector('.dvw-review-toolbar')).toBeNull()
+  expect(state.editor?.line).toBeUndefined()
+  await act(async () => { await vi.advanceTimersByTimeAsync(1499) })
+  expect(state.editor?.line).toBeUndefined()
+  await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+  expect(state.editor).toMatchObject({ line: 1, focusOnReveal: false })
+  expect(state.editor?.review?.activeId).toBe('8:0')
+})
+
+it('postpones AI follow while the user is typing or scrolling', async () => {
+  vi.useFakeTimers()
+  localStorage.setItem('dvw:ai-review', 'on')
+  await setup(false, { paths: ['a.txt'], active: 'a.txt' }, [{
+    id: '8:0',
+    seq: 8,
+    path: 'a.txt',
+    before: 'old',
+    after: 'disk',
+    created: false,
+  }])
+  await act(async () => { await vi.advanceTimersByTimeAsync(0) })
+  expect(state.editor?.review?.changes).toHaveLength(1)
+
+  await act(async () => { await vi.advanceTimersByTimeAsync(1000) })
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }))
+  })
+  await act(async () => { await vi.advanceTimersByTimeAsync(1499) })
+  expect(state.editor?.line).toBeUndefined()
+  await act(async () => { await vi.advanceTimersByTimeAsync(1) })
+  expect(state.editor).toMatchObject({ line: 1, focusOnReveal: false })
+})
+
+it('uses the file review bar to accept or reject every block in the active file', async () => {
+  localStorage.setItem('dvw:ai-review-mode', 'all')
+  localStorage.setItem('dvw:ai-review-follow', 'off')
+  await setup(false, { paths: ['a.txt'], active: 'a.txt' }, [
+    { id: '8:0', seq: 8, path: 'a.txt', before: 'old', after: 'disk', created: false },
+    { id: '8:1', seq: 8, path: 'a.txt', before: 'before', after: 'tail', created: false },
+  ])
+  await vi.waitFor(() => expect(document.querySelector('.dvw-review-filebar')).not.toBeNull())
+  const bar = document.querySelector('.dvw-review-filebar')!
+  expect(bar.textContent).toContain('AI 改动 · 2 处')
+  const buttons = [...bar.querySelectorAll<HTMLButtonElement>('button')]
+  expect(buttons.map(button => button.textContent)).toEqual(['接受', '拒绝'])
+  expect(buttons[0]!.title).toContain('Ctrl+Enter')
+  expect(buttons[1]!.title).toContain('Ctrl+Backspace')
+  await act(async () => buttons[0]!.click())
+  expect(document.querySelector('.dvw-review-filebar')).toBeNull()
 })
 
 it('keeps edits entered while a save is pending and saves them on the next request', async () => {

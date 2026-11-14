@@ -24,6 +24,7 @@ import { handleBrowserShortcut, handleTerminalShortcut } from './shortcuts.ts'
 import { mainViewSession } from './session.ts'
 import { createDshNavigation } from './dshNavigation.ts'
 import type { DshNavigation } from './dshNavigation.ts'
+import { installDshChangedFilesOpenInterceptor, installGeneratedFileOpenInterceptor } from './generatedFileLinks.ts'
 
 export type { BottomPanelContribution, BottomPanelProps, VscodeWorkbench, WorkbenchCommand, WorkbenchSnapshot, WorkbenchView } from './service.ts'
 
@@ -68,6 +69,8 @@ export function apply(ctx: ClientContext): void {
   // Optional access to DSH's own workspace/session stores, used by the centered workspace switcher.
   const navigation = createDshNavigation((name) => (ctx as unknown as { get?: (name: string) => unknown }).get?.(name))
   ctx.effect(() => installStyles(), 'dsh-vscode-workbench: styles')
+  ctx.effect(() => installGeneratedFileOpenInterceptor(ctx.sidebarRight, () => service.getSnapshot().visible), 'dsh-vscode-workbench: generated file links')
+  ctx.effect(() => installDshChangedFilesOpenInterceptor(ctx.sidebarRight, () => service.getSnapshot().visible, () => service.show('explorer')), 'dsh-vscode-workbench: changed file links')
   ctx.effect(() => { const dispose = ctx.reflect.provide('vscodeWorkbench', service); return () => { void dispose() } }, 'dsh-vscode-workbench: service')
   ctx.effect(() => service.registerBottomPanel({ id: 'terminal', title: '终端', component: props => <TerminalPanel key={props.sessionId} {...props} workspace={terminals.get(props.sessionId)}/> }), 'dsh-vscode-workbench: terminal panel')
   ctx.effect(() => service.registerCommand({ id: 'terminal.new', run() { window.dispatchEvent(new Event('dvw-terminal-new')) } }), 'dsh-vscode-workbench: terminal command')

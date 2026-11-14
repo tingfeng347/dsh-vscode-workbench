@@ -1,8 +1,9 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import type { CSSProperties, DragEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
+import type { CSSProperties, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { FileDocument, FileEntry, GitBranch, GitChange, GitCommit, GitCommitFile, GitDiff, GitStatus, SearchMatch } from '../types.ts'
 import { ApiError, api } from './api.ts'
+import { AiReviewController, latestReviewFollowChange, locateReviewChange, type AiReviewSnapshot, type ReviewChange, type ReviewMode } from './aiReview.ts'
 import type { VscodeWorkbench, WorkbenchView } from './service.ts'
 import { Icon } from './Icon.tsx'
 import { FileIcon } from './FileIcon.tsx'
@@ -10,7 +11,7 @@ import { branchErrorMessage } from './gitError.ts'
 import { MarkdownPreview, markdownHeadings } from './MarkdownPreview.tsx'
 import type { MarkdownHeading } from './MarkdownPreview.tsx'
 import { MonacoDiffEditor, MonacoEditor, isMacPlatform, loadMonaco, preloadMonaco, retainEditorModels } from './MonacoEditor.tsx'
-import { DshConversationPanel, DshConversationTheme } from './DshConversationPanel.tsx'
+import { DshConversationPanel, DshConversationTheme, DshReviewActions } from './DshConversationPanel.tsx'
 import { DshMark } from './DshMark.tsx'
 import { DshPanelPage } from './DshPanelPage.tsx'
 import { DshBrowserPage } from './DshBrowserPage.tsx'
@@ -32,8 +33,9 @@ import { WorkbenchSettings } from './SettingsPanel.tsx'
 import { settingsHost } from './settingsHost.ts'
 import { applyFloatGesture, clampFloatRect, defaultFloatRect, FLOAT_BAR_HEIGHT, FLOAT_MAX_KEY, FLOAT_RECT_KEY, readFloatMax, readFloatRect, readOpenMode, writeOpenMode, type FloatGesture, type FloatRect, type WorkbenchOpenMode } from './floatWindow.ts'
 import type { CommitDetail, CommitLanguage, CommitMessagePreferences } from '../commit-message.ts'
+import { outermostTreeEntries, remapTreeSelectionPaths, selectAllTreePaths, selectTreePath, type TreeSelection } from './treeSelection.ts'
 
-interface Tab extends FileDocument { instance?: symbol; dirty: boolean; draft: string; loaded?: boolean; line?: number; column?: number; highlight?: string; external?: boolean; preview?: boolean; title?: string; diff?: GitDiff; diffMode?: 'inline' | 'split'; diffSourcePath?:string; imageUrl?:string; documentPreview?:DocumentPreviewKind; documentUrl?:string }
+interface Tab extends FileDocument { instance?: symbol; dirty: boolean; draft: string; loaded?: boolean; line?: number; column?: number; highlight?: string; focusOnReveal?: boolean; external?: boolean; preview?: boolean; title?: string; diff?: GitDiff; diffMode?: 'inline' | 'split'; diffSourcePath?:string; imageUrl?:string; documentPreview?:DocumentPreviewKind; documentUrl?:string }
 type WorkbenchTheme = 'dsh' | 'dark' | 'light' | 'white' | 'eyecare'
 export type MarkdownDefaultView = 'preview' | 'source'
 export const MARKDOWN_DEFAULT_VIEW_KEY = 'dvw:markdown-default-view'
@@ -42,7 +44,26 @@ export const DEFAULT_BROWSER_KEY = 'dvw:default-browser'
 /** One independent editor group: its own tabs, its own active tab. */
 export interface EditorGroup { id: string; tabs: Tab[]; active?: string }
 
-interface TreeProps { sessionId: string; root: string; path: string; depth: number; expanded: Set<string>; selected?: string; selectedDirectory: string; statuses: Map<string, string>; onToggle(path: string): void; onSelectDirectory(path: string): void; onOpen(path: string): void; onChange(): void; onUpload(directory: string, files: FileList): void; onAddToDsh(path: string, directory: boolean): void }
+interface TreeProps {
+  sessionId: string
+  root: string
+  path: string
+  depth: number
+  expanded: Set<string>
+  selected?: string
+  selectedPaths: ReadonlySet<string>
+  selectedEntries: readonly FileEntry[]
+  statuses: Map<string, string>
+  onToggle(path: string): void
+  onSelect(row: FileEntry, event: ReactMouseEvent<HTMLElement>): void
+  onContextSelect(row: FileEntry, event: ReactMouseEvent<HTMLElement>): void
+  onDelete(entries: readonly FileEntry[]): void
+  onRenamed(oldPath: string, nextPath: string): void
+  onOpen(path: string): void
+  onChange(): void
+  onUpload(directory: string, files: FileList): void
+  onAddToDsh(path: string, directory: boolean, selection?: readonly string[]): void
+}
 interface CreatingEntry { kind: 'file' | 'directory'; directory: string; value: string; error?: string }
 
 type ResizeDirection = 1 | -1
@@ -278,8 +299,27 @@ async function dropEntry(event: DragEvent, sessionId: string, directory: string)
   try { await api('fs.rename', { sessionId, path: entry.path, nextPath }); window.dispatchEvent(new CustomEvent('dvw-files-changed', { detail: [entry.path, nextPath] })) } catch (error) { alert(error instanceof Error ? error.message : String(error)) }
 }
 
-function Tree({ sessionId, root, path, depth, expanded, selected, selectedDirectory, statuses, onToggle, onSelectDirectory, onOpen, onChange, onUpload, onAddToDsh, creating, onCreatingChange, onCreatingCancel, onCreatingSubmit }: TreeProps & { creating?: CreatingEntry; onCreatingChange(value: string): void; onCreatingCancel(): void; onCreatingSubmit(): void }) {
-  const [rows, setRows] = useState<FileEntry[]>([]); const [error, setError] = useState<string>(); const [dropTarget, setDropTarget] = useState(false); const [context, setContext] = useState<{ entry: FileEntry; x: number; y: number }>(); const [renaming, setRenaming] = useState<{ path: string; value: string }>(); const [pendingDelete, setPendingDelete] = useState<FileEntry>()
+/** Visible paths in render order, including rows from expanded descendant trees. */
+function visibleTreePaths(tree: Element | null | undefined): string[] {
+  if (!tree) return []
+  return [...tree.querySelectorAll<HTMLElement>('[data-tree-path]')]
+    .map(row => row.dataset.treePath)
+    .filter((path): path is string => path !== undefined && path !== '')
+}
+
+/** Rebuild entry metadata from rendered rows for selection-wide context actions. */
+function visibleTreeEntries(tree: Element | null | undefined): FileEntry[] {
+  if (!tree) return []
+  return [...tree.querySelectorAll<HTMLElement>('[data-tree-path][data-tree-kind]')].flatMap(row => {
+    const path = row.dataset.treePath
+    const kind = row.dataset.treeKind
+    if (path === undefined || (kind !== 'file' && kind !== 'directory')) return []
+    return [{ path, kind, name: row.dataset.treeName ?? path.split('/').at(-1) ?? path }]
+  })
+}
+
+function Tree({ sessionId, root, path, depth, expanded, selected, selectedPaths, selectedEntries, statuses, onToggle, onSelect, onContextSelect, onDelete, onRenamed, onOpen, onChange, onUpload, onAddToDsh, creating, onCreatingChange, onCreatingCancel, onCreatingSubmit }: TreeProps & { creating?: CreatingEntry; onCreatingChange(value: string): void; onCreatingCancel(): void; onCreatingSubmit(): void }) {
+  const [rows, setRows] = useState<FileEntry[]>([]); const [error, setError] = useState<string>(); const [dropTarget, setDropTarget] = useState(false); const [context, setContext] = useState<{ entry: FileEntry; x: number; y: number }>(); const [renaming, setRenaming] = useState<{ path: string; value: string }>()
   const listing = useRef<AbortController>()
   const load = useCallback(() => {
     listing.current?.abort()
@@ -294,27 +334,52 @@ function Tree({ sessionId, root, path, depth, expanded, selected, selectedDirect
     const handler = (event:Event) => { const paths=(event as CustomEvent<string[]>).detail; if(!Array.isArray(paths)||directoryAffected(path,paths))load() }; window.addEventListener('dvw-files-changed', handler); return () => window.removeEventListener('dvw-files-changed', handler)
   }, [load])
   useEffect(() => { if (context === undefined) return; const close = () => setContext(undefined); const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') close() }; window.addEventListener('pointerdown', close); window.addEventListener('keydown', escape); return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('keydown', escape) } }, [context])
-  useEffect(() => { if (pendingDelete === undefined) return; const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setPendingDelete(undefined) }; window.addEventListener('keydown', escape); return () => window.removeEventListener('keydown', escape) }, [pendingDelete])
-  const rename = async (entry: FileEntry) => { const value = renaming?.path === entry.path ? renaming.value.trim() : ''; setRenaming(undefined); if (value === '' || value === entry.name) return; try { await api('fs.rename', { sessionId, path: entry.path, nextPath: renamedPath(entry.path, value) }); onChange() } catch (error) { alert(error instanceof Error ? error.message : String(error)) } }
-  const remove = async () => { if (pendingDelete === undefined) return; const entry = pendingDelete; setPendingDelete(undefined); try { await api('fs.delete', { sessionId, path: entry.path }); onChange() } catch (error) { alert(error instanceof Error ? error.message : String(error)) } }
+  const rename = async (entry: FileEntry) => { const value = renaming?.path === entry.path ? renaming.value.trim() : ''; setRenaming(undefined); if (value === '' || value === entry.name) return; const nextPath = renamedPath(entry.path, value); try { await api('fs.rename', { sessionId, path: entry.path, nextPath }); onRenamed(entry.path, nextPath); onChange() } catch (error) { alert(error instanceof Error ? error.message : String(error)) } }
   const entryDirectory = (row: FileEntry) => row.kind === 'directory' ? row.path : parentPath(row.path)
   // A folder highlights its whole block like VS Code; a file targets its parent folder's block (or the tree root).
   const entryTarget = (event: DragEvent, row: FileEntry) => { const entry = (event.currentTarget as HTMLElement).parentElement; return row.kind === 'directory' ? entry : entry?.parentElement?.closest<HTMLElement>('.dvw-tree-entry,.dvw-tree') }
   const drop = (event: DragEvent, directory: string) => { event.preventDefault(); event.stopPropagation(); setDropTarget(false); if (event.dataTransfer.files.length > 0) onUpload(directory, event.dataTransfer.files) }
   return <>{error && <div className="dvw-error">{error}</div>}{creating?.directory === path && <><div className="dvw-tree-row dvw-tree-create-row" style={{ paddingLeft: 6 + depth * 13 }}><span className="dvw-chevron"/><Icon name={creating.kind === 'directory' ? 'folder' : 'new-file'} className={`dvw-file-icon ${creating.kind === 'directory' ? 'folder' : ''}`}/><input className="dvw-tree-create-input" value={creating.value} autoFocus aria-label={creating.kind === 'directory' ? '新建文件夹名称' : '新建文件名称'} aria-invalid={creating.error !== undefined} placeholder={creating.kind === 'directory' ? '文件夹名称' : '文件名称'} onChange={event => onCreatingChange(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); onCreatingSubmit() } if (event.key === 'Escape') { event.preventDefault(); onCreatingCancel() } }} onBlur={onCreatingCancel}/></div>{creating.error && <div className="dvw-tree-create-error" style={{ paddingLeft: 42 + depth * 13 }}>{creating.error}</div>}</>}{rows.map(row => <div className="dvw-tree-entry" key={row.path}>
-    <div className="dvw-tree-row" data-dvw-upload-directory={row.kind === 'directory' ? row.path : undefined} data-selected={selected === row.path || selectedDirectory === row.path} data-drop-target={dropTarget && row.kind === 'directory'} style={{ paddingLeft: 6 + depth * 13 }} onClick={() => row.kind === 'directory' ? (onSelectDirectory(row.path), onToggle(row.path)) : onOpen(row.path)} onContextMenu={(event) => { event.preventDefault(); if (row.kind === 'directory') onSelectDirectory(row.path); setContext({ entry: row, x: event.clientX, y: event.clientY }) }} draggable={renaming?.path !== row.path} onDragStart={event => startEntryDrag(event, sessionId, row)} onDragEnd={endEntryDrag} onDragEnter={event => { if (entryDragOver(event, entryDirectory(row), entryTarget(event, row), row.kind === 'directory' && !expanded.has(row.path) ? () => onToggle(row.path) : undefined)) return; if (row.kind === 'directory' && event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); setDropTarget(true) } }} onDragOver={event => { if (entryDragOver(event, entryDirectory(row), entryTarget(event, row))) return; if (row.kind === 'directory' && event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); setDropTarget(true) } }} onDragLeave={() => setDropTarget(false)} onDrop={event => { if (draggedEntry !== undefined) { void dropEntry(event, sessionId, entryDirectory(row)); return } if (row.kind === 'directory') drop(event, row.path) }}>
+    <div className="dvw-tree-row" role="treeitem" aria-selected={selectedPaths.size > 0 ? selectedPaths.has(row.path) : selected === row.path} data-tree-path={row.path} data-tree-kind={row.kind} data-tree-name={row.name} data-dvw-upload-directory={row.kind === 'directory' ? row.path : undefined} data-selected={(selectedPaths.size > 0 ? selectedPaths.has(row.path) : selected === row.path) || undefined} data-drop-target={dropTarget && row.kind === 'directory'} style={{ paddingLeft: 6 + depth * 13 }} onClick={event => onSelect(row, event)} onContextMenu={(event) => { event.preventDefault(); onContextSelect(row, event); setContext({ entry: row, x: event.clientX, y: event.clientY }) }} draggable={renaming?.path !== row.path} onDragStart={event => startEntryDrag(event, sessionId, row)} onDragEnd={endEntryDrag} onDragEnter={event => { if (entryDragOver(event, entryDirectory(row), entryTarget(event, row), row.kind === 'directory' && !expanded.has(row.path) ? () => onToggle(row.path) : undefined)) return; if (row.kind === 'directory' && event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); setDropTarget(true) } }} onDragOver={event => { if (entryDragOver(event, entryDirectory(row), entryTarget(event, row))) return; if (row.kind === 'directory' && event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); setDropTarget(true) } }} onDragLeave={() => setDropTarget(false)} onDrop={event => { if (draggedEntry !== undefined) { void dropEntry(event, sessionId, entryDirectory(row)); return } if (row.kind === 'directory') drop(event, row.path) }}>
       <span className="dvw-chevron">{row.kind === 'directory' && <Icon name={expanded.has(row.path) ? 'chevron-down' : 'chevron-right'}/>}</span><FileIcon name={row.name} directory={row.kind === 'directory'} expanded={expanded.has(row.path)}/>{renaming?.path === row.path ? <input className="dvw-tree-rename" value={renaming.value} autoFocus onClick={event => event.stopPropagation()} onChange={event => setRenaming({ path: row.path, value: event.target.value })} onKeyDown={event => { if (event.key === 'Enter') void rename(row); if (event.key === 'Escape') setRenaming(undefined) }} onBlur={() => setRenaming(undefined)}/> : <span className="dvw-tree-name">{row.name}</span>}{row.kind === 'file' && statuses.has(row.path) && <span className="dvw-tree-status" data-status={statuses.get(row.path)}>{statuses.get(row.path)}</span>}
     </div>
-    {row.kind === 'directory' && expanded.has(row.path) && <Tree {...{ sessionId, root, path: row.path, depth: depth + 1, expanded, selected, selectedDirectory, statuses, onToggle, onSelectDirectory, onOpen, onChange, onUpload, onAddToDsh, creating, onCreatingChange, onCreatingCancel, onCreatingSubmit }} />}
-  </div>)}{context && <div className="dvw-context-menu" role="menu" style={{ left: context.x, top: context.y }} onPointerDown={event => event.stopPropagation()}><button role="menuitem" onClick={() => { onAddToDsh(context.entry.path, context.entry.kind === 'directory'); setContext(undefined) }}><DshMark size={14}/>添加到 DSH 对话<kbd>{ADD_TO_DSH_SHORTCUT}</kbd></button><button role="menuitem" onClick={() => { void copyText(context.entry.path); setContext(undefined) }}><Icon name="copy"/>复制相对路径</button><button role="menuitem" onClick={() => { void copyText(absoluteEntryPath(root, context.entry.path)); setContext(undefined) }}><Icon name="copy"/>复制绝对路径</button><button role="menuitem" onClick={() => { setRenaming({ path: context.entry.path, value: context.entry.name }); setContext(undefined) }}><Icon name="edit"/>重命名</button><button className="dvw-context-delete" role="menuitem" onClick={() => { setPendingDelete(context.entry); setContext(undefined) }}><Icon name="trash"/>删除</button></div>}{pendingDelete && <div className="dvw-confirm-backdrop" role="presentation"><section className="dvw-confirm" role="alertdialog" aria-modal="true" aria-labelledby="dvw-delete-title" aria-describedby="dvw-delete-message"><h2 id="dvw-delete-title">删除 {pendingDelete.kind === 'directory' ? '文件夹' : '文件'}</h2><p id="dvw-delete-message">是否删除“{pendingDelete.name}”？</p><p className="dvw-confirm-note">此操作无法撤销。</p><footer><button autoFocus onClick={() => setPendingDelete(undefined)}>取消</button><button className="dvw-danger-button" onClick={() => void remove()}>删除</button></footer></section></div>}</>
+    {row.kind === 'directory' && expanded.has(row.path) && <Tree {...{ sessionId, root, path: row.path, depth: depth + 1, expanded, selected, selectedPaths, selectedEntries, statuses, onToggle, onSelect, onContextSelect, onDelete, onRenamed, onOpen, onChange, onUpload, onAddToDsh, creating, onCreatingChange, onCreatingCancel, onCreatingSubmit }} />}
+  </div>)}{context && (() => {
+    const selectedForContext = selectedPaths.has(context.entry.path)
+    const paths = selectedForContext && selectedPaths.size > 0 ? [...selectedPaths] : [context.entry.path]
+    const single = paths.length === 1
+    return <div className="dvw-context-menu" role="menu" style={{ left: context.x, top: context.y }} onPointerDown={event => event.stopPropagation()}>
+      {single && <button role="menuitem" onClick={() => { onAddToDsh(context.entry.path, context.entry.kind === 'directory'); setContext(undefined) }}><DshMark size={14}/>添加到 DSH 对话<kbd>{ADD_TO_DSH_SHORTCUT}</kbd></button>}
+      <button role="menuitem" onClick={() => { void copyText(paths.join('\n')); setContext(undefined) }}><Icon name="copy"/>复制{single ? '相对路径' : ` ${paths.length} 个相对路径`}</button>
+      <button role="menuitem" onClick={() => { void copyText(paths.map(path => absoluteEntryPath(root, path)).join('\n')); setContext(undefined) }}><Icon name="copy"/>复制{single ? '绝对路径' : ` ${paths.length} 个绝对路径`}</button>
+      {single && <button role="menuitem" onClick={() => { setRenaming({ path: context.entry.path, value: context.entry.name }); setContext(undefined) }}><Icon name="edit"/>重命名</button>}
+      <button className="dvw-context-delete" role="menuitem" onClick={() => { onDelete(selectedForContext ? selectedEntries : [context.entry]); setContext(undefined) }}><Icon name="trash"/>删除{selectedForContext && selectedEntries.length > 1 ? ` ${selectedEntries.length} 个项目` : ''}</button>
+    </div>
+  })()}</>
 }
 
 function Explorer(props: { sessionId: string; cwd?: string; selected?: string; onOpen(path: string): void; onAddToDsh(path: string, directory: boolean): void }) {
   // The row the user last clicked, which the Explorer shortcut adds to the DSH chat.
   const lastEntry = useRef<{ path: string; directory: boolean }>()
   const [expanded, setExpanded] = useState<Set<string>>(new Set()); const [statuses, setStatuses] = useState<Map<string, string>>(new Map()); const [dropTarget, setDropTarget] = useState(false); const [selectedDirectory, setSelectedDirectory] = useState(''); const [creating, setCreating] = useState<CreatingEntry>(); const picker = useRef<HTMLInputElement>(null)
+  const [selection, setSelection] = useState<TreeSelection>({ selected: new Set() })
+  const [selectionEntries, setSelectionEntries] = useState<Map<string, FileEntry>>(new Map())
+  const [pendingDelete, setPendingDelete] = useState<FileEntry[]>()
   useEffect(() => { if (props.cwd) { try { setExpanded(new Set(JSON.parse(localStorage.getItem(`dvw:tree:${props.cwd}`) ?? '[]') as string[])) } catch { setExpanded(new Set()) } } }, [props.cwd])
   useEffect(() => { if (props.cwd) localStorage.setItem(`dvw:tree:${props.cwd}`, JSON.stringify([...expanded])) }, [props.cwd, expanded])
+  useEffect(() => {
+    setSelection({ selected: new Set() })
+    setSelectionEntries(new Map())
+    setSelectedDirectory('')
+    setPendingDelete(undefined)
+    lastEntry.current = undefined
+  }, [props.cwd])
+  useEffect(() => {
+    if (pendingDelete === undefined) return
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setPendingDelete(undefined) }
+    window.addEventListener('keydown', escape)
+    return () => window.removeEventListener('keydown', escape)
+  }, [pendingDelete])
   const refreshStatus = useCallback(() => {
     void api<GitStatus>('git.status', { sessionId: props.sessionId })
       .then(status => setStatuses(new Map(status.changes.map(change => [change.path, gitStatusCode(change)]))))
@@ -323,7 +388,24 @@ function Explorer(props: { sessionId: string; cwd?: string; selected?: string; o
   const refreshStatusDebounced = useDebouncedCallback(refreshStatus, 500)
   useEffect(() => { refreshStatus(); const handler = () => refreshStatusDebounced(); window.addEventListener('dvw-files-changed', handler); return () => window.removeEventListener('dvw-files-changed', handler) }, [refreshStatus, refreshStatusDebounced])
   const startCreating = (kind: 'file' | 'directory') => { const directory = selectedDirectory; if (directory) setExpanded(current => new Set(current).add(directory)); setCreating({ kind, directory, value: '' }) }
-  const submitCreating = async () => { if (creating === undefined) return; const value = creating.value.trim(); if (value === '') { setCreating(current => current && ({ ...current, error: '请输入名称' })); return } const path = createdEntryPath(creating.directory, value); try { await api('fs.create', { sessionId: props.sessionId, path, kind: creating.kind }); const created = path; setCreating(undefined); setSelectedDirectory(creating.kind === 'directory' ? created : creating.directory); window.dispatchEvent(new Event('dvw-files-changed')) } catch (error) { setCreating(current => current && ({ ...current, error: error instanceof Error ? error.message : String(error) })) } }
+  const submitCreating = async () => {
+    if (creating === undefined) return
+    const value = creating.value.trim()
+    if (value === '') { setCreating(current => current && ({ ...current, error: '请输入名称' })); return }
+    const path = createdEntryPath(creating.directory, value)
+    try {
+      await api('fs.create', { sessionId: props.sessionId, path, kind: creating.kind })
+      const created = path
+      setCreating(undefined)
+      setSelectedDirectory(creating.kind === 'directory' ? created : creating.directory)
+      setSelection({ selected: new Set([created]), anchor: created, focus: created })
+      setSelectionEntries(new Map([[created, { path: created, name: value, kind: creating.kind }]]))
+      lastEntry.current = { path: created, directory: creating.kind === 'directory' }
+      window.dispatchEvent(new Event('dvw-files-changed'))
+    } catch (error) {
+      setCreating(current => current && ({ ...current, error: error instanceof Error ? error.message : String(error) }))
+    }
+  }
   const upload = useCallback(async (directory: string, files: FileList) => { try { await Promise.all([...files].map(async file => { const query = new URLSearchParams({ sessionId: props.sessionId, directory, name: file.name }); const response = await fetch(`/dsh-vscode/upload?${query}`, { method: 'POST', headers: { 'content-type': file.type || 'application/octet-stream' }, body: file }); const answer = await response.json() as { ok: boolean; error?: { message?: string } }; if (!response.ok || !answer.ok) throw new Error(answer.error?.message ?? 'upload failed') })); window.dispatchEvent(new Event('dvw-files-changed')) } catch (error) { alert(error instanceof Error ? error.message : String(error)) } }, [props.sessionId])
   useEffect(() => {
     let activeTarget: HTMLElement | undefined
@@ -355,7 +437,155 @@ function Explorer(props: { sessionId: string; cwd?: string; selected?: string; o
   const drop = (event: DragEvent) => { event.preventDefault(); setDropTarget(false); if (event.dataTransfer.files.length > 0) void upload('', event.dataTransfer.files) }
   const destination = uploadDestination(selectedDirectory)
   const treeDrag = (event: DragEvent) => { if (entryDragOver(event, '', event.currentTarget as HTMLElement)) return; if (event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); setDropTarget(true) } }
-  return <><div className="dvw-side-head">资源管理器<div className="dvw-toolbar"><input ref={picker} className="dvw-file-picker" type="file" accept="*/*" multiple onChange={event => { if (event.currentTarget.files) void upload(destination, event.currentTarget.files); event.currentTarget.value = '' }}/><button className="dvw-icon" title={`上传文件到 ${destination || '工作区根目录'}`} onClick={() => picker.current?.click()}><Icon name="cloud-upload"/></button><button className="dvw-icon" title="新建文件" onClick={() => startCreating('file')}><Icon name="new-file"/></button><button className="dvw-icon" title="新建文件夹" onClick={() => startCreating('directory')}><Icon name="new-folder"/></button><button className="dvw-icon" title="刷新" onClick={() => { window.dispatchEvent(new Event('dvw-files-changed')) }}><Icon name="refresh"/></button></div></div><div className="dvw-tree" tabIndex={-1} data-dvw-upload-directory="" data-drop-target={dropTarget} onKeyDown={event => { if (!isAddToDshShortcut(event.nativeEvent) || lastEntry.current === undefined) return; event.preventDefault(); props.onAddToDsh(lastEntry.current.path, lastEntry.current.directory) }} onDragEnter={treeDrag} onDragOver={treeDrag} onDragLeave={event => { setDropTarget(false); if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) clearMoveTarget() }} onDrop={event => { if (draggedEntry !== undefined) { void dropEntry(event, props.sessionId, ''); return } drop(event) }}><Tree sessionId={props.sessionId} root={props.cwd ?? ''} path="" depth={0} expanded={expanded} selected={props.selected} selectedDirectory={selectedDirectory} statuses={statuses} onToggle={path => setExpanded(current => { const next = new Set(current); next.has(path) ? next.delete(path) : next.add(path); return next })} onSelectDirectory={path => { lastEntry.current = { path, directory: true }; setSelectedDirectory(path) }} onOpen={path => { lastEntry.current = { path, directory: false }; props.onOpen(path) }} onAddToDsh={props.onAddToDsh} onChange={() => window.dispatchEvent(new Event('dvw-files-changed'))} onUpload={(directory, files) => void upload(directory, files)} creating={creating} onCreatingChange={value => setCreating(current => current && ({ ...current, value, error: undefined }))} onCreatingCancel={() => setCreating(undefined)} onCreatingSubmit={() => void submitCreating()} /></div></>
+  const applyTreeSelection = (next: TreeSelection, entries: readonly FileEntry[]) => {
+    const known = new Map(selectionEntries)
+    for (const entry of entries) if (next.selected.has(entry.path)) known.set(entry.path, entry)
+    for (const path of known.keys()) if (!next.selected.has(path)) known.delete(path)
+    setSelection(next)
+    setSelectionEntries(known)
+  }
+  const selectRow = (row: FileEntry, event: ReactMouseEvent<HTMLElement>) => {
+    const tree = event.currentTarget.closest<HTMLElement>('.dvw-tree')
+    const visible = visibleTreePaths(tree)
+    const next = selectTreePath(selection, visible, row.path, {
+      toggle: event.ctrlKey || event.metaKey,
+      extend: event.shiftKey,
+    })
+    applyTreeSelection(next, visibleTreeEntries(tree))
+    lastEntry.current = { path: row.path, directory: row.kind === 'directory' }
+    if (row.kind === 'directory') setSelectedDirectory(row.path)
+    tree?.focus({ preventScroll: true })
+
+    if (event.ctrlKey || event.metaKey || event.shiftKey) return
+    if (row.kind === 'directory') setExpanded(current => {
+      const expandedPaths = new Set(current)
+      if (expandedPaths.has(row.path)) expandedPaths.delete(row.path)
+      else expandedPaths.add(row.path)
+      return expandedPaths
+    })
+    else props.onOpen(row.path)
+  }
+  const contextSelectRow = (row: FileEntry, event: ReactMouseEvent<HTMLElement>) => {
+    const tree = event.currentTarget.closest<HTMLElement>('.dvw-tree')
+    if (!selection.selected.has(row.path)) {
+      const next = selectTreePath(selection, visibleTreePaths(tree), row.path)
+      applyTreeSelection(next, visibleTreeEntries(tree))
+    }
+    lastEntry.current = { path: row.path, directory: row.kind === 'directory' }
+    if (row.kind === 'directory') setSelectedDirectory(row.path)
+    tree?.focus({ preventScroll: true })
+  }
+  const selectedEntries = outermostTreeEntries([...selectionEntries.values()].filter(entry => selection.selected.has(entry.path)))
+  const requestDelete = (entries: readonly FileEntry[]) => {
+    const next = outermostTreeEntries(entries)
+    if (next.length > 0) setPendingDelete(next)
+  }
+  const renamedSelection = (oldPath: string, nextPath: string) => {
+    const remap = (path: string): string => path === oldPath
+      ? nextPath
+      : path.startsWith(`${oldPath}/`) ? `${nextPath}${path.slice(oldPath.length)}` : path
+    setSelection(current => remapTreeSelectionPaths(current, oldPath, nextPath))
+    setSelectionEntries(current => new Map([...current].map(([path, entry]) => {
+      if (path !== oldPath && !path.startsWith(`${oldPath}/`)) return [path, entry]
+      const mapped = remap(path)
+      return [mapped, { ...entry, path: mapped, name: mapped.split('/').at(-1) ?? entry.name }]
+    })))
+    setSelectedDirectory(current => remap(current))
+    if (lastEntry.current !== undefined) lastEntry.current = { ...lastEntry.current, path: remap(lastEntry.current.path) }
+  }
+  const remove = async () => {
+    if (pendingDelete === undefined || pendingDelete.length === 0) return
+    const entries = pendingDelete
+    setPendingDelete(undefined)
+    const failed: Array<{ entry: FileEntry; message: string }> = []
+    for (const entry of entries) {
+      try { await api('fs.delete', { sessionId: props.sessionId, path: entry.path }) }
+      catch (error) { failed.push({ entry, message: error instanceof Error ? error.message : String(error) }) }
+    }
+    const failedPaths = new Set(failed.map(item => item.entry.path))
+    setSelection({ selected: failedPaths, anchor: failed[0]?.entry.path, focus: failed.at(-1)?.entry.path })
+    setSelectionEntries(new Map(failed.map(item => [item.entry.path, item.entry])))
+    lastEntry.current = undefined
+    window.dispatchEvent(new Event('dvw-files-changed'))
+    if (failed.length > 0) alert(failed.map(item => `${item.entry.path}: ${item.message}`).join('\n'))
+  }
+  const treeKeyDown = (event: ReactKeyboardEvent<HTMLElement>) => {
+    if (event.target instanceof Element && event.target.closest('input,textarea,[contenteditable=true]')) return
+    const tree = event.currentTarget
+    const visible = visibleTreePaths(tree)
+    const entries = visibleTreeEntries(tree)
+    const command = event.ctrlKey || event.metaKey
+
+    if (command && event.key.toLowerCase() === 'a') {
+      event.preventDefault()
+      applyTreeSelection(selectAllTreePaths(visible), entries)
+      return
+    }
+    if (command && event.key.toLowerCase() === 'c' && selection.selected.size > 0) {
+      event.preventDefault()
+      void copyText([...selection.selected].join('\n'))
+      return
+    }
+    if ((event.key === 'Delete' || event.key === 'Backspace') && selectedEntries.length > 0) {
+      event.preventDefault()
+      requestDelete(selectedEntries)
+      return
+    }
+    if (event.key === 'Escape' && selection.selected.size > 0) {
+      event.preventDefault()
+      applyTreeSelection({ selected: new Set() }, [])
+      return
+    }
+    if (event.key === 'Enter' && selectedEntries.length === 1) {
+      event.preventDefault()
+      const entry = selectedEntries[0]!
+      if (entry.kind === 'directory') setExpanded(current => {
+        const next = new Set(current)
+        if (next.has(entry.path)) next.delete(entry.path)
+        else next.add(entry.path)
+        return next
+      })
+      else props.onOpen(entry.path)
+      return
+    }
+    if (['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key) && visible.length > 0) {
+      const current = selection.focus ?? selection.anchor ?? [...selection.selected].at(-1)
+      const currentIndex = current === undefined ? -1 : visible.indexOf(current)
+      let targetIndex = currentIndex
+      if (event.key === 'Home') targetIndex = 0
+      else if (event.key === 'End') targetIndex = visible.length - 1
+      else if (event.key === 'ArrowDown') targetIndex = currentIndex < 0 ? 0 : Math.min(visible.length - 1, currentIndex + 1)
+      else if (event.key === 'ArrowUp') targetIndex = currentIndex < 0 ? visible.length - 1 : Math.max(0, currentIndex - 1)
+      const target = visible[targetIndex]
+      if (target !== undefined) {
+        event.preventDefault()
+        applyTreeSelection(
+          selectTreePath(selection, visible, target, { extend: event.shiftKey, toggle: event.shiftKey && command }),
+          entries,
+        )
+        const targetEntry = entries.find(entry => entry.path === target)
+        if (targetEntry !== undefined) {
+          lastEntry.current = { path: targetEntry.path, directory: targetEntry.kind === 'directory' }
+          if (targetEntry.kind === 'directory') setSelectedDirectory(targetEntry.path)
+          const targetRow = [...tree.querySelectorAll<HTMLElement>('[data-tree-path]')]
+            .find(row => row.dataset.treePath === target)
+          targetRow?.scrollIntoView({ block: 'nearest' })
+        }
+      }
+      return
+    }
+    if (isAddToDshShortcut(event.nativeEvent) && lastEntry.current !== undefined) {
+      event.preventDefault()
+      props.onAddToDsh(lastEntry.current.path, lastEntry.current.directory)
+    }
+  }
+  return <>
+    <div className="dvw-side-head">资源管理器<div className="dvw-toolbar"><input ref={picker} className="dvw-file-picker" type="file" accept="*/*" multiple onChange={event => { if (event.currentTarget.files) void upload(destination, event.currentTarget.files); event.currentTarget.value = '' }}/><button className="dvw-icon" title={`上传文件到 ${destination || '工作区根目录'}`} onClick={() => picker.current?.click()}><Icon name="cloud-upload"/></button><button className="dvw-icon" title="新建文件" onClick={() => startCreating('file')}><Icon name="new-file"/></button><button className="dvw-icon" title="新建文件夹" onClick={() => startCreating('directory')}><Icon name="new-folder"/></button><button className="dvw-icon" title="刷新" onClick={() => { window.dispatchEvent(new Event('dvw-files-changed')) }}><Icon name="refresh"/></button></div></div>
+    <div className="dvw-tree" role="tree" aria-multiselectable="true" tabIndex={0} title="Ctrl/⌘ 点击多选，Shift 点击连续选择" data-dvw-upload-directory="" data-drop-target={dropTarget} onKeyDown={treeKeyDown} onDragEnter={treeDrag} onDragOver={treeDrag} onDragLeave={event => { setDropTarget(false); if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) clearMoveTarget() }} onDrop={event => { if (draggedEntry !== undefined) { void dropEntry(event, props.sessionId, ''); return } drop(event) }}>
+      <Tree sessionId={props.sessionId} root={props.cwd ?? ''} path="" depth={0} expanded={expanded} selected={props.selected} selectedPaths={selection.selected} selectedEntries={selectedEntries} statuses={statuses} onToggle={path => setExpanded(current => { const next = new Set(current); next.has(path) ? next.delete(path) : next.add(path); return next })} onSelect={selectRow} onContextSelect={contextSelectRow} onDelete={requestDelete} onRenamed={renamedSelection} onOpen={path => { lastEntry.current = { path, directory: false }; props.onOpen(path) }} onAddToDsh={props.onAddToDsh} onChange={() => window.dispatchEvent(new Event('dvw-files-changed'))} onUpload={(directory, files) => void upload(directory, files)} creating={creating} onCreatingChange={value => setCreating(current => current && ({ ...current, value, error: undefined }))} onCreatingCancel={() => setCreating(undefined)} onCreatingSubmit={() => void submitCreating()}/>
+    </div>
+    {pendingDelete !== undefined && <div className="dvw-confirm-backdrop" role="presentation"><section className="dvw-confirm" role="alertdialog" aria-modal="true" aria-labelledby="dvw-delete-title" aria-describedby="dvw-delete-message"><h2 id="dvw-delete-title">删除{pendingDelete.length > 1 ? ` ${pendingDelete.length} 个项目` : pendingDelete[0]?.kind === 'directory' ? '文件夹' : '文件'}</h2><p id="dvw-delete-message">{pendingDelete.length === 1 ? `是否删除“${pendingDelete[0]?.name}”？` : `是否删除已选择的 ${pendingDelete.length} 个项目？`}</p><p className="dvw-confirm-note">此操作无法撤销。</p><footer><button autoFocus onClick={() => setPendingDelete(undefined)}>取消</button><button className="dvw-danger-button" onClick={() => void remove()}>删除</button></footer></section></div>}
+  </>
 }
 
 /** Return the workspace-relative directory used by the file picker. */
@@ -673,6 +903,52 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const dshDark = useDshDarkTheme()
   const [theme,setTheme]=useState<WorkbenchTheme>(()=>{const saved=localStorage.getItem('dvw:theme');return saved==='dark'||saved==='light'||saved==='white'||saved==='eyecare'?saved:'dsh'})
   const [markdownView,setMarkdownView]=useState<MarkdownDefaultView>(()=>markdownDefaultView())
+  const [reviewMode,setReviewMode]=useState<ReviewMode>(()=>{
+    const saved=storedValue('dvw:ai-review-mode')
+    return saved==='all'||saved==='latest'||saved==='none'
+      ?saved
+      :storedValue('dvw:ai-review')==='on'?'all':'none'
+  })
+  const reviewEnabled=reviewMode!=='none'
+  const [reviewFollow,setReviewFollow]=useState(()=>storedValue('dvw:ai-review-follow')!=='off')
+  const [reviewFollowing,setReviewFollowing]=useState(reviewFollow)
+  const [reviewActiveId,setReviewActiveId]=useState<string>()
+  const [reviewPageVisible,setReviewPageVisible]=useState(()=>document.visibilityState!=='hidden')
+  const reviewController=useMemo(()=>sessionId===undefined||!reviewEnabled?undefined:new AiReviewController({sessionId,mode:reviewMode}),[sessionId,reviewEnabled,reviewMode])
+  const [reviewSnapshot,setReviewSnapshot]=useState<AiReviewSnapshot>(()=>reviewController?.getSnapshot()??{changes:[],conflicts:{},busy:false,loading:false,working:false})
+  const reviewFollowRef=useRef(false);reviewFollowRef.current=reviewFollowing
+  const reviewSeenIds=useRef(new Set<string>())
+  const reviewFollowCandidate=useRef<ReviewChange>()
+  const reviewFollowTimer=useRef<ReturnType<typeof setTimeout>>()
+  const reviewInteractionAt=useRef(Date.now())
+  const reviewRunFollowRef=useRef<() => Promise<void>>(async()=>{})
+  useEffect(()=>{localStorage.setItem('dvw:ai-review',reviewEnabled?'on':'off')},[reviewEnabled])
+  useEffect(()=>localStorage.setItem('dvw:ai-review-mode',reviewMode),[reviewMode])
+  useEffect(()=>{localStorage.setItem('dvw:ai-review-follow',reviewFollow?'on':'off')},[reviewFollow])
+  useEffect(()=>setReviewFollowing(reviewFollow),[reviewFollow])
+  useEffect(()=>{
+    if(reviewController===undefined)return
+    setReviewSnapshot(reviewController.getSnapshot())
+    const unsubscribe=reviewController.subscribe(()=>setReviewSnapshot(reviewController.getSnapshot()))
+    return()=>{unsubscribe();reviewController.dispose()}
+  },[reviewController])
+  useEffect(()=>{
+    if(reviewController===undefined)return
+    if(reviewEnabled&&snapshot.visible&&reviewPageVisible)reviewController.start()
+    else reviewController.stop()
+  },[reviewController,reviewEnabled,snapshot.visible,reviewPageVisible])
+  useEffect(()=>{
+    if(reviewEnabled)return
+    try{localStorage.removeItem(`dvw:review:${sessionId??''}`)}catch{}
+    setReviewSnapshot({changes:[],conflicts:{},busy:false,loading:false,working:false})
+    setReviewActiveId(undefined)
+  },[reviewEnabled,sessionId])
+  useEffect(()=>{
+    const visibility=()=>setReviewPageVisible(document.visibilityState!=='hidden')
+    document.addEventListener('visibilitychange',visibility)
+    return()=>document.removeEventListener('visibilitychange',visibility)
+  },[])
+  useEffect(()=>()=>{if(reviewFollowTimer.current!==undefined)clearTimeout(reviewFollowTimer.current)},[])
   const [commitDetail,setCommitDetail]=useState<CommitDetail>(()=>{const saved=localStorage.getItem('dvw:commit-detail');return saved==='concise'||saved==='detailed'?saved:'standard'})
   const [commitLanguage,setCommitLanguage]=useState<CommitLanguage>(()=>{const saved=localStorage.getItem('dvw:commit-language');return saved==='zh'||saved==='en'?saved:'auto'})
   const colorScheme: 'dark' | 'light' | 'white' | 'eyecare' = theme === 'dsh' ? dshDark ? 'dark' : 'light' : theme
@@ -736,10 +1012,10 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   // The conversation may still be attaching after the chat column opens, so retry for about a second.
   const addToDsh=useCallback((reference:string)=>{setChatVisible(true);let frames=0;const attempt=()=>{void insertIntoDshComposer(reference).then(done=>{if(done)return;if(++frames<60){requestAnimationFrame(attempt);return}alert('DSH 对话输入框当前不可用，请先选择会话或等待当前回复结束。')})};requestAnimationFrame(attempt)},[])
   const addEntryToDsh=useCallback((path:string,directory:boolean)=>addToDsh(dshReference(path,{directory})),[addToDsh])
-  const openForWorkspace=(path:string,line?:number,column?:number,highlight?:string)=>{
+  const openForWorkspace=(path:string,line?:number,column?:number,highlight?:string,focusOnReveal=true)=>{
     // HTML is a page, not source: hand it to the configured browser so its assets resolve.
     if(!path.startsWith('diff:')&&/\.html?$/i.test(path)){void openSiteFile(path);return}
-    const existing=tabsRef.current.find(tab=>tab.path===path);if(existing)setTabs(rows=>rows.map(tab=>tab.path===path?{...tab,line,column,highlight,preview:line!==undefined?false:tab.preview}:tab));else setTabs(rows=>[...rows,{...unloadedTab(path),line,column,highlight,...(line!==undefined?{preview:false}:{})}]);leaveDshPanel();setActive(path)}
+    const existing=tabsRef.current.find(tab=>tab.path===path);if(existing)setTabs(rows=>rows.map(tab=>tab.path===path?{...tab,line,column,highlight,focusOnReveal,preview:line!==undefined?false:tab.preview}:tab));else setTabs(rows=>[...rows,{...unloadedTab(path),line,column,highlight,focusOnReveal,...(line!==undefined?{preview:false}:{})}]);leaveDshPanel();setActive(path)}
   useEffect(() => {
     if (sessionId === undefined) return
     // Switching sessions inside one workspace must keep the explorer, tabs and layout as they are.
@@ -891,10 +1167,10 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const tabRect = selected.getBoundingClientRect()
     list.scrollLeft = tabScrollLeft(list.scrollLeft, listRect, tabRect)
   }, [active, tabs.length])
-  const open=(path:string,line?:number,column?:number,highlight?:string)=>{if(sessionId!==undefined)openForWorkspace(path,line,column,highlight)}
+  const open=(path:string,line?:number,column?:number,highlight?:string,focusOnReveal=true)=>{if(sessionId!==undefined)openForWorkspace(path,line,column,highlight,focusOnReveal)}
   // Stable handlers let the memoised side views skip re-rendering while the editor types.
   const openRef=useRef(open);openRef.current=open
-  const openPath=useCallback((path:string,line?:number,column?:number,highlight?:string)=>openRef.current(path,line,column,highlight),[])
+  const openPath=useCallback((path:string,line?:number,column?:number,highlight?:string,focusOnReveal=true)=>openRef.current(path,line,column,highlight,focusOnReveal),[])
   const [switcherOpen,setSwitcherOpen]=useState(false);const [switcherChoices,setSwitcherChoices]=useState<WorkspaceChoice[]>([]);const [switcherBusy,setSwitcherBusy]=useState(false);const [switcherError,setSwitcherError]=useState<string>()
   const openSwitcher=useCallback(()=>{setSwitcherError(undefined);setSwitcherChoices(navigation?.choices(sessionId)??[]);setSwitcherOpen(true)},[navigation,sessionId])
   const switchSession=useCallback((id:string)=>{navigation?.openSession(id);setSwitcherOpen(false)},[navigation])
@@ -971,7 +1247,17 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   useEffect(()=>()=>{if(window.monaco!==undefined)disposeTypeScriptProject(window.monaco)},[])
   const openDiff=useCallback((path:string,diff:GitDiff,title?:string,diffSourcePath?:string)=>{const key=`diff:${path}`;const source=diffSourcePath??path;// Previewable documents open like VS Code's PDF/Office editors; history diffs keep the binary notice.
     if(isPreviewDocumentPath(source)&&!path.startsWith('commit:')){openPath(source);return}const binary=isBinaryDiffPath(source);setTabs(rows=>[...rows.filter(row=>row.path!==key),{path:key,title,content:diff.diff,draft:diff.diff,revision:'',size:diff.diff.length,binary,tooLarge:false,dirty:false,diff:binary?undefined:diff,diffMode:'inline',diffSourcePath:source}]);leaveDshPanel();setActive(key)},[openPath,leaveDshPanel])
-  useEffect(()=>{const listener=(event:Event)=>void open((event as CustomEvent<string>).detail);window.addEventListener('dvw-open-workspace-path',listener);return()=>window.removeEventListener('dvw-open-workspace-path',listener)},[sessionId,tabs])
+  useEffect(()=>{
+    const listener=(event:Event)=>{
+      const detail=(event as CustomEvent<string|{sessionId?:string;path?:string;line?:number}>).detail
+      if(typeof detail==='string'){void open(detail);return}
+      if(detail?.sessionId!==undefined&&detail.sessionId!==sessionId)return
+      if(typeof detail?.path==='string'&&detail.path!=='')void open(detail.path,detail.line)
+    }
+    window.addEventListener('dvw-open-workspace-path',listener)
+    window.addEventListener('dvw-open-generated-file',listener)
+    return()=>{window.removeEventListener('dvw-open-workspace-path',listener);window.removeEventListener('dvw-open-generated-file',listener)}
+  },[sessionId])
   const savingTabs = useRef(new Set<string>())
   const cancelTabLoads = useCallback((path: string) => {
     const suffix = `\0${path}`
@@ -994,7 +1280,47 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const close=(tab:Tab)=>{if(tab.dirty&&!confirm(`${tab.path} 有未保存更改，确定关闭？`))return;loadingTabs.current.delete(tabLoadKey(focusedRef.current,tab.path));setTabs(rows=>rows.filter(row=>row.path!==tab.path));if(active===tab.path)setActive(tabs.filter(row=>row.path!==tab.path).at(-1)?.path)}
   const closeAll=()=>{const dirty=tabs.filter(tab=>tab.dirty);if(dirty.length>0&&!confirm(`有 ${dirty.length} 个文件包含未保存更改，确定全部关闭？`))return;loadingTabs.current.clear();setTabs([]);setActive(undefined);setError(undefined);setTabMenu(undefined)}
   const removeTabs=(targets:Tab[],verb:string)=>{if(targets.length===0)return;const dirty=targets.filter(tab=>tab.dirty).length;if(dirty>0&&!confirm(`有 ${dirty} 个文件包含未保存更改，确定${verb}？`))return;const paths=new Set(targets.map(tab=>tab.path));for(const path of paths)loadingTabs.current.delete(tabLoadKey(focusedRef.current,path));const remaining=tabsRef.current.filter(tab=>!paths.has(tab.path));setTabs(remaining);if(active!==undefined&&paths.has(active))setActive(remaining.at(-1)?.path);setTabMenu(undefined)}
-  const activeTab=tabs.find(tab=>tab.path===active); const Panel=panels.find(panel=>panel.id===snapshot.bottomPanel)?.component; const terminalAvailable=panels.some(panel=>panel.id==='terminal')
+  const activeTab=tabs.find(tab=>tab.path===active)
+  const reviewByPath=useMemo(()=>{
+    const map=new Map<string,ReviewChange[]>()
+    for(const change of reviewSnapshot.changes){const list=map.get(change.path);if(list===undefined)map.set(change.path,[change]);else list.push(change)}
+    return map
+  },[reviewSnapshot.changes])
+  const reviewFiles=useMemo(()=>[...reviewByPath].map(([path,changes])=>({path,count:changes.length})).sort((left,right)=>left.path.localeCompare(right.path)),[reviewByPath])
+  const rejectReviewIn=async(groupId:string,tab:Tab,ids:string[])=>{
+    if(reviewController===undefined||ids.length===0)return
+    if(tab.dirty){setError('文件存在未保存的手动修改，请先处理后再撤销');return}
+    if(reviewSnapshot.busy||reviewSnapshot.working)return
+    setError(undefined)
+    try{
+      const result=await reviewController.reject(tab.path,ids)
+      setReviewActiveId(undefined)
+      if(result.deleted)closeInGroup(groupId,tab)
+      window.dispatchEvent(new CustomEvent('dvw-files-changed',{detail:[tab.path]}))
+    }catch(cause){setError(cause instanceof Error?cause.message:String(cause))}
+  }
+  const keepReview=(ids:string[])=>{if(reviewController!==undefined)void reviewController.keep(ids)}
+  const keepAllReview=()=>keepReview(reviewSnapshot.changes.map(change=>change.id))
+  const rejectAllReview=async()=>{
+    if(reviewController===undefined||reviewSnapshot.changes.length===0)return
+    if(reviewSnapshot.busy||reviewSnapshot.working)return
+    const paths=[...new Set(reviewSnapshot.changes.map(change=>change.path))]
+    const dirtyPaths=new Set(groupsRef.current.flatMap(group=>group.tabs.filter(tab=>tab.dirty).map(tab=>tab.path)))
+    const dirty=paths.find(path=>dirtyPaths.has(path))
+    if(dirty!==undefined){setError(`${dirty} 存在未保存的手动修改，请先处理后再撤销`);return}
+    setError(undefined)
+    try{
+      for(const path of paths){
+        const result=await reviewController.reject(path)
+        if(result.deleted){
+          setGroups(current=>current.map(group=>({...group,tabs:group.tabs.filter(tab=>tab.path!==path),active:group.active===path?group.tabs.filter(tab=>tab.path!==path).at(-1)?.path:group.active})))
+        }
+      }
+      setReviewActiveId(undefined)
+      window.dispatchEvent(new CustomEvent('dvw-files-changed',{detail:paths}))
+    }catch(cause){setError(cause instanceof Error?cause.message:String(cause))}
+  }
+  const Panel=panels.find(panel=>panel.id===snapshot.bottomPanel)?.component; const terminalAvailable=panels.some(panel=>panel.id==='terminal')
   const menuTab=tabMenu===undefined?undefined:tabs.find(tab=>tab.path===tabMenu.path); const menuIndex=menuTab===undefined?-1:tabs.findIndex(tab=>tab.path===menuTab.path); const savedTabs=tabs.filter(tab=>!tab.dirty)
   const selectView=(view:WorkbenchView)=>{if(snapshot.view===view&&primarySideVisible){setPrimarySideVisible(false);return}setPrimarySideVisible(true);service.show(view)}
   const ACTIVITY_IDS=['explorer','search','git','terminal','chat'] as const
@@ -1007,8 +1333,70 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     if(activityHidden.includes('terminal')&&snapshot.bottomPanel==='terminal')toggleTerminal(service)
     if(primarySideVisible&&(snapshot.view==='explorer'||snapshot.view==='search'||snapshot.view==='git')&&activityHidden.includes(snapshot.view))setPrimarySideVisible(false)
   },[activityHidden])
+  const openInGroup = useCallback((groupId: string, path: string, line?: number, column?: number, highlight?: string, focusOnReveal = true) => {
+    focusGroup(groupId)
+    requestAnimationFrame(() => openPath(path, line, column, highlight, focusOnReveal))
+  },[focusGroup,openPath])
+  useEffect(()=>{
+    const current=new Set(reviewSnapshot.changes.map(change=>change.id))
+    const previousSeen=new Set(reviewSeenIds.current)
+    reviewSeenIds.current=current
+    if(!reviewEnabled||!reviewFollowing||!reviewPageVisible||reviewController===undefined){
+      if(reviewFollowTimer.current!==undefined){clearTimeout(reviewFollowTimer.current);reviewFollowTimer.current=undefined}
+      reviewFollowCandidate.current=undefined
+      return
+    }
+    // Turning follow on after review is already active should still jump to the
+    // latest pending change; waiting only for a brand-new ID leaves the user
+    // stranded on whichever tab happened to be open.
+    const latest=latestReviewFollowChange(reviewSnapshot.changes,previousSeen)
+    if(latest===undefined)return
+    if(reviewFollowTimer.current!==undefined){clearTimeout(reviewFollowTimer.current);reviewFollowTimer.current=undefined}
+    reviewFollowCandidate.current=latest
+    const schedule=()=>{
+      if(reviewFollowTimer.current!==undefined)clearTimeout(reviewFollowTimer.current)
+      const wait=Math.max(0,1500-(Date.now()-reviewInteractionAt.current))
+      reviewFollowTimer.current=setTimeout(()=>{reviewFollowTimer.current=undefined;void reviewRunFollowRef.current()},wait)
+    }
+    reviewRunFollowRef.current=async()=>{
+      const candidate=reviewFollowCandidate.current
+      if(candidate===undefined||!reviewFollowRef.current||!reviewEnabled||document.visibilityState==='hidden')return
+      const snapshot=reviewController.getSnapshot()
+      const target=snapshot.changes.find(change=>change.id===candidate.id)??snapshot.changes.find(change=>change.path===candidate.path)
+      if(target===undefined)return
+      try{
+        const inspected=await reviewController.inspect(target.path)
+        const targetChange=snapshot.changes.find(change=>change.id===candidate.id)??target
+        const change=inspected.changes.find(item=>item.id===targetChange.id)?.id===targetChange.id?targetChange:target
+        const location=locateReviewChange(inspected.content,change)
+        setReviewActiveId(change.id)
+        openPath(change.path,location?.startLine,location===undefined?undefined:1,undefined,false)
+      }catch{/* A conflict or vanished file remains visible in its tab and review bar. */}
+    }
+    schedule()
+  },[reviewSnapshot.changes,reviewEnabled,reviewFollowing,reviewPageVisible,reviewController,openPath])
+  useEffect(()=>{
+    if(!reviewEnabled)return
+    const interacted=()=>{
+      reviewInteractionAt.current=Date.now()
+      if(reviewFollowTimer.current!==undefined){clearTimeout(reviewFollowTimer.current);reviewFollowTimer.current=undefined}
+      if(reviewFollowCandidate.current===undefined||!reviewFollowRef.current)return
+      reviewFollowTimer.current=setTimeout(()=>{reviewFollowTimer.current=undefined;void reviewRunFollowRef.current()},1500)
+    }
+    const options:AddEventListenerOptions={passive:true,capture:true}
+    window.addEventListener('pointerdown',interacted,options)
+    window.addEventListener('wheel',interacted,options)
+    window.addEventListener('keydown',interacted,options)
+    window.addEventListener('touchstart',interacted,options)
+    return()=>{
+      window.removeEventListener('pointerdown',interacted,options)
+      window.removeEventListener('wheel',interacted,options)
+      window.removeEventListener('keydown',interacted,options)
+      window.removeEventListener('touchstart',interacted,options)
+    }
+  },[reviewEnabled])
   const suppressAttachmentDrop=(event:DragEvent)=>{if(!event.dataTransfer.types.includes('Files'))return;const target=event.target;const insideTree=target instanceof Element&&target.closest('.dvw-tree')!==null;if(!insideTree){event.preventDefault();event.stopPropagation()}}
-  const settingsPage=<WorkbenchSettings theme={theme} setTheme={setTheme} fontSize={fontSize} setFontSize={setFontSize} primarySideVisible={primarySideVisible} setPrimarySideVisible={setPrimarySideVisible} chatVisible={chatVisible} setChatVisible={setChatVisible} statusVisible={statusVisible} setStatusVisible={setStatusVisible} sideWidth={sideWidth} setSideWidth={setSideWidth} chatWidth={chatWidth} setChatWidth={setChatWidth} chatMinWidth={DSH_CHAT_MIN_WIDTH} chatMaxWidth={DSH_CHAT_MAX_WIDTH} markdownView={markdownView} setMarkdownView={setMarkdownView} defaultBrowser={defaultBrowser} setDefaultBrowser={setDefaultBrowser} openMode={openMode} setOpenMode={setOpenMode} resetFloatWindow={resetFloatGeometry} commitDetail={commitDetail} setCommitDetail={setCommitDetail} commitLanguage={commitLanguage} setCommitLanguage={setCommitLanguage} tsIntellisense={tsIntellisense} setTsIntellisense={setTsIntellisense} tsIndex={tsIndex} lspServers={lspServers} lspBusy={lspBusy} lspError={lspError} changeLsp={changeLspAction} refreshLsp={refreshLspAction}/>
+  const settingsPage=<WorkbenchSettings reviewMode={reviewMode} setReviewMode={setReviewMode} reviewFollow={reviewFollow} setReviewFollow={setReviewFollow} theme={theme} setTheme={setTheme} fontSize={fontSize} setFontSize={setFontSize} primarySideVisible={primarySideVisible} setPrimarySideVisible={setPrimarySideVisible} chatVisible={chatVisible} setChatVisible={setChatVisible} statusVisible={statusVisible} setStatusVisible={setStatusVisible} sideWidth={sideWidth} setSideWidth={setSideWidth} chatWidth={chatWidth} setChatWidth={setChatWidth} chatMinWidth={DSH_CHAT_MIN_WIDTH} chatMaxWidth={DSH_CHAT_MAX_WIDTH} markdownView={markdownView} setMarkdownView={setMarkdownView} defaultBrowser={defaultBrowser} setDefaultBrowser={setDefaultBrowser} openMode={openMode} setOpenMode={setOpenMode} resetFloatWindow={resetFloatGeometry} commitDetail={commitDetail} setCommitDetail={setCommitDetail} commitLanguage={commitLanguage} setCommitLanguage={setCommitLanguage} tsIntellisense={tsIntellisense} setTsIntellisense={setTsIntellisense} tsIndex={tsIndex} lspServers={lspServers} lspBusy={lspBusy} lspError={lspError} changeLsp={changeLspAction} refreshLsp={refreshLspAction}/>
   if(!snapshot.visible)return settingsNode===undefined?null:createPortal(settingsPage,settingsNode)
   const floatTop=dshTitlebarHeight()
   const floatRectNow=floatMax
@@ -1028,8 +1416,13 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const markdown = paneMarkdown
     const diffMarkdown = paneDiffMarkdown
     const headings = markdownPreview && activeTab ? markdownHeadings(activeTab.diff?.modified ?? activeTab.draft) : []
+    const paneReviewChanges=reviewEnabled&&activeTab!==undefined?(reviewByPath.get(activeTab.path)??[]):[]
+    const activeReviewChanges=paneReviewChanges
+    const hasActiveReview=activeReviewChanges.length>0
+    const inlineReviewChanges=activeReviewChanges.filter(change=>!change.created||activeReviewChanges.length===1)
+    const rejectReview=(ids:string[])=>{if(activeTab!==undefined)void rejectReviewIn(group.id,activeTab,ids)}
     const selectHeading = (index: number) => { if (activeTab === undefined) return; setTabs(rows => rows.map(tab => tab.path === activeTab.path ? { ...tab, preview: true } : tab)); window.setTimeout(() => window.dispatchEvent(new CustomEvent('dvw-markdown-heading', { detail: index })), 50) }
-    return <><div className="dvw-tabs" data-empty={(tabs.length===0&&dshPanelId===undefined&&browserTabs.length===0)||undefined}><div className="dvw-tab-list" ref={focused?tabListRef:undefined}>{focused&&browserTabs.map(tab=><button className="dvw-tab" key={tab.id} data-dvw-browser-tab={tab.id} data-active={browserId===tab.id&&!dshTabActive} title={tab.title} onClick={()=>{leaveDshPanel();setBrowserId(tab.id)}}><Icon name="globe"/><span className="dvw-tab-name">{tab.title}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();browser?.close(tab.sessionId,tab.id)}}><Icon name="close"/></span></button>)}{focused&&dshPanelId!==undefined&&<button className="dvw-tab" data-active={dshTabActive} data-dvw-dsh-tab="" title={`${dshPanelLabel(dshPanelId)}（DSH 官方页面）`} onClick={()=>setDshTabActive(true)}><span className="dvw-dsh-tab-mark"/><span className="dvw-tab-name">{dshPanelLabel(dshPanelId)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();closeDshPanel()}}><Icon name="close"/></span></button>}{tabs.map(tab=><button className="dvw-tab" data-active={tab.path===active&&!dshTabActive&&browserId===undefined} key={tab.path} data-tab-path={tab.path} draggable onDragStart={event=>startTabDrag(event,group.id,tab)} onDragEnd={endTabDrag} title={tab.diffSourcePath??tab.path} onClick={()=>{setBrowserId(undefined);setDshTabActive(false);setActive(tab.path)}} onAuxClick={event=>{if(event.button===1){event.preventDefault();close(tab)}}} onMouseDown={event=>{if(event.button===1)event.preventDefault()}} onContextMenu={event=>{event.preventDefault();setBrowserId(undefined);setDshTabActive(false);setActive(tab.path);setTabMenu({x:event.clientX,y:event.clientY,path:tab.path})}}><FileIcon name={tabLabel(tab)} className="dvw-tab-icon"/><span className="dvw-tab-name">{tab.dirty?'● ':''}{tabLabel(tab)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();close(tab)}}><Icon name="close"/></span></button>)}</div></div><div className="dvw-editor" data-dvw-focused-editor={focused||undefined} data-outline={markdownPreview&&outlineVisible&&headings.length>0} data-browser-active={focused&&browserId!==undefined||undefined}>{error&&<div className="dvw-error"><button className="dvw-icon" onClick={()=>setError(undefined)}><Icon name="close"/></button>{error}</div>}{markdownPreview&&outlineVisible&&headings.length>0&&<MarkdownOutline headings={headings} onClose={()=>setOutlineVisible(false)} onHeading={selectHeading}/>} {markdown&&activeTab&&<div className="dvw-editor-toolbar"><button className="dvw-icon dvw-outline-toggle" data-active={outlineVisible} title={outlineVisible?'关闭 Markdown 大纲':'显示 Markdown 大纲'} onClick={()=>setOutlineVisible(value=>!value)}><Icon name="list-tree"/></button><button className="dvw-mode-button" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="code"/> 源码</button><button className="dvw-mode-button" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{activeTab?.diff&&<div className="dvw-editor-toolbar dvw-diff-toolbar">{diffMarkdown&&<div className="dvw-diff-preview-switch"><button className="dvw-mode-button" data-diff-view="diff" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="diff"/> 差异</button><button className="dvw-mode-button" data-diff-view="preview" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{!activeTab.preview&&<><button className="dvw-mode-button dvw-diff-mode-button" data-mode="inline" data-active={activeTab.diffMode!=='split'} title="内联视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'inline'}:tab))}><Icon name="diff-single"/> 内联</button><button className="dvw-mode-button dvw-diff-mode-button" data-mode="split" data-active={activeTab.diffMode==='split'} title="并排视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'split'}:tab))}><Icon name="diff-sidebyside"/> 并排</button></>}</div>}<div className="dvw-editor-body" data-toolbar={markdown||activeTab?.diff!==undefined}>{activeTab===undefined?<div className="dvw-empty"><div><strong>DSH Workbench</strong><br/>从资源管理器或搜索结果打开文件<div className="dvw-start-tools"><button onClick={()=>{if(snapshot.bottomPanel!=='terminal')service.toggleBottomPanel('terminal');queueMicrotask(()=>service.runCommand('terminal.new'))}} disabled={!terminalAvailable}><Icon name="terminal"/>新建终端</button>{browser!==undefined&&<button onClick={()=>void newBrowser()} disabled={!browserSnapshot.available}><Icon name="globe"/>浏览器</button>}</div></div></div>:activeTab.diff?diffMarkdown&&activeTab.preview?<MarkdownPreview source={activeTab.diff.modified} sessionId={sessionId} path={activeTab.diffSourcePath??''}/>:<MonacoDiffEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} original={activeTab.diff.original} modified={activeTab.diff.modified} mode={activeTab.diffMode??'inline'} theme={colorScheme} fontSize={fontSize}/>:activeTab.imageUrl?<div className="dvw-image-preview" key={activeTab.path}><img key={activeTab.path} src={`/dsh-vscode/file?sessionId=${encodeURIComponent(sessionId??'')}&path=${encodeURIComponent(activeTab.path)}&v=${encodeURIComponent(activeTab.revision??'')}`} alt={activeTab.path}/><span>{activeTab.path}</span></div>:activeTab.documentPreview&&activeTab.documentUrl?<DocumentPreview key={activeTab.path} kind={activeTab.documentPreview} src={activeTab.documentUrl} path={activeTab.path}/>:markdown&&activeTab.preview?<MarkdownPreview source={activeTab.draft} sessionId={sessionId} path={activeTab.path}/>:activeTab.binary||activeTab.tooLarge?<div className="dvw-message">{activeTab.binary?'二进制文件无法在文本编辑器或差异视图中打开':`文件超过 5 MiB：${activeTab.path}`}{activeTab.binary&&activeTab.diffSourcePath!==undefined&&!activeTab.path.startsWith('diff:commit:')&&<button onClick={()=>void openPath(activeTab.diffSourcePath!)}>打开文件</button>}</div>:activeTab.loaded===false?<div className="dvw-message">正在加载文件…</div>:<MonacoEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} onAddToDsh={selection=>addToDsh(dshReference(activeTab.path,{selection}))} value={activeTab.draft} theme={colorScheme} fontSize={fontSize} line={activeTab.line} column={activeTab.column} highlight={activeTab.highlight} onChange={draft=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,draft,dirty:draft!==tab.content}:tab))} onSave={()=>void save(activeTab)}/>}</div></div></>
+    return <><div className="dvw-tabs" data-empty={(tabs.length===0&&dshPanelId===undefined&&browserTabs.length===0)||undefined}><div className="dvw-tab-list" ref={focused?tabListRef:undefined}>{focused&&browserTabs.map(tab=><button className="dvw-tab" key={tab.id} data-dvw-browser-tab={tab.id} data-active={browserId===tab.id&&!dshTabActive} title={tab.title} onClick={()=>{leaveDshPanel();setBrowserId(tab.id)}}><Icon name="globe"/><span className="dvw-tab-name">{tab.title}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();browser?.close(tab.sessionId,tab.id)}}><Icon name="close"/></span></button>)}{focused&&dshPanelId!==undefined&&<button className="dvw-tab" data-active={dshTabActive} data-dvw-dsh-tab="" title={`${dshPanelLabel(dshPanelId)}（DSH 官方页面）`} onClick={()=>setDshTabActive(true)}><span className="dvw-dsh-tab-mark"/><span className="dvw-tab-name">{dshPanelLabel(dshPanelId)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();closeDshPanel()}}><Icon name="close"/></span></button>}{tabs.map(tab=>{const count=reviewEnabled?(reviewByPath.get(tab.path)?.length??0):0;const conflict=reviewEnabled&&(reviewByPath.get(tab.path)??[]).some(change=>reviewSnapshot.conflicts[change.id]!==undefined);return <button className="dvw-tab" data-active={tab.path===active&&!dshTabActive&&browserId===undefined} data-review-conflict={conflict||undefined} key={tab.path} data-tab-path={tab.path} draggable onDragStart={event=>startTabDrag(event,group.id,tab)} onDragEnd={endTabDrag} title={conflict?`${tab.diffSourcePath??tab.path} · AI 改动与当前文件状态冲突`:tab.diffSourcePath??tab.path} onClick={()=>{setBrowserId(undefined);setDshTabActive(false);setActive(tab.path)}} onAuxClick={event=>{if(event.button===1){event.preventDefault();close(tab)}}} onMouseDown={event=>{if(event.button===1)event.preventDefault()}} onContextMenu={event=>{event.preventDefault();setBrowserId(undefined);setDshTabActive(false);setActive(tab.path);setTabMenu({x:event.clientX,y:event.clientY,path:tab.path})}}><FileIcon name={tabLabel(tab)} className="dvw-tab-icon"/><span className="dvw-tab-name">{tab.dirty?'● ':''}{tabLabel(tab)}</span>{count>0&&<span className="dvw-tab-review" data-conflict={conflict||undefined} title={`${count} 处 AI 改动待审阅`}>{count}</span>}<span className="dvw-tab-close" onClick={event=>{event.stopPropagation();close(tab)}}><Icon name="close"/></span></button>})}</div></div><div className="dvw-editor" data-dvw-focused-editor={focused||undefined} data-review={hasActiveReview||undefined} data-outline={markdownPreview&&outlineVisible&&headings.length>0} data-browser-active={focused&&browserId!==undefined||undefined} onKeyDownCapture={event=>{if(!hasActiveReview||activeTab===undefined||!(event.target instanceof Element)||event.target.closest('.monaco-editor')===null)return;const command=event.ctrlKey||event.metaKey;if(command&&!event.altKey&&!event.shiftKey&&event.key==='Enter'){event.preventDefault();event.stopPropagation();keepReview(activeReviewChanges.map(change=>change.id));return}if(command&&!event.altKey&&!event.shiftKey&&event.key==='Backspace'){event.preventDefault();event.stopPropagation();rejectReview(activeReviewChanges.map(change=>change.id));return}const singleModifier=navigator.userAgent.includes('Mac')?event.ctrlKey&&!event.metaKey&&!event.altKey:event.altKey&&!command;if(singleModifier&&!event.shiftKey&&(event.code==='KeyY'||event.code==='KeyN')){const change=inlineReviewChanges.find(item=>item.id===reviewActiveId)??inlineReviewChanges[0];if(change===undefined)return;event.preventDefault();event.stopPropagation();if(event.code==='KeyY')keepReview([change.id]);else rejectReview([change.id])}}}>{error&&<div className="dvw-error"><button className="dvw-icon" onClick={()=>setError(undefined)}><Icon name="close"/></button>{error}</div>}{hasActiveReview&&activeTab&&<div className="dvw-review-filebar"><strong>AI 改动 · {activeReviewChanges.length} 处</strong><span>{activeTab.path}</span><button type="button" data-action="accept" disabled={reviewSnapshot.busy||reviewSnapshot.working} title="接受本文件全部 AI 改动 (Ctrl+Enter)" onClick={()=>keepReview(activeReviewChanges.map(change=>change.id))}>接受</button><button type="button" data-action="reject" disabled={reviewSnapshot.busy||reviewSnapshot.working||activeTab.dirty} title="拒绝本文件全部 AI 改动 (Ctrl+Backspace)" onClick={()=>rejectReview(activeReviewChanges.map(change=>change.id))}>拒绝</button></div>}{markdownPreview&&outlineVisible&&headings.length>0&&<MarkdownOutline headings={headings} onClose={()=>setOutlineVisible(false)} onHeading={selectHeading}/>} {markdown&&activeTab&&<div className="dvw-editor-toolbar" style={{top:hasActiveReview?35:0}}><button className="dvw-icon dvw-outline-toggle" data-active={outlineVisible} title={outlineVisible?'关闭 Markdown 大纲':'显示 Markdown 大纲'} onClick={()=>setOutlineVisible(value=>!value)}><Icon name="list-tree"/></button><button className="dvw-mode-button" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="code"/> 源码</button><button className="dvw-mode-button" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{activeTab?.diff&&<div className="dvw-editor-toolbar dvw-diff-toolbar" style={{top:hasActiveReview?35:0}}>{diffMarkdown&&<div className="dvw-diff-preview-switch"><button className="dvw-mode-button" data-diff-view="diff" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="diff"/> 差异</button><button className="dvw-mode-button" data-diff-view="preview" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{!activeTab.preview&&<><button className="dvw-mode-button dvw-diff-mode-button" data-mode="inline" data-active={activeTab.diffMode!=='split'} title="内联视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'inline'}:tab))}><Icon name="diff-single"/> 内联</button><button className="dvw-mode-button dvw-diff-mode-button" data-mode="split" data-active={activeTab.diffMode==='split'} title="并排视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'split'}:tab))}><Icon name="diff-sidebyside"/> 并排</button></>}</div>}<div className="dvw-editor-body" data-toolbar={markdown||activeTab?.diff!==undefined} style={{top:(markdown&&!activeTab?.preview?35:0)+(activeTab?.diff?35:0)+(hasActiveReview?35:0)}}>{activeTab===undefined?<div className="dvw-empty"><div><strong>DSH Workbench</strong><br/>从资源管理器或搜索结果打开文件<div className="dvw-start-tools"><button onClick={()=>{if(snapshot.bottomPanel!=='terminal')service.toggleBottomPanel('terminal');queueMicrotask(()=>service.runCommand('terminal.new'))}} disabled={!terminalAvailable}><Icon name="terminal"/>新建终端</button>{browser!==undefined&&<button onClick={()=>void newBrowser()} disabled={!browserSnapshot.available}><Icon name="globe"/>浏览器</button>}</div></div></div>:activeTab.diff?diffMarkdown&&activeTab.preview?<MarkdownPreview source={activeTab.diff.modified} sessionId={sessionId} path={activeTab.diffSourcePath??''}/>:<MonacoDiffEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} original={activeTab.diff.original} modified={activeTab.diff.modified} mode={activeTab.diffMode??'inline'} theme={colorScheme} fontSize={fontSize}/>:activeTab.imageUrl?<div className="dvw-image-preview" key={activeTab.path}><img src={`/dsh-vscode/file?sessionId=${encodeURIComponent(sessionId??'')}&path=${encodeURIComponent(activeTab.path)}&v=${encodeURIComponent(activeTab.revision??'')}`} alt={activeTab.path}/><span>{activeTab.path}</span></div>:activeTab.documentPreview&&activeTab.documentUrl?<DocumentPreview key={activeTab.path} kind={activeTab.documentPreview} src={activeTab.documentUrl} path={activeTab.path}/>:markdown&&activeTab.preview?<MarkdownPreview source={activeTab.draft} sessionId={sessionId} path={activeTab.path}/>:activeTab.binary||activeTab.tooLarge?<div className="dvw-message">{activeTab.binary?'二进制文件无法在文本编辑器或差异视图中打开':`文件超过 5 MiB：${activeTab.path}`}{activeTab.binary&&activeTab.diffSourcePath!==undefined&&!activeTab.path.startsWith('diff:commit:')&&<button onClick={()=>void openPath(activeTab.diffSourcePath!)}>打开文件</button>}</div>:activeTab.loaded===false?<div className="dvw-message">正在加载文件…</div>:<MonacoEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} onAddToDsh={selection=>addToDsh(dshReference(activeTab.path,{selection}))} value={activeTab.draft} theme={colorScheme} fontSize={fontSize} line={activeTab.line} column={activeTab.column} highlight={activeTab.highlight} focusOnReveal={activeTab.focusOnReveal} review={reviewEnabled&&inlineReviewChanges.length>0?{changes:inlineReviewChanges.map(change=>({...change,...(reviewSnapshot.conflicts[change.id]===undefined?{}:{conflict:reviewSnapshot.conflicts[change.id]})})),activeId:reviewActiveId,rejectDisabled:reviewSnapshot.busy||reviewSnapshot.working||activeTab.dirty,onFocus:setReviewActiveId,onKeep:changeId=>keepReview([changeId]),onReject:changeId=>rejectReview([changeId])}:undefined} onChange={draft=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,draft,dirty:draft!==tab.content}:tab))} onSave={()=>void save(activeTab)}/>}</div></div></>
   }
 
   // ---- editor groups -------------------------------------------------------
@@ -1085,10 +1478,6 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     if (host !== null && next !== null && host.contains(next)) return
     if (next === null) return
     setPaneDrop(undefined); setTabDrop(undefined)
-  }
-  const openInGroup = (groupId: string, path: string, line?: number, column?: number, highlight?: string) => {
-    focusGroup(groupId)
-    requestAnimationFrame(() => openPath(path, line, column, highlight))
   }
   const splitGroup = (groupId: string, direction: SplitDirection, position: SplitPosition, path: string) => {
     setPaneDrop(undefined)
@@ -1243,6 +1632,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     {dshTabId!==undefined&&<DshPanelPage panelId={dshTabId} active={showingDshPanel}/>}
     <DshConversationPanel visible={chatShown} width={chatWidth} statusHeight={statusVisible?30:6}/>
     <DshConversationTheme visible={chatShown} colorScheme={colorScheme} followDsh={false}/>
+    <DshReviewActions visible={chatShown&&reviewEnabled} files={reviewFiles} count={reviewSnapshot.changes.length} disabled={reviewSnapshot.busy||reviewSnapshot.working} onOpen={path=>void openPath(path)} onAcceptAll={keepAllReview} onRejectAll={()=>void rejectAllReview()}/>
     {chatShown&&<aside className="dvw-chat"><PanelResizer className="dvw-chat-resizer" label="拖动调整 DSH 对话栏宽度" width={chatWidth} min={DSH_CHAT_MIN_WIDTH} max={DSH_CHAT_MAX_WIDTH} defaultWidth={DSH_CHAT_DEFAULT_WIDTH} direction={-1} hideBelow={200} onHide={()=>setChatVisible(false)} onWidth={setChatWidth}/><header className="dvw-chat-head"><span><DshMark/> DSH</span><button className="dvw-icon" title="关闭 DSH 对话栏" onClick={()=>setChatVisible(false)}><Icon name="close"/></button></header><div className="dvw-chat-body"/></aside>}
     {switcherOpen&&<WorkspaceSwitcher choices={switcherChoices} activeSessionId={sessionId} unavailable={navigation?.available===false} busy={switcherBusy} error={switcherError} theme={colorScheme} onCreate={()=>void createWorkspace()} onSwitch={switchSession} onOpenWorkspace={enterWorkspace} onClose={()=>setSwitcherOpen(false)}/>}
     {settingsNode!==undefined&&createPortal(settingsPage,settingsNode)}

@@ -23,8 +23,11 @@ describe('workbench dark theme', () => {
     const styles = read('src/client/styles.ts')
     expect(styles).not.toContain(':has(.dvw-tree-row:hover)')
     expect(styles).toContain('.dvw-tree-row:hover{background:color-mix(in srgb,var(--dvw-text) 4%,transparent)}')
-    expect(styles).toContain('.dvw-tree-row[data-selected=true]:not([data-dvw-upload-directory]){background:var(--dvw-active)}')
-    expect(styles).toContain('.dvw-tree-row[data-selected=true][data-dvw-upload-directory]:not(:hover):not([data-drop-target=true]){background:transparent}')
+    expect(styles).toContain('.dvw-tree-row[data-selected=true]{background:var(--dvw-active)}')
+  })
+
+  it('places review controls above Monaco line hit testing', () => {
+    expect(read('src/client/styles.ts')).toContain('.dvw-editor .lines-content>.view-zones{z-index:2}')
   })
 
   it('offers the workbench from the sidebar panel list', () => {

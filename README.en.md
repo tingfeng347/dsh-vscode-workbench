@@ -84,6 +84,13 @@ Installing from the DSH Plugins page or a marketplace enables the plugin automat
 | `Ctrl+Shift+E` | Open Explorer |
 | `Ctrl+Shift+F` | Open Search |
 | `Ctrl+Shift+G` | Open Source Control |
+| `Ctrl/Cmd+Click` | Toggle one Explorer item |
+| `Shift+Click` | Select the visible range from the anchor |
+| `Ctrl/Cmd+A` | Select every visible Explorer item |
+| `Shift+Up/Down` | Extend or shrink the contiguous selection |
+| `Ctrl/Cmd+C` | Copy selected relative paths, one per line |
+| `Delete` / `Backspace` | Delete selected Explorer items |
+| `Esc` | Clear the selection or close the delete confirmation |
 | `Ctrl+S` | Save the active file |
 | `Ctrl+Alt+B` | Toggle the DSH conversation panel |
 | `Ctrl+\`` | Show or hide the terminal |

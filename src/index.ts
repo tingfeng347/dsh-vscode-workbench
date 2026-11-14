@@ -1,4 +1,5 @@
 /** DSH host plugin for the VS Code workbench. */
+import { inspectReview, rejectReview, reviewFeed, reviewPath } from './review.ts'
 import { createReadStream } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
 import type { IncomingMessage } from 'node:http'
@@ -27,9 +28,38 @@ let dshDirectoryPicker: import('./context.ts').DirectoryPickerLike | undefined
 let dshWorkspaceRegistry: import('./context.ts').WorkspaceRegistryLike | undefined
 export const inject = ['webServer', 'sessions', 'connection', 'workingDirectory']
 
+function stringArrayField(body: Record<string, unknown>, key: string): string[] {
+  const value = body[key]
+  if (!Array.isArray(value) || value.length === 0 || value.some(item => typeof item !== 'string' || item.length === 0)) {
+    throw new WorkbenchError('bad-request', `${key} must be a non-empty array of non-empty strings`)
+  }
+  return value as string[]
+}
+
 async function dispatch(ctx: HostContext, method: string, body: Record<string, unknown>, signal?: AbortSignal, site?: WorkspaceSite): Promise<unknown> {
   const sessionId = stringField(body, 'sessionId'); const cwd = cwdFor(ctx, sessionId)
   switch (method) {
+    case 'review.feed': {
+      const session = ctx.sessions.get(sessionId)!
+      const from = typeof body.from === 'number' && Number.isSafeInteger(body.from) && body.from >= 0 ? body.from : session.seq
+      const feed = reviewFeed(session, from)
+      const changes = []
+      for (const change of feed.changes) {
+        try { changes.push({ ...change, path: await reviewPath(cwd, change.path) }) }
+        catch { /* Tools may modify files outside this workspace; never expose them here. */ }
+      }
+      return { ...feed, changes }
+    }
+    case 'review.inspect':
+      return inspectReview(ctx.sessions.get(sessionId)!, cwd, stringField(body, 'path'), stringArrayField(body, 'ids'))
+    case 'review.reject':
+      return rejectReview(
+        ctx.sessions.get(sessionId)!,
+        cwd,
+        stringField(body, 'path'),
+        stringArrayField(body, 'ids'),
+        stringField(body, 'revision'),
+      )
     case 'workspace': return { cwd, name: cwd.split(/[\\/]/).at(-1) || cwd }
     case 'fs.list': return listFiles(cwd, stringField(body, 'path'))
     case 'fs.read': return readDocument(cwd, stringField(body, 'path'))

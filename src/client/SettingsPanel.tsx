@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { LspServerStatus } from './lsp.ts'
+import type { ReviewMode } from './aiReview.ts'
 import { settingsHost } from './settingsHost.ts'
 
 type WorkbenchTheme = 'dsh' | 'dark' | 'light' | 'white' | 'eyecare'
@@ -13,6 +14,10 @@ type TsIndex = { state: 'idle' | 'loading' | 'ready' | 'error'; files?: number; 
 
 /** Everything the settings page renders, owned by the mounted workbench. */
 export interface WorkbenchSettingsProps {
+  reviewMode?: ReviewMode
+  setReviewMode?(value: ReviewMode): void
+  reviewFollow?: boolean
+  setReviewFollow?(value: boolean): void
   theme: WorkbenchTheme
   setTheme(value: WorkbenchTheme): void
   fontSize: number
@@ -52,6 +57,7 @@ export interface WorkbenchSettingsProps {
 
 const THEMES = [['dsh', '跟随 DSH'], ['dark', '深色'], ['light', '浅色'], ['white', '纯白'], ['eyecare', '护眼']] as const
 const MARKDOWN_VIEWS = [['preview', '预览'], ['source', '源码']] as const
+const REVIEW_MODES = [['all', '审阅全部改动'], ['latest', '审阅最新改动'], ['none', '无需审阅']] as const
 const DEFAULT_BROWSERS = [['builtin', '内置浏览器'], ['system', '系统浏览器']] as const
 const OPEN_MODES = [['current', '当前窗口'], ['floating', '浮动窗口']] as const
 const COMMIT_DETAILS = [['concise', '简洁'], ['standard', '标准'], ['detailed', '详细']] as const
@@ -150,6 +156,16 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
       <Row title="默认浏览器" description="打开网页链接和 HTML 文件时使用的浏览器。">
         <Selector label="默认浏览器" value={props.defaultBrowser} options={DEFAULT_BROWSERS} onChange={props.setDefaultBrowser}/>
       </Row>
+    </section>
+
+    <section className="dvw-set-group">
+      <h3 className="dvw-set-group-title">AI 改动审阅</h3>
+      <Row title="代码审阅模式" description="审阅全部改动会保留每轮待处理差异；审阅最新改动会在新任务开始时接受上一任务；无需审阅会自动接受全部改动。">
+        <Selector label="代码审阅模式" value={props.reviewMode??'none'} options={REVIEW_MODES} onChange={value=>props.setReviewMode?.(value)}/>
+      </Row>
+      {props.reviewMode!=='none'&&<Row title="自动跟随 AI 修改" description="收到新修改时更新原文件；输入、滚动或操作指针期间不会抢焦点。">
+        <Switch label="自动跟随 AI 修改" checked={props.reviewFollow??true} onChange={value=>props.setReviewFollow?.(value)}/>
+      </Row>}
     </section>
 
     <section className="dvw-set-group">

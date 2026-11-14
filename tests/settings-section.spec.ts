@@ -50,6 +50,15 @@ describe('workbench settings section', () => {
     expect(panel).toContain("['system', '系统浏览器']")
   })
 
+  it('places the three Trae-style review modes after the default browser setting', () => {
+    const panel = read('src/client/SettingsPanel.tsx')
+    expect(panel.indexOf('默认浏览器')).toBeLessThan(panel.indexOf('AI 改动审阅'))
+    expect(panel).toContain("['all', '审阅全部改动']")
+    expect(panel).toContain("['latest', '审阅最新改动']")
+    expect(panel).toContain("['none', '无需审阅']")
+    expect(panel).toContain("props.reviewMode!=='none'")
+  })
+
   it('lets the workbench open as a floating window', () => {
     const panel = read('src/client/SettingsPanel.tsx')
     const workbench = read('src/client/Workbench.tsx')

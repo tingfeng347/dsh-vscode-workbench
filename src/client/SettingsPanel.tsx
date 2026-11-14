@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { LspServerStatus } from './lsp.ts'
 import type { ReviewMode } from './aiReview.ts'
 import { settingsHost } from './settingsHost.ts'
+import type { CommitModelCatalog, CommitModelOption, CommitModelSelection } from '../commit-message.ts'
 
 type WorkbenchTheme = 'dsh' | 'dark' | 'light' | 'white' | 'eyecare'
 type MarkdownView = 'preview' | 'source'
@@ -45,6 +46,14 @@ export interface WorkbenchSettingsProps {
   setCommitDetail(value: CommitDetail): void
   commitLanguage: CommitLanguage
   setCommitLanguage(value: CommitLanguage): void
+  commitModel?: CommitModelSelection
+  commitModelConfigured: boolean
+  setCommitModel(value: CommitModelSelection | undefined): void
+  commitModels: readonly CommitModelOption[]
+  commitModelStatus: 'idle' | 'loading' | 'ready' | 'error'
+  commitModelUnavailable: CommitModelCatalog['unavailable']
+  commitModelError: string
+  refreshCommitModels(): void
   tsIntellisense: boolean
   setTsIntellisense(value: boolean): void
   tsIndex: TsIndex
@@ -62,6 +71,11 @@ const DEFAULT_BROWSERS = [['builtin', '内置浏览器'], ['system', '系统浏�
 const OPEN_MODES = [['current', '当前窗口'], ['floating', '浮动窗口']] as const
 const COMMIT_DETAILS = [['concise', '简洁'], ['standard', '标准'], ['detailed', '详细']] as const
 const COMMIT_LANGUAGES = [['auto', '跟随最近提交'], ['zh', '中文'], ['en', 'English']] as const
+const FOLLOW_CHAT_MODEL = 'follow-chat'
+
+function modelKey(model: CommitModelSelection): string {
+  return JSON.stringify([model.provider, model.model])
+}
 
 /** One settings row: title and explanation on the left, control on the right. */
 function Row({ title, description, children }: { title: string; description?: string; children: React.ReactNode }) {
@@ -88,30 +102,99 @@ function Check() {
   return <svg className="dvw-set-check" width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m3.5 8.5 3 3 6-7"/></svg>
 }
 
+type ModelBadge = NonNullable<CommitModelOption['badge']>
+
 /** DSH's own settings control: a light pill showing the value, with a dropdown menu. */
-function Selector<T extends string>({ value, options, label, onChange }: { value: T; options: readonly (readonly [T, string])[]; label: string; onChange(value: T): void }) {
+function Selector<T extends string>({ value, options, label, badges, onChange }: { value: T; options: readonly (readonly [T, string])[]; label: string; badges?: Partial<Record<T, ModelBadge>>; onChange(value: T): void }) {
   const [open, setOpen] = useState(false)
-  const [anchor, setAnchor] = useState<{ right: number; top: number; width: number }>()
+  const [activeIndex, setActiveIndex] = useState(0)
+  const [anchor, setAnchor] = useState<{ right: number; top?: number; bottom?: number; minWidth: number; maxHeight: number }>()
   const button = useRef<HTMLButtonElement>(null)
+  const menu = useRef<HTMLDivElement>(null)
+  const items = useRef<Array<HTMLButtonElement | null>>([])
+  const menuId = useId()
+  const selectedIndex = options.findIndex(([key]) => key === value)
   useEffect(() => {
     if (!open) return
     const close = () => setOpen(false)
-    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); close() } }
-    window.addEventListener('pointerdown', close)
-    window.addEventListener('keydown', escape, true)
+    const pointer = (event: PointerEvent) => {
+      if (event.target instanceof Node && button.current?.contains(event.target) === true) return
+      close()
+    }
+    const scroll = (event: Event) => {
+      if (event.target instanceof Node && menu.current?.contains(event.target) === true) return
+      close()
+    }
+    window.addEventListener('pointerdown', pointer)
     window.addEventListener('blur', close)
-    return () => { window.removeEventListener('pointerdown', close); window.removeEventListener('keydown', escape, true); window.removeEventListener('blur', close) }
+    window.addEventListener('resize', close)
+    window.addEventListener('scroll', scroll, true)
+    return () => {
+      window.removeEventListener('pointerdown', pointer)
+      window.removeEventListener('blur', close)
+      window.removeEventListener('resize', close)
+      window.removeEventListener('scroll', scroll, true)
+    }
   }, [open])
-  const toggle = () => {
+  useEffect(() => {
+    if (open) items.current[activeIndex]?.focus()
+  }, [activeIndex, open])
+  const show = (preferredIndex = selectedIndex) => {
     const rect = button.current?.getBoundingClientRect()
-    if (rect !== undefined) setAnchor({ right: Math.max(8, window.innerWidth - rect.right), top: rect.bottom + 6, width: rect.width })
-    setOpen(current => !current)
+    if (rect === undefined) return
+    const below = window.innerHeight - rect.bottom - 12
+    const above = rect.top - 12
+    const useAbove = below < 240 && above > below
+    setAnchor({
+      right: Math.max(8, window.innerWidth - rect.right),
+      ...(useAbove ? { bottom: window.innerHeight - rect.top + 6 } : { top: rect.bottom + 6 }),
+      minWidth: Math.min(rect.width, window.innerWidth - 16),
+      maxHeight: Math.max(96, Math.min(420, useAbove ? above : below)),
+    })
+    setActiveIndex(preferredIndex >= 0 ? preferredIndex : 0)
+    setOpen(true)
   }
-  const text = options.find(([key]) => key === value)?.[1] ?? value
+  const toggle = () => {
+    if (open) setOpen(false)
+    else show()
+  }
+  const move = (index: number) => {
+    if (options.length === 0 || index < 0) return
+    setActiveIndex(index)
+  }
+  const text = options.find(([key]) => key === value)?.[1] ?? (value === '' ? '选择模型' : value)
+  const selectedBadge = badges?.[value]
   return <>
-    <button ref={button} type="button" className="dvw-set-selector" aria-label={label} aria-haspopup="menu" aria-expanded={open} onClick={toggle}>{text}<Chevron/></button>
-    {open && anchor !== undefined && <div className="dvw-set-menu" role="menu" aria-label={label} style={{ right: anchor.right, top: anchor.top, minWidth: anchor.width }} onPointerDown={event => event.stopPropagation()}>
-      {options.map(([key, item]) => <button key={key} type="button" role="menuitemradio" aria-checked={value === key} data-active={value === key} onClick={() => { setOpen(false); onChange(key) }}><span>{item}</span>{value === key && <Check/>}</button>)}
+    <button ref={button} type="button" className="dvw-set-selector" aria-label={`${label}：${text}`} aria-haspopup="menu" aria-controls={open ? menuId : undefined} aria-expanded={open} onClick={toggle} onKeyDown={event => {
+      if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') return
+      event.preventDefault()
+      if (open) {
+        const direction = event.key === 'ArrowDown' ? 1 : -1
+        move((activeIndex + direction + options.length) % options.length)
+      } else show(event.key === 'ArrowUp' ? options.length - 1 : selectedIndex)
+    }}><span className="dvw-set-selector-text">{text}{selectedBadge !== undefined && <span className="dvw-set-model-badge" data-tone={selectedBadge.tone}>{selectedBadge.text}</span>}</span><Chevron/></button>
+    {open && anchor !== undefined && <div ref={menu} id={menuId} className="dvw-set-menu" role="menu" aria-label={label} style={{ right: anchor.right, top: anchor.top, bottom: anchor.bottom, minWidth: anchor.minWidth, maxHeight: anchor.maxHeight }} onPointerDown={event => event.stopPropagation()} onKeyDown={event => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        event.stopPropagation()
+        setOpen(false)
+        button.current?.focus()
+      } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault()
+        const direction = event.key === 'ArrowDown' ? 1 : -1
+        move((activeIndex + direction + options.length) % options.length)
+      } else if (event.key === 'Home' || event.key === 'End') {
+        event.preventDefault()
+        move(event.key === 'Home' ? 0 : options.length - 1)
+      } else if (event.key === 'Tab') {
+        setOpen(false)
+        button.current?.focus()
+      }
+    }}>
+      {options.map(([key, item], index) => {
+        const badge = badges?.[key]
+        return <button ref={node => { items.current[index] = node }} tabIndex={-1} key={key} type="button" role="menuitemradio" aria-checked={value === key} data-active={value === key} onMouseEnter={() => setActiveIndex(index)} onClick={() => { setOpen(false); onChange(key); queueMicrotask(() => button.current?.focus()) }}><span className="dvw-set-option-label"><span className="dvw-set-option-text">{item}</span>{badge !== undefined && <span className="dvw-set-model-badge" data-tone={badge.tone}>{badge.text}</span>}</span>{value === key && <Check/>}</button>
+      })}
     </div>}
   </>
 }
@@ -140,6 +223,18 @@ function DebouncedRange(props: { value: number; min: number; max: number; unit: 
 export function WorkbenchSettings(props: WorkbenchSettingsProps) {
   const { refreshLsp } = props
   useEffect(() => { refreshLsp() }, [refreshLsp])
+  const followedModel=props.commitModels.find(model=>model.provider===props.commitModel?.provider&&model.model===props.commitModel?.model)
+  const commitModelOptions: Array<readonly [string, string]> = [
+    [FOLLOW_CHAT_MODEL, followedModel===undefined?'跟随 DSH 聊天模型':`跟随 DSH 聊天模型（${followedModel.name}）`],
+    ...props.commitModels.map(model => [modelKey(model), model.name] as const),
+  ]
+  const commitModelBadges: Partial<Record<string, ModelBadge>> = Object.fromEntries(props.commitModels.flatMap(model => model.badge === undefined ? [] : [[modelKey(model), model.badge]]))
+  if (followedModel?.badge!==undefined) commitModelBadges[FOLLOW_CHAT_MODEL]=followedModel.badge
+  const selectedModel=props.commitModel
+  if (props.commitModelConfigured&&selectedModel!==undefined&&!props.commitModels.some(model=>model.provider===selectedModel.provider&&model.model===selectedModel.model)) {
+    const unavailable=props.commitModelUnavailable.find(provider=>provider.provider===selectedModel.provider)
+    if (unavailable!==undefined) commitModelOptions.unshift([modelKey(selectedModel), `${selectedModel.model}（暂不可用）`])
+  }
   return <div className="dvw-set-page">
     <section className="dvw-set-group">
       <h3 className="dvw-set-group-title">外观</h3>
@@ -208,6 +303,21 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
       <Row title="语言" description="跟随最近提交会沿用仓库里上一条提交的语言。">
         <Selector label="提交信息语言" value={props.commitLanguage} options={COMMIT_LANGUAGES} onChange={props.setCommitLanguage}/>
       </Row>
+      <Row title="生成模型" description="未手动选择时跟随 DSH 聊天的当前 DeepSeek 模型，不需要先与 AI 对话即可生成提交信息。">
+        {props.commitModelStatus==='ready'&&commitModelOptions.length>0
+          ? <><Selector
+                label="提交信息生成模型"
+                value={props.commitModelConfigured&&props.commitModel!==undefined?modelKey(props.commitModel):FOLLOW_CHAT_MODEL}
+                options={commitModelOptions}
+                badges={commitModelBadges}
+                onChange={key=>{if(key===FOLLOW_CHAT_MODEL){props.setCommitModel(undefined);return}const item=props.commitModels.find(model=>modelKey(model)===key);if(item!==undefined)props.setCommitModel({provider:item.provider,model:item.model})}}
+              />{props.commitModelUnavailable.length>0&&<button type="button" className="dvw-set-button" onClick={props.refreshCommitModels}>刷新</button>}</>
+          : props.commitModelStatus==='error'
+            ? <button type="button" className="dvw-set-button" onClick={props.refreshCommitModels}>重新读取模型</button>
+            : <span role="status" aria-live="polite"><button type="button" className="dvw-set-button" disabled={props.commitModelStatus!=='ready'} onClick={props.commitModelStatus==='ready'?props.refreshCommitModels:undefined}>{props.commitModelStatus==='ready'?'没有可用模型':'正在读取模型…'}</button></span>}
+      </Row>
+      {props.commitModelUnavailable.map(provider=><p className="dvw-set-footnote" role="status" aria-live="polite" key={provider.provider}>无法读取 {provider.providerName}：{provider.message}</p>)}
+      {props.commitModelError!==''&&<p className="dvw-set-footnote dvw-set-error" role="alert">读取 DSH 模型失败：{props.commitModelError}</p>}
     </section>
 
     <section className="dvw-set-group">

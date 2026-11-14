@@ -32,7 +32,7 @@ import { resetWorkspaceDocuments, WorkspaceRequestScope } from './workspaceState
 import { WorkbenchSettings } from './SettingsPanel.tsx'
 import { settingsHost } from './settingsHost.ts'
 import { applyFloatGesture, clampFloatRect, defaultFloatRect, FLOAT_BAR_HEIGHT, FLOAT_MAX_KEY, FLOAT_RECT_KEY, readFloatMax, readFloatRect, readOpenMode, writeOpenMode, type FloatGesture, type FloatRect, type WorkbenchOpenMode } from './floatWindow.ts'
-import type { CommitDetail, CommitLanguage, CommitMessagePreferences } from '../commit-message.ts'
+import { DEEPSEEK_CHAT_PROVIDER_ID, type CommitDetail, type CommitLanguage, type CommitMessagePreferences, type CommitModelCatalog, type CommitModelOption, type CommitModelSelection } from '../commit-message.ts'
 import { outermostTreeEntries, remapTreeSelectionPaths, selectAllTreePaths, selectTreePath, type TreeSelection } from './treeSelection.ts'
 
 interface Tab extends FileDocument { instance?: symbol; dirty: boolean; draft: string; loaded?: boolean; line?: number; column?: number; highlight?: string; focusOnReveal?: boolean; external?: boolean; preview?: boolean; title?: string; diff?: GitDiff; diffMode?: 'inline' | 'split'; diffSourcePath?:string; imageUrl?:string; documentPreview?:DocumentPreviewKind; documentUrl?:string }
@@ -91,6 +91,23 @@ function persistFloatRect(rect: FloatRect): void {
 
 function storedValue(key: string): string | null {
   try { return localStorage.getItem(key) } catch { return null }
+}
+
+function readStoredCommitModel(): CommitModelSelection | undefined {
+  const saved = storedValue('dvw:commit-model')
+  if (saved === null) return undefined
+  try {
+    const value: unknown = JSON.parse(saved)
+    if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
+    const { provider, model } = value as Record<string, unknown>
+    return provider === DEEPSEEK_CHAT_PROVIDER_ID && typeof model === 'string' && model.trim() !== ''
+      ? { provider, model: model.trim() }
+      : undefined
+  } catch { return undefined }
+}
+
+function commitModelKey(model: CommitModelSelection): string {
+  return JSON.stringify([model.provider, model.model])
 }
 
 function persistFloatMax(max: boolean): void {
@@ -715,7 +732,7 @@ function GitGroupHeader({ title, count, expanded, onToggle, children }: { title:
   return <div className="dvw-group-head"><button className="dvw-group-toggle" aria-expanded={expanded} onClick={onToggle}><Icon name={expanded?'chevron-down':'chevron-right'}/><span>{title}</span><span className="dvw-count">{count}</span></button>{children}</div>
 }
 
-function Git(props: { sessionId: string; preferences: CommitMessagePreferences; onDiff(key:string, diff:GitDiff, title?:string, sourcePath?:string): void }) {
+function Git(props: { sessionId: string; preferences: CommitMessagePreferences; model?: CommitModelSelection; modelConfigured: boolean; modelAvailable: boolean; modelHint: string; onDiff(key:string, diff:GitDiff, title?:string, sourcePath?:string): void }) {
   const [status, setStatus] = useState<GitStatus>(); const [commits,setCommits]=useState<GitCommit[]>([]); const [message, setMessage] = useState(''); const [actionError,setActionError]=useState<GitActionNotice>();const [busy,setBusy]=useState(false); const [expanded,setExpanded]=useState({staged:true,changes:true,graph:true});const [expandedCommit,setExpandedCommit]=useState<string>();const [commitFileMap,setCommitFileMap]=useState<Map<string,GitCommitFile[]>>(new Map());const [branchMenu,setBranchMenu]=useState(false);const [branches,setBranches]=useState<GitBranch[]>([]);const [newBranch,setNewBranch]=useState('');const [branchError,setBranchError]=useState<string>();const [generating,setGenerating]=useState(false);const [commitMenu,setCommitMenu]=useState(false)
   const refresh = useCallback(() => { void Promise.all([api<GitStatus>('git.status',{sessionId:props.sessionId}),api<GitCommit[]>('git.action',{sessionId:props.sessionId,action:'log'})]).then(([nextStatus,nextCommits])=>{setStatus(nextStatus);setCommits(nextCommits)}).catch(error=>{setStatus(undefined);setCommits([]);if(!(error instanceof ApiError&&error.code==='not-repository'))setActionError(gitActionErrorNotice('refresh',error))}) }, [props.sessionId])
   const refreshDebounced = useDebouncedCallback(refresh, 500)
@@ -729,7 +746,7 @@ function Git(props: { sessionId: string; preferences: CommitMessagePreferences; 
   const createBranch=async()=>{const name=newBranch.trim();if(name==='')return;setBusy(true);try{setStatus(await api<GitStatus>('git.action',{sessionId:props.sessionId,action:'branch.create',value:name}));setNewBranch('');setBranchMenu(false);refresh()}catch(error){setBranchError(branchErrorMessage(error))}finally{setBusy(false)}}
   const toggleCommit=async(commit:GitCommit)=>{if(expandedCommit===commit.hash){setExpandedCommit(undefined);return}setExpandedCommit(commit.hash);if(commitFileMap.has(commit.hash))return;setBusy(true);setActionError(undefined);try{const files=await api<GitCommitFile[]>('git.action',{sessionId:props.sessionId,action:'commit.files',value:commit.hash});setCommitFileMap(current=>new Map(current).set(commit.hash,files))}catch(error){setActionError(gitActionErrorNotice('commit.files',error))}finally{setBusy(false)}}
   const openCommitFile=async(commit:GitCommit,file:GitCommitFile)=>{setBusy(true);setActionError(undefined);try{const result=await api<GitDiff>('git.action',{sessionId:props.sessionId,action:'commit.file.diff',path:file.path,value:commit.hash});props.onDiff(`commit:${commit.hash}:${file.path}`,result,file.path.split('/').at(-1)??file.path,file.path)}catch(error){setActionError(gitActionErrorNotice('commit.file.diff',error))}finally{setBusy(false)}}
-  const generateMessage=async()=>{if(generating)return;setGenerating(true);setActionError(undefined);try{const result=await api<{message:string}>('git.commitMessage',{sessionId:props.sessionId,detail:props.preferences.detail,language:props.preferences.language});setMessage(result.message)}catch(error){setActionError(gitActionErrorNotice('commitMessage',error))}finally{setGenerating(false)}}
+  const generateMessage=async()=>{if(generating||props.model===undefined||!props.modelAvailable)return;setGenerating(true);setActionError(undefined);try{const selection=props.modelConfigured?{provider:props.model.provider,model:props.model.model}:{};const result=await api<{message:string}>('git.commitMessage',{sessionId:props.sessionId,...selection,detail:props.preferences.detail,language:props.preferences.language});setMessage(result.message)}catch(error){setActionError(gitActionErrorNotice('commitMessage',error))}finally{setGenerating(false)}}
   const staged=status?.changes.filter(change=>change.index!=='.'&&change.index!=='?')??[]
   const changed=status?.changes.filter(change=>change.worktree!=='.'||change.untracked)??[]
   const commitChanges=async(name:'commit'|'commit.amend'='commit')=>{
@@ -753,7 +770,7 @@ function Git(props: { sessionId: string; preferences: CommitMessagePreferences; 
     <div className="dvw-side-head">源代码管理<div className="dvw-toolbar"><button className="dvw-icon" title="刷新" disabled={busy} onClick={refresh}><Icon name="refresh"/></button></div></div>
     {status&&<>
       <div className="dvw-git-head"><button className="dvw-branch" aria-haspopup="menu" aria-expanded={branchMenu} onClick={()=>void openBranchMenu()}><Icon name="git-branch"/> {status.branch} <Icon name="chevron-down" className="dvw-branch-caret"/></button><span>↑{status.ahead} ↓{status.behind}</span>{branchMenu&&<div className="dvw-branch-menu" role="menu" onPointerDown={event=>event.stopPropagation()}><div className="dvw-branch-current">当前分支：{status.branch}</div><div className="dvw-branch-list">{branches.map(branch=><button key={branch.name} role="menuitem" data-active={branch.name===status.branch} disabled={busy||branch.worktree!==undefined} title={branch.worktree!==undefined?`已在 worktree ${branch.worktree} 中检出`:undefined} onClick={()=>void switchBranch(branch.name)}><Icon name={branch.name===status.branch?'check':'git-branch'}/><span>{branch.name}</span>{branch.worktree!==undefined&&<span className="dvw-branch-worktree">worktree</span>}</button>)}</div><div className="dvw-branch-create"><input className="dvw-input" value={newBranch} placeholder="新分支名称" onChange={event=>setNewBranch(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();void createBranch()}}}/><button className="dvw-icon dvw-branch-create-button" title="创建并切换分支" disabled={busy||!newBranch.trim()} onClick={()=>void createBranch()}><Icon name="add"/></button></div></div>}</div>
-      <div className="dvw-commit"><div className="dvw-commit-box"><textarea className="dvw-textarea dvw-commit-input" rows={1} value={message} onChange={event=>setMessage(event.target.value)} onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key==='Enter'&&message.trim()){event.preventDefault();void commitChanges()}}} placeholder={`消息 (${isMacPlatform()?'⌘':'Ctrl+'}Enter 在“${status.branch}”提交)`}/><button className="dvw-commit-ai" disabled={busy||generating||status.changes.length===0} title={generating?'正在生成提交信息':'根据当前更改生成提交信息'} aria-label="生成提交信息" onClick={()=>void generateMessage()}><Icon name="sparkle"/></button></div><div className="dvw-commit-actions"><button className="dvw-commit-button" disabled={busy||!message.trim()||status.changes.length===0} title={staged.length===0?'没有已暂存的更改':'提交暂存的更改'} onClick={()=>void commitChanges()}><Icon name="check"/> 提交</button><button className="dvw-commit-more" disabled={busy||!message.trim()||status.changes.length===0} aria-haspopup="menu" aria-expanded={commitMenu} title="更多提交操作" aria-label="更多提交操作" onClick={()=>setCommitMenu(value=>!value)}><Icon name="chevron-down"/></button>{commitMenu&&<div className="dvw-commit-menu" role="menu" onPointerDown={event=>event.stopPropagation()}><button role="menuitem" onClick={()=>{setCommitMenu(false);void commitChanges()}}>提交</button><button role="menuitem" onClick={()=>{setCommitMenu(false);void commitChanges('commit.amend')}}>提交（修改）</button><div className="dvw-commit-menu-sep" role="separator"/><button role="menuitem" onClick={()=>void commitThen('push')}>提交和推送</button><button role="menuitem" onClick={()=>void commitThen('sync')}>提交和同步</button></div>}</div></div>
+      <div className="dvw-commit"><div className="dvw-commit-box"><textarea className="dvw-textarea dvw-commit-input" rows={1} value={message} onChange={event=>setMessage(event.target.value)} onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key==='Enter'&&message.trim()){event.preventDefault();void commitChanges()}}} placeholder={`消息 (${isMacPlatform()?'⌘':'Ctrl+'}Enter 在“${status.branch}”提交)`}/><button className="dvw-commit-ai" disabled={busy||generating||!props.modelAvailable||status.changes.length===0} title={generating?'正在生成提交信息':props.modelAvailable?'根据当前更改生成提交信息':props.modelHint} aria-label="生成提交信息" onClick={()=>void generateMessage()}><Icon name="sparkle"/></button></div><div className="dvw-commit-actions"><button className="dvw-commit-button" disabled={busy||!message.trim()||status.changes.length===0} title={staged.length===0?'没有已暂存的更改':'提交暂存的更改'} onClick={()=>void commitChanges()}><Icon name="check"/> 提交</button><button className="dvw-commit-more" disabled={busy||!message.trim()||status.changes.length===0} aria-haspopup="menu" aria-expanded={commitMenu} title="更多提交操作" aria-label="更多提交操作" onClick={()=>setCommitMenu(value=>!value)}><Icon name="chevron-down"/></button>{commitMenu&&<div className="dvw-commit-menu" role="menu" onPointerDown={event=>event.stopPropagation()}><button role="menuitem" onClick={()=>{setCommitMenu(false);void commitChanges()}}>提交</button><button role="menuitem" onClick={()=>{setCommitMenu(false);void commitChanges('commit.amend')}}>提交（修改）</button><div className="dvw-commit-menu-sep" role="separator"/><button role="menuitem" onClick={()=>void commitThen('push')}>提交和推送</button><button role="menuitem" onClick={()=>void commitThen('sync')}>提交和同步</button></div>}</div></div>
       <div className="dvw-git">{staged.length>0&&<section><GitGroupHeader title="暂存的更改" count={staged.length} expanded={expanded.staged} onToggle={()=>setExpanded(value=>({...value,staged:!value.staged}))}><button className="dvw-icon" title="取消暂存所有更改" onClick={()=>void action('unstage.all')}><Icon name="remove"/></button></GitGroupHeader>{expanded.staged&&staged.map(change=>renderChange(change,'staged'))}</section>}<section><GitGroupHeader title="更改" count={changed.length} expanded={expanded.changes} onToggle={()=>setExpanded(value=>({...value,changes:!value.changes}))}><button className="dvw-icon" title="放弃所有更改" onClick={()=>{if(confirm('放弃所有已跟踪和未跟踪的更改？此操作无法撤销。'))void action('discard.all')}}><Icon name="discard"/></button><button className="dvw-icon" title="暂存所有更改" onClick={()=>void action('stage.all')}><Icon name="add"/></button></GitGroupHeader>{expanded.changes&&changed.map(change=>renderChange(change,'worktree'))}</section><section className="dvw-graph"><GitGroupHeader title="图表" count={commits.length} expanded={expanded.graph} onToggle={()=>setExpanded(value=>({...value,graph:!value.graph}))}><button className="dvw-icon" title="刷新提交图表" onClick={refresh}><Icon name="refresh"/></button></GitGroupHeader>{expanded.graph&&<CommitGraph commits={commits} expanded={expandedCommit} files={commitFileMap} onToggle={commit=>void toggleCommit(commit)} onOpenFile={(commit,file)=>void openCommitFile(commit,file)}/>}</section></div>
     </>}
     {actionError!==undefined&&createPortal(<div className="dvw-confirm-backdrop dvw-git-dialog-layer" role="presentation" onMouseDown={()=>setActionError(undefined)}><section className="dvw-confirm dvw-git-error-dialog" role="alertdialog" aria-modal="true" aria-labelledby="dvw-git-error-title" aria-describedby="dvw-git-error-message" onMouseDown={event=>event.stopPropagation()}><header className="dvw-git-error-head"><span className="dvw-git-error-mark" aria-hidden="true"><Icon name="git-commit"/></span><div><h2 id="dvw-git-error-title">{actionError.title}</h2><p id="dvw-git-error-message">{actionError.message}</p></div></header>{actionError.detail!==undefined&&<details className="dvw-git-error-detail"><summary>技术详情</summary><pre>{actionError.detail}</pre></details>}<footer><button autoFocus onClick={()=>setActionError(undefined)}>{actionError.canStageAll?'取消':'知道了'}</button>{actionError.canStageAll&&<button className="dvw-git-error-primary" onClick={()=>void stageAllAndCommit()}>暂存全部并提交</button>}</footer></section></div>,document.body)}
@@ -968,12 +985,56 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   useEffect(()=>()=>{if(reviewFollowTimer.current!==undefined)clearTimeout(reviewFollowTimer.current)},[])
   const [commitDetail,setCommitDetail]=useState<CommitDetail>(()=>{const saved=localStorage.getItem('dvw:commit-detail');return saved==='concise'||saved==='detailed'?saved:'standard'})
   const [commitLanguage,setCommitLanguage]=useState<CommitLanguage>(()=>{const saved=localStorage.getItem('dvw:commit-language');return saved==='zh'||saved==='en'?saved:'auto'})
+  const [commitModel,setCommitModel]=useState<CommitModelSelection|undefined>(readStoredCommitModel)
+  const [commitModelConfigured,setCommitModelConfigured]=useState(()=>readStoredCommitModel()!==undefined)
+  const [commitModels,setCommitModels]=useState<{status:'idle'|'loading'|'ready'|'error';models:CommitModelOption[];unavailable:CommitModelCatalog['unavailable'];defaultModel?:CommitModelSelection;error?:string}>({status:'idle',models:[],unavailable:[]})
+  const commitModelsRequest=useRef(0)
+  const commitModelsAbort=useRef<AbortController>()
+  const refreshCommitModels=useCallback(async()=>{
+    const request=++commitModelsRequest.current
+    commitModelsAbort.current?.abort()
+    const controller=commitModelsAbort.current=new AbortController()
+    setCommitModels(current=>({...current,status:'loading',error:undefined}))
+    try{
+      const result=await api<unknown>('commit.models',sessionId===undefined?{}:{sessionId},controller.signal)
+      if(result===null||typeof result!=='object'||Array.isArray(result)||!Array.isArray((result as Partial<CommitModelCatalog>).models)){
+        throw new Error('DSH 返回的模型目录格式不正确')
+      }
+      const catalog=result as CommitModelCatalog
+      const defaultModel=catalog.defaultModel?.provider===DEEPSEEK_CHAT_PROVIDER_ID
+        ?{provider:catalog.defaultModel.provider,model:catalog.defaultModel.model}
+        :undefined
+      if(request!==commitModelsRequest.current)return
+      setCommitModels({status:'ready',models:catalog.models,unavailable:Array.isArray(catalog.unavailable)?catalog.unavailable:[],...(defaultModel===undefined?{}:{defaultModel})})
+    }catch(error){
+      if(request!==commitModelsRequest.current||controller.signal.aborted)return
+      setCommitModels(current=>({...current,status:'error',error:error instanceof Error?error.message:String(error)}))
+    }
+  },[sessionId])
+  useEffect(()=>{if(snapshot.visible||settingsOpen)void refreshCommitModels();else commitModelsAbort.current?.abort()},[snapshot.visible,settingsOpen,refreshCommitModels])
+  useEffect(()=>()=>commitModelsAbort.current?.abort(),[])
+  useEffect(()=>{
+    if(commitModels.status!=='ready')return
+    const defaultModel=commitModels.defaultModel
+    const availableDefault=defaultModel!==undefined&&commitModels.models.some(model=>model.provider===defaultModel.provider&&model.model===defaultModel.model)?defaultModel:undefined
+    if(!commitModelConfigured){setCommitModel(availableDefault);return}
+    if(commitModel!==undefined){
+      const selection=commitModel
+      const available=commitModels.models.some(model=>model.provider===selection.provider&&model.model===selection.model)
+      const providerUnavailable=commitModels.unavailable.some(provider=>provider.provider===selection.provider)
+      if(available||providerUnavailable)return
+    }
+    setCommitModelConfigured(false)
+    setCommitModel(availableDefault)
+  },[commitModel,commitModelConfigured,commitModels])
   const colorScheme: 'dark' | 'light' | 'white' | 'eyecare' = theme === 'dsh' ? dshDark ? 'dark' : 'light' : theme
   const commitPreferences=useMemo<CommitMessagePreferences>(()=>({detail:commitDetail,language:commitLanguage}),[commitDetail,commitLanguage])
   useEffect(()=>localStorage.setItem('dvw:theme',theme),[theme])
   useEffect(()=>localStorage.setItem(MARKDOWN_DEFAULT_VIEW_KEY,markdownView),[markdownView])
   useEffect(()=>localStorage.setItem('dvw:commit-detail',commitDetail),[commitDetail])
   useEffect(()=>localStorage.setItem('dvw:commit-language',commitLanguage),[commitLanguage])
+  useEffect(()=>{try{if(!commitModelConfigured)localStorage.removeItem('dvw:commit-model');else if(commitModel!==undefined)localStorage.setItem('dvw:commit-model',JSON.stringify(commitModel))}catch{/* Browser privacy settings may deny storage. */}},[commitModel,commitModelConfigured])
+  const selectCommitModel=useCallback((value:CommitModelSelection|undefined)=>{setCommitModelConfigured(value!==undefined);setCommitModel(value)},[])
   useEffect(()=>{if(!snapshot.visible||theme==='dsh')return;const body=document.body;const root=document.documentElement;const wasDark=body.hasAttribute('data-ds-dark-theme');const previousColorScheme=root.style.colorScheme;body.toggleAttribute('data-ds-dark-theme',theme==='dark');root.style.colorScheme=theme==='dark'?'dark':'light';return()=>{body.toggleAttribute('data-ds-dark-theme',wasDark);if(previousColorScheme==='')root.style.removeProperty('color-scheme');else root.style.colorScheme=previousColorScheme}},[snapshot.visible,theme])
   useEffect(()=>localStorage.setItem('dvw:outline',outlineVisible?'open':'closed'),[outlineVisible])
   useEffect(()=>localStorage.setItem('dvw:dsh-chat-visible',chatVisible?'open':'closed'),[chatVisible])
@@ -1413,14 +1474,18 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     }
   },[reviewEnabled])
   const suppressAttachmentDrop=(event:DragEvent)=>{if(!event.dataTransfer.types.includes('Files'))return;const target=event.target;const insideTree=target instanceof Element&&target.closest('.dvw-tree')!==null;if(!insideTree){event.preventDefault();event.stopPropagation()}}
-  const settingsPage=<WorkbenchSettings reviewMode={reviewMode} setReviewMode={setReviewMode} reviewFollow={reviewFollow} setReviewFollow={setReviewFollow} theme={theme} setTheme={setTheme} fontSize={fontSize} setFontSize={setFontSize} primarySideVisible={primarySideVisible} setPrimarySideVisible={setPrimarySideVisible} chatVisible={chatVisible} setChatVisible={setChatVisible} statusVisible={statusVisible} setStatusVisible={setStatusVisible} sideWidth={sideWidth} setSideWidth={setSideWidth} chatWidth={chatWidth} setChatWidth={setChatWidth} chatMinWidth={DSH_CHAT_MIN_WIDTH} chatMaxWidth={DSH_CHAT_MAX_WIDTH} markdownView={markdownView} setMarkdownView={setMarkdownView} defaultBrowser={defaultBrowser} setDefaultBrowser={setDefaultBrowser} openMode={openMode} setOpenMode={setOpenMode} resetFloatWindow={resetFloatGeometry} commitDetail={commitDetail} setCommitDetail={setCommitDetail} commitLanguage={commitLanguage} setCommitLanguage={setCommitLanguage} tsIntellisense={tsIntellisense} setTsIntellisense={setTsIntellisense} tsIndex={tsIndex} lspServers={lspServers} lspBusy={lspBusy} lspError={lspError} changeLsp={changeLspAction} refreshLsp={refreshLspAction}/>
+  const commitModelAvailable=commitModels.status==='ready'&&commitModel!==undefined&&commitModels.models.some(model=>model.provider===commitModel.provider&&model.model===commitModel.model)
+  const commitModelHint=commitModels.status==='loading'||commitModels.status==='idle'?'正在读取 DSH 聊天中的 DeepSeek 模型':commitModels.status==='error'||commitModels.unavailable.length>0?'DeepSeek 聊天模型当前不可用，请在设置中刷新或重新选择':'没有可用的 DeepSeek 聊天模型，请在设置中选择'
+  const settingsPage=<WorkbenchSettings reviewMode={reviewMode} setReviewMode={setReviewMode} reviewFollow={reviewFollow} setReviewFollow={setReviewFollow} theme={theme} setTheme={setTheme} fontSize={fontSize} setFontSize={setFontSize} primarySideVisible={primarySideVisible} setPrimarySideVisible={setPrimarySideVisible} chatVisible={chatVisible} setChatVisible={setChatVisible} statusVisible={statusVisible} setStatusVisible={setStatusVisible} sideWidth={sideWidth} setSideWidth={setSideWidth} chatWidth={chatWidth} setChatWidth={setChatWidth} chatMinWidth={DSH_CHAT_MIN_WIDTH} chatMaxWidth={DSH_CHAT_MAX_WIDTH} markdownView={markdownView} setMarkdownView={setMarkdownView} defaultBrowser={defaultBrowser} setDefaultBrowser={setDefaultBrowser} openMode={openMode} setOpenMode={setOpenMode} resetFloatWindow={resetFloatGeometry} commitDetail={commitDetail} setCommitDetail={setCommitDetail} commitLanguage={commitLanguage} setCommitLanguage={setCommitLanguage} commitModel={commitModel} commitModelConfigured={commitModelConfigured} setCommitModel={selectCommitModel} commitModels={commitModels.models} commitModelStatus={commitModels.status} commitModelUnavailable={commitModels.unavailable} commitModelError={commitModels.error??''} refreshCommitModels={()=>void refreshCommitModels()} tsIntellisense={tsIntellisense} setTsIntellisense={setTsIntellisense} tsIndex={tsIndex} lspServers={lspServers} lspBusy={lspBusy} lspError={lspError} changeLsp={changeLspAction} refreshLsp={refreshLspAction}/>
   if(!snapshot.visible)return settingsNode===undefined?null:createPortal(settingsPage,settingsNode)
   const floatTop=dshTitlebarHeight()
   const floatRectNow=floatMax
     ?{left:0,top:floatTop,width:viewport.width,height:Math.max(320,viewport.height-floatTop)}
     :{left:floatRect.x,top:floatRect.y,width:floatRect.width,height:floatRect.height}
   const floatStyle=floating?{...floatRectNow,paddingTop:FLOAT_BAR_HEIGHT} as CSSProperties:undefined
-  if(sessionId===undefined)return <div ref={overlayRef} className="dvw-overlay" data-dvw-theme={colorScheme} data-dvw-theme-name={theme} data-dvw-float={floating||undefined} data-dvw-float-max={floating&&floatMax||undefined} data-dvw-float-fullscreen={floating&&floatFullscreen||undefined} style={floatStyle}>{floating&&<FloatBar fullscreen={floatFullscreen} onPointerDown={event=>beginFloatGesture(event,'move')} onToggleFullscreen={()=>void toggleFloatFullscreen()} onClose={()=>service.hide()}/>}<div className="dvw-empty" style={{gridColumn:'1/4'}}><div>请先选择或创建一个 DSH 会话。<br/><button onClick={()=>service.hide()}>返回 DSH</button></div></div></div>
+  if(sessionId===undefined)return settingsNode===undefined
+    ? <div ref={overlayRef} className="dvw-overlay" data-dvw-theme={colorScheme} data-dvw-theme-name={theme} data-dvw-float={floating||undefined} data-dvw-float-max={floating&&floatMax||undefined} data-dvw-float-fullscreen={floating&&floatFullscreen||undefined} style={floatStyle}>{floating&&<FloatBar fullscreen={floatFullscreen} onPointerDown={event=>beginFloatGesture(event,'move')} onToggleFullscreen={()=>void toggleFloatFullscreen()} onClose={()=>service.hide()}/>}<div className="dvw-empty" style={{gridColumn:'1/4'}}><div>请先选择或创建一个 DSH 会话。<br/><button onClick={()=>service.hide()}>返回 DSH</button></div></div></div>
+    : createPortal(settingsPage,settingsNode)
   const showingDshPanel=dshTabId!==undefined&&dshTabActive
   const closeDshPanel=()=>{setDshTabActive(false);setDshTabId(undefined);onCloseDshPanel?.()}
   const openFromView=openPath
@@ -1668,7 +1733,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
         ]}
         order={activityOrder} hidden={activityHidden}
         onOrderChange={setActivityOrder} onHiddenChange={setActivityHidden}/>
-    <aside className="dvw-side" data-side-width={sideWidth}>{snapshot.view==='explorer'&&workspace!==undefined&&<ExplorerView sessionId={sessionId} cwd={workspace.cwd} selected={active} onOpen={openFromView} onAddToDsh={addEntryToDsh}/>} {snapshot.view==='search'&&<SearchView sessionId={sessionId} onOpen={openFromView}/>} {snapshot.view==='git'&&<GitView sessionId={sessionId} preferences={commitPreferences} onDiff={(path,diff,title,source)=>{leaveDshPanel();openDiff(path,diff,title,source)}}/>}</aside>
+    <aside className="dvw-side" data-side-width={sideWidth}>{snapshot.view==='explorer'&&workspace!==undefined&&<ExplorerView sessionId={sessionId} cwd={workspace.cwd} selected={active} onOpen={openFromView} onAddToDsh={addEntryToDsh}/>} {snapshot.view==='search'&&<SearchView sessionId={sessionId} onOpen={openFromView}/>} {snapshot.view==='git'&&<GitView sessionId={sessionId} preferences={commitPreferences} model={commitModel} modelConfigured={commitModelConfigured} modelAvailable={commitModelAvailable} modelHint={commitModelHint} onDiff={(path,diff,title,source)=>{leaveDshPanel();openDiff(path,diff,title,source)}}/>}</aside>
     <PanelResizer className="dvw-side-resizer" label="拖动调整源码管理侧边栏宽度" width={sideWidth} min={210} max={640} defaultWidth={210} direction={1} hideBelow={105} onHide={()=>setPrimarySideVisible(false)} onWidth={setSideWidth}/>
     <main className="dvw-main" onDragOverCapture={paneDragOver} onDragLeaveCapture={paneDragLeave} onDropCapture={paneDropHandler}><div className="dvw-panes">{renderNode(layout)}</div>{snapshot.bottomPanel===undefined&&<div className="dvw-bottom-reveal" title="向上拖动打开终端" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();service.toggleBottomPanel('terminal');const statusHeight=statusVisible?24:0;const heightAt=(clientY:number)=>Math.max(120,Math.min(window.innerHeight-160,window.innerHeight-clientY-statusHeight));const move=(e:PointerEvent)=>setPanelHeight(heightAt(e.clientY));const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>}</main>
     {tabMenu&&menuTab&&<div className="dvw-context-menu dvw-tab-menu" role="menu" style={{left:Math.min(tabMenu.x,window.innerWidth-240),top:Math.min(tabMenu.y,window.innerHeight-180)}} onPointerDown={event=>event.stopPropagation()}>

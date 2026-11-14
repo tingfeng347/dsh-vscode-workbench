@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { GenerateOptions, StreamChunk } from '@deepseek-ai/dsh-llm'
-import { buildCommitMessagePrompt, cleanCommitMessage, commitMessageSystemPrompt, compactCommitPatch, generateCommitMessage, normalizeCommitPreferences, prioritizeCommitPatch, type CommitContext, type CommitMessageRuntime } from '../src/commit-message.ts'
+import { DEEPSEEK_CHAT_PROVIDER_ID, buildCommitMessagePrompt, cleanCommitMessage, commitCatalogFromDsh, commitMessageSystemPrompt, compactCommitPatch, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, prioritizeCommitPatch, type CommitContext, type CommitMessageRuntime } from '../src/commit-message.ts'
 
 const context: CommitContext = {
   repository: '/repo',
@@ -60,6 +60,111 @@ describe('commit message generation', () => {
   it('normalizes unknown preference values', () => {
     expect(normalizeCommitPreferences('unexpected', 'fr')).toEqual({ detail: 'standard', language: 'auto' })
     expect(normalizeCommitPreferences('detailed', 'zh')).toEqual({ detail: 'detailed', language: 'zh' })
+    expect(normalizeCommitModelSelection(' deepseek-official ', ' deepseek-flash ')).toEqual({ provider: 'deepseek-official', model: 'deepseek-flash' })
+    expect(normalizeCommitModelSelection('gateway', 'team-coder-v1')).toBeUndefined()
+    expect(normalizeCommitModelSelection('', 'deepseek-chat')).toBeUndefined()
+    expect(normalizeCommitModelSelection('deepseek', null)).toBeUndefined()
+    expect(firstSupportedCommitModel(
+      { provider: 'gateway', model: 'team-coder-v1' },
+      { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+      { provider: 'deepseek-official', model: 'deepseek-flash' },
+    )).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+  })
+
+  it('loads only the models used by the DeepSeek chat picker and preserves their badges', async () => {
+    const requested: string[] = []
+    const catalog = await loadCommitModelCatalog({
+      listProviders: () => [
+        { id: 'deepseek-official', name: 'DeepSeek' },
+        { id: 'gateway', name: '内部网关' },
+      ],
+      async listModels(provider) {
+        requested.push(provider)
+        if (provider === 'deepseek-official') return [
+          { provider, id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', inputModalities: ['text'], badge: { text: '1017', tone: 'info' } },
+          { provider, id: 'image-only', name: 'Image Only', inputModalities: ['image'] },
+        ]
+        return [{ provider, id: 'internal-v1', name: 'Internal V1', description: '团队模型' }]
+      },
+    })
+    expect(catalog.models).toEqual([
+      { provider: 'deepseek-official', model: 'deepseek-flash', id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', providerName: 'DeepSeek', badge: { text: '1017', tone: 'info' } },
+    ])
+    expect(catalog.unavailable).toEqual([])
+    expect(requested).toEqual(['deepseek-official'])
+  })
+
+  it('keeps DSH chat model metadata and its default while excluding other providers', () => {
+    expect(commitCatalogFromDsh({
+      default: { provider: 'deepseek-official', model: 'deepseek-flash' },
+      groups: [
+        {
+          id: 'deepseek-official',
+          name: 'DeepSeek',
+          models: [
+            { id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', badge: { text: { zh: '1017', en: '1017' }, tone: 'info' } },
+            { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro' },
+          ],
+        },
+        { id: 'gateway', name: '团队网关', models: [{ id: 'team-coder-v1', name: 'Team Coder' }] },
+      ],
+      failures: [{ id: 'other', name: '其他来源', message: 'offline' }],
+    })).toEqual({
+      models: [
+        { provider: 'deepseek-official', model: 'deepseek-flash', id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', providerName: 'DeepSeek', badge: { text: '1017', tone: 'info' } },
+        { provider: 'deepseek-official', model: 'deepseek-v4-pro', id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', providerName: 'DeepSeek' },
+      ],
+      unavailable: [],
+      defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' },
+    })
+  })
+
+  it('surfaces an unavailable DeepSeek provider instead of treating it as a removed model', async () => {
+    await expect(loadCommitModelCatalog({
+      listProviders: () => [{ id: 'gateway', name: '团队网关' }],
+      listModels: async () => [],
+    })).resolves.toEqual({
+      models: [],
+      unavailable: [{ provider: 'deepseek-official', providerName: 'DeepSeek', message: 'DSH 没有注册 DeepSeek 聊天模型来源' }],
+    })
+    expect(commitCatalogFromDsh({
+      default: { provider: 'deepseek-official', model: 'deepseek-flash' },
+      groups: [{ id: 'gateway', name: '团队网关', models: [{ id: 'team-coder-v1', name: 'Team Coder' }] }],
+      failures: [],
+    })).toEqual({
+      models: [],
+      unavailable: [{ provider: 'deepseek-official', providerName: 'DeepSeek', message: 'DSH 聊天没有提供 DeepSeek 模型目录' }],
+    })
+  })
+
+  it('reports a timeout from the DeepSeek chat provider', async () => {
+    vi.useFakeTimers()
+    try {
+      const loading = loadCommitModelCatalog({
+        listProviders: () => [
+          { id: 'deepseek-official', name: 'DeepSeek' },
+        ],
+        listModels: () => new Promise(() => {}),
+      })
+      await vi.advanceTimersByTimeAsync(5000)
+      await expect(loading).resolves.toMatchObject({
+        models: [],
+        unavailable: [{ provider: 'deepseek-official', providerName: 'DeepSeek', message: expect.stringContaining('超过 5 秒') }],
+      })
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('does not start provider discovery after the request was already cancelled', async () => {
+    const controller = new AbortController()
+    controller.abort(new Error('页面已关闭'))
+    let listed = false
+    await expect(loadCommitProviderModels({
+      listProviders: () => [{ id: DEEPSEEK_CHAT_PROVIDER_ID, name: 'DeepSeek' }],
+      async listModels() { listed = true; return [] },
+    }, { id: DEEPSEEK_CHAT_PROVIDER_ID, name: 'DeepSeek' }, controller.signal)).rejects.toThrow('页面已关闭')
+    expect(listed).toBe(false)
   })
 
   it('streams text into a commit message and forwards the session model', async () => {

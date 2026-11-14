@@ -1,4 +1,4 @@
-import type { ConfigureCall, GenerateOptions, LlmCallConfig, PreparedLlmCall, StreamChunk } from '@deepseek-ai/dsh-llm'
+import type { ConfigureCall, GenerateOptions, LlmCallConfig, LlmModelBadge, LlmModelBadgeTone, LlmModelInfo, LlmProviderInfo, PreparedLlmCall, StreamChunk } from '@deepseek-ai/dsh-llm'
 
 export interface CommitContext {
   repository: string
@@ -17,6 +17,28 @@ export interface CommitMessageRuntime {
 
 export type CommitDetail = 'concise' | 'standard' | 'detailed'
 export type CommitLanguage = 'auto' | 'zh' | 'en'
+/** The provider used by DSH's own DeepSeek chat model picker. */
+export const DEEPSEEK_CHAT_PROVIDER_ID = 'deepseek-official'
+export interface CommitModelSelection {
+  provider: string
+  model: string
+}
+export interface CommitModelOption extends CommitModelSelection {
+  id: string
+  name: string
+  providerName: string
+  description?: string
+  badge?: {
+    text: string
+    tone: LlmModelBadgeTone
+  }
+}
+export interface CommitModelCatalog {
+  models: CommitModelOption[]
+  unavailable: Array<{ provider: string; providerName: string; message: string }>
+  /** The model currently selected in DSH chat, used until the user overrides it. */
+  defaultModel?: CommitModelSelection
+}
 export interface CommitMessagePreferences {
   detail: CommitDetail
   language: CommitLanguage
@@ -28,6 +50,151 @@ export function normalizeCommitPreferences(detail: unknown, language: unknown): 
   return {
     detail: detail === 'concise' || detail === 'detailed' ? detail : 'standard',
     language: language === 'zh' || language === 'en' ? language : 'auto',
+  }
+}
+
+export function normalizeCommitModelSelection(provider: unknown, model: unknown): CommitModelSelection | undefined {
+  if (typeof provider !== 'string' || provider.trim() === '' || typeof model !== 'string' || model.trim() === '') return undefined
+  const normalizedProvider = provider.trim()
+  if (normalizedProvider !== DEEPSEEK_CHAT_PROVIDER_ID) return undefined
+  return { provider: normalizedProvider, model: model.trim() }
+}
+
+/** Pick the first supported provider/model pair from DSH's selection sources. */
+export function firstSupportedCommitModel(
+  ...candidates: Array<{ provider?: unknown; model?: unknown } | undefined | null>
+): CommitModelSelection | undefined {
+  for (const candidate of candidates) {
+    const selection = normalizeCommitModelSelection(candidate?.provider, candidate?.model)
+    if (selection !== undefined) return selection
+  }
+  return undefined
+}
+
+interface CommitModelCatalogRuntime {
+  listProviders(): LlmProviderInfo[]
+  listModels(provider: string): Promise<LlmModelInfo[]>
+}
+
+/** The subset of DSH's host-generation model catalog needed by commit generation. */
+export interface DshChatModelCatalog {
+  default: CommitModelSelection
+  groups: Array<{
+    id: string
+    name: string
+    models: Array<{ id: string; name: string; description?: string; badge?: LlmModelBadge }>
+  }>
+  failures: Array<{ id: string; name: string; message: string }>
+}
+
+const MODEL_LIST_TIMEOUT_MS = 5000
+
+function modelBadge(model: { badge?: LlmModelBadge }): CommitModelOption['badge'] {
+  if (model.badge === undefined) return undefined
+  const text = typeof model.badge.text === 'string'
+    ? model.badge.text
+    : model.badge.text['zh'] ?? model.badge.text.en
+  return text === undefined || text.trim() === ''
+    ? undefined
+    : { text, tone: model.badge.tone }
+}
+
+/** Adapt DSH's chat picker catalog so both UI choices and meta stay identical to chat. */
+export function commitCatalogFromDsh(source: DshChatModelCatalog): CommitModelCatalog {
+  const provider = source.groups.find(group => group.id === DEEPSEEK_CHAT_PROVIDER_ID)
+  const models = provider?.models.map(model => ({
+    provider: provider.id,
+    model: model.id,
+    id: model.id,
+    name: model.name,
+    providerName: provider.name,
+    ...(model.description === undefined ? {} : { description: model.description }),
+    ...(modelBadge(model) === undefined ? {} : { badge: modelBadge(model) }),
+  })) ?? []
+  const selected = normalizeCommitModelSelection(source.default.provider, source.default.model)
+  const defaultModel = selected !== undefined && models.some(model => model.model === selected.model)
+    ? selected
+    : undefined
+  return {
+    models,
+    unavailable: provider === undefined && !source.failures.some(failure => failure.id === DEEPSEEK_CHAT_PROVIDER_ID)
+      ? [{ provider: DEEPSEEK_CHAT_PROVIDER_ID, providerName: 'DeepSeek', message: 'DSH 聊天没有提供 DeepSeek 模型目录' }]
+      : source.failures
+          .filter(failure => failure.id === DEEPSEEK_CHAT_PROVIDER_ID)
+          .map(failure => ({ provider: failure.id, providerName: failure.name, message: failure.message })),
+    ...(defaultModel === undefined ? {} : { defaultModel }),
+  }
+}
+
+async function listProviderModels(
+  runtime: CommitModelCatalogRuntime,
+  provider: LlmProviderInfo,
+  signal?: AbortSignal,
+): Promise<LlmModelInfo[]> {
+  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error('模型目录读取已取消')
+  let timer: ReturnType<typeof setTimeout> | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`读取“${provider.name}”的模型列表超过 ${MODEL_LIST_TIMEOUT_MS / 1000} 秒`)), MODEL_LIST_TIMEOUT_MS)
+  })
+  let abortListener: (() => void) | undefined
+  const aborted = new Promise<never>((_resolve, reject) => {
+    abortListener = () => reject(signal?.reason instanceof Error ? signal.reason : new Error('模型目录读取已取消'))
+    if (signal?.aborted === true) abortListener()
+    else signal?.addEventListener('abort', abortListener, { once: true })
+  })
+  try {
+    return await Promise.race([runtime.listModels(provider.id), timeout, aborted])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+    if (abortListener !== undefined) signal?.removeEventListener('abort', abortListener)
+  }
+}
+
+/** Load the models a single provider offers for text-based commit generation. */
+export async function loadCommitProviderModels(
+  runtime: CommitModelCatalogRuntime,
+  provider: LlmProviderInfo,
+  signal?: AbortSignal,
+): Promise<CommitModelOption[]> {
+  const models = await listProviderModels(runtime, provider, signal)
+  return models.flatMap(model => model.inputModalities !== undefined && !model.inputModalities.includes('text')
+    ? []
+    : [{
+        provider: provider.id,
+        model: model.id,
+        id: model.id,
+        name: model.name,
+        providerName: provider.name,
+        ...(model.description === undefined ? {} : { description: model.description }),
+        ...(modelBadge(model) === undefined ? {} : { badge: modelBadge(model) }),
+      }])
+}
+
+/**
+ * Load the model catalog used by DSH's DeepSeek chat picker. Other installed
+ * providers are intentionally excluded: commit generation must follow the same
+ * provider and model choices the user sees in chat.
+ */
+export async function loadCommitModelCatalog(runtime: CommitModelCatalogRuntime, signal?: AbortSignal): Promise<CommitModelCatalog> {
+  const provider = runtime.listProviders().find(candidate => candidate.id === DEEPSEEK_CHAT_PROVIDER_ID)
+  if (provider === undefined) {
+    return {
+      models: [],
+      unavailable: [{ provider: DEEPSEEK_CHAT_PROVIDER_ID, providerName: 'DeepSeek', message: 'DSH 没有注册 DeepSeek 聊天模型来源' }],
+    }
+  }
+  try {
+    return { models: await loadCommitProviderModels(runtime, provider, signal), unavailable: [] }
+  } catch (error) {
+    if (signal?.aborted === true) throw error
+    return {
+      models: [],
+      unavailable: [{
+        provider: provider.id,
+        providerName: provider.name,
+        message: error instanceof Error ? error.message : String(error),
+      }],
+    }
   }
 }
 

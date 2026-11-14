@@ -37,4 +37,17 @@ describe('branchErrorMessage', () => {
       message: '请检查远程仓库的登录凭据或 SSH 密钥，然后重试。',
     })
   })
+
+  it('turns missing or unavailable generation models into actionable text', () => {
+    const unavailable = Object.assign(new Error('所选模型当前不可用，请到设置重新选择。'), { code: 'model-unavailable' })
+    expect(gitActionErrorNotice('commitMessage', unavailable)).toEqual({
+      title: '无法生成提交信息',
+      message: '所选模型当前不可用，请到设置重新选择。',
+    })
+    const missing = Object.assign(new Error(''), { code: 'llm-unavailable' })
+    expect(gitActionErrorNotice('commitMessage', missing)).toMatchObject({
+      title: '无法生成提交信息',
+      message: '请到 Workbench 设置的“提交信息”中选择一个可用的 DeepSeek 聊天模型。',
+    })
+  })
 })

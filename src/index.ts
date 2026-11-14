@@ -10,7 +10,7 @@ import chokidar from 'chokidar'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { HostContext } from './context.ts'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
-import { generateCommitMessage, normalizeCommitPreferences } from './commit-message.ts'
+import { DEEPSEEK_CHAT_PROVIDER_ID, commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, type CommitModelSelection, type DshChatModelCatalog } from './commit-message.ts'
 import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitCommitContext, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, searchWorkspace, uploadFile, workspacePreviewFile } from './host.ts'
 import { installLsp, lspStatuses, resolveLsp, uninstallLsp, pipeLanguageServer } from './lsp.ts'
 import { officePdf, officeStatus } from './office.ts'
@@ -36,7 +36,63 @@ function stringArrayField(body: Record<string, unknown>, key: string): string[] 
   return value as string[]
 }
 
+function currentChatCommitModel(ctx: HostContext, sessionId: string | undefined): CommitModelSelection | undefined {
+  try {
+    const session = sessionId === undefined ? undefined : ctx.sessions.get(sessionId)
+    const projections = ctx.get('sessionProjections') as unknown as {
+      stateOf(session: unknown, key: string): { pending?: { provider: string; model: string } | null } | undefined
+    } | undefined
+    const projection = session === undefined ? undefined : projections?.stateOf(session, 'modelSelection')
+    const defaults = ctx.get('agentDefaultModel') as unknown as { currentSelection(): { provider: string; model: string } } | undefined
+    const headerConfig = session?.requestHeader()?.config
+    return firstSupportedCommitModel(projection?.pending, headerConfig, defaults?.currentSelection())
+  } catch {
+    return undefined
+  }
+}
+
+async function loadChatModelCatalog(
+  service: { modelCatalog(): Promise<DshChatModelCatalog> },
+  signal?: AbortSignal,
+): Promise<DshChatModelCatalog> {
+  if (signal?.aborted === true) throw signal.reason instanceof Error ? signal.reason : new Error('模型目录读取已取消')
+  let timer: ReturnType<typeof setTimeout> | undefined
+  let abortListener: (() => void) | undefined
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error('读取 DSH 聊天模型目录超过 5 秒')), 5000)
+  })
+  const aborted = new Promise<never>((_resolve, reject) => {
+    abortListener = () => reject(signal?.reason instanceof Error ? signal.reason : new Error('模型目录读取已取消'))
+    if (signal?.aborted === true) abortListener()
+    else signal?.addEventListener('abort', abortListener, { once: true })
+  })
+  try {
+    return await Promise.race([service.modelCatalog(), timeout, aborted])
+  } finally {
+    if (timer !== undefined) clearTimeout(timer)
+    if (abortListener !== undefined) signal?.removeEventListener('abort', abortListener)
+  }
+}
+
 async function dispatch(ctx: HostContext, method: string, body: Record<string, unknown>, signal?: AbortSignal, site?: WorkspaceSite): Promise<unknown> {
+  if (method === 'commit.models') {
+    const llm: LlmRuntime | undefined = ctx.get('llm')
+    if (llm === undefined) throw new WorkbenchError('llm-unavailable', 'DSH 的模型服务当前不可用。', 503)
+    try {
+      const sessionController = ctx.get('sessionController') as unknown as { modelCatalog(): Promise<DshChatModelCatalog> } | undefined
+      const catalog = sessionController === undefined
+        ? await loadCommitModelCatalog(llm, signal)
+        : commitCatalogFromDsh(await loadChatModelCatalog(sessionController, signal))
+      const sessionId = typeof body.sessionId === 'string' ? body.sessionId : undefined
+      const sessionSelection = currentChatCommitModel(ctx, sessionId)
+      const defaultModel = sessionSelection !== undefined && catalog.models.some(model => model.provider === sessionSelection.provider && model.model === sessionSelection.model)
+        ? sessionSelection
+        : catalog.defaultModel
+      return { ...catalog, ...(defaultModel === undefined ? {} : { defaultModel }) }
+    } catch (error) {
+      throw new WorkbenchError('model-unavailable', error instanceof Error ? error.message : String(error), 503)
+    }
+  }
   const sessionId = stringField(body, 'sessionId'); const cwd = cwdFor(ctx, sessionId)
   switch (method) {
     case 'review.feed': {
@@ -81,15 +137,41 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     case 'git.status': return gitStatus(cwd)
     case 'git.action': return gitAction(cwd, stringField(body, 'action'), typeof body.path === 'string' ? body.path : undefined, typeof body.value === 'string' ? body.value : undefined)
     case 'git.commitMessage': {
-      const session = ctx.sessions.get(sessionId)
-      const config = session?.requestHeader()?.config
-      if (config === undefined) throw new WorkbenchError('model-unavailable', '当前会话还没有模型配置，请先发送一条消息后再生成提交信息。', 409)
+      const hasExplicitSelection = body.provider !== undefined || body.model !== undefined
+      if (hasExplicitSelection && (typeof body.provider !== 'string' || body.provider.trim() !== DEEPSEEK_CHAT_PROVIDER_ID)) {
+        throw new WorkbenchError('model-unavailable', '提交信息只支持 DSH 聊天中使用的 DeepSeek 模型，请到 Workbench 设置重新选择。', 409)
+      }
+      const selection = hasExplicitSelection
+        ? normalizeCommitModelSelection(body.provider, body.model)
+        : currentChatCommitModel(ctx, sessionId)
+      if (selection === undefined) {
+        throw new WorkbenchError('model-unavailable', '无法读取 DSH 聊天当前使用的 DeepSeek 模型，请到 Workbench 设置中选择模型。', 409)
+      }
       const llm: LlmRuntime | undefined = ctx.get('llm')
       if (llm === undefined) throw new WorkbenchError('llm-unavailable', 'DSH 的模型服务当前不可用。', 503)
+      let provider
+      try {
+        provider = llm.listProviders().find(candidate => candidate.id === selection.provider)
+      } catch (error) {
+        throw new WorkbenchError('model-unavailable', `无法读取 DSH 模型来源：${error instanceof Error ? error.message : String(error)}`, 503)
+      }
+      if (provider === undefined) {
+        throw new WorkbenchError('model-unavailable', `所选模型来源“${selection.provider}”当前不可用，请到设置重新选择。`, 409)
+      }
+      let models
+      try {
+        models = await loadCommitProviderModels(llm, provider, signal)
+      } catch (error) {
+        throw new WorkbenchError('model-unavailable', `无法读取“${provider.name}”的模型列表：${error instanceof Error ? error.message : String(error)}`, 503)
+      }
+      const selected = models.find(model => model.model === selection.model)
+      if (selected === undefined) {
+        throw new WorkbenchError('model-unavailable', `所选模型“${selection.model}”当前不可用，请到设置重新选择。`, 409)
+      }
       const context = await gitCommitContext(cwd)
       const preferences = normalizeCommitPreferences(body.detail, body.language)
       try {
-        return { message: await generateCommitMessage(llm, config, context, signal, preferences) }
+        return { message: await generateCommitMessage(llm, { provider: selected.provider, model: selected.model }, context, signal, preferences) }
       } catch (error) {
         if (error instanceof WorkbenchError) throw error
         throw new WorkbenchError('llm-failed', error instanceof Error ? error.message : String(error), 502)

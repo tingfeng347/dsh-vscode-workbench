@@ -53,6 +53,12 @@ export function noStagedCommitNotice(hasUnstagedChanges: boolean): GitActionNoti
 export function gitActionErrorNotice(action: string, error: unknown, hasUnstagedChanges = true): GitActionNotice {
   const raw = errorText(error)
   const code = typeof error === 'object' && error !== null && 'code' in error ? String(error.code) : ''
+  if (code === 'model-unavailable' || code === 'llm-unavailable') {
+    return {
+      title: '无法生成提交信息',
+      message: raw || '请到 Workbench 设置的“提交信息”中选择一个可用的 DeepSeek 聊天模型。',
+    }
+  }
   if (action === 'commit' && (code === 'no-staged-changes' || /nothing added to commit|no changes added to commit|nothing to commit/iu.test(raw))) {
     return noStagedCommitNotice(hasUnstagedChanges)
   }

@@ -53,10 +53,51 @@ describe('Harness 0.2 host integration', () => {
     const original = resolve('original')
     const changed = resolve('changed')
     let directory = original
-    const session = { header: { cwd: original } } as Session
+    const session = {
+      header: { cwd: original },
+      requestHeader: () => ({ config: { provider: 'deepseek-official', model: 'deepseek-flash' } }),
+    } as unknown as Session
+    const llm = {
+      listProviders: () => [{ id: 'deepseek-official', name: 'DeepSeek' }, { id: 'gateway', name: '团队网关' }],
+      listModels: async (provider: string) => provider === 'deepseek-official'
+        ? [{ provider, id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash' }]
+        : [{ provider, id: 'team-coder-v1', name: 'Team Coder' }],
+    }
+    const sessionController = {
+      modelCatalog: async () => ({
+        default: { provider: 'deepseek-official', model: 'deepseek-flash' },
+        groups: [
+          {
+            id: 'deepseek-official',
+            name: 'DeepSeek',
+            models: [
+              { id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', badge: { text: { zh: '1017', en: '1017' }, tone: 'info' } },
+              { id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro' },
+            ],
+          },
+          { id: 'gateway', name: '团队网关', models: [{ id: 'team-coder-v1', name: 'Team Coder' }] },
+        ],
+        failures: [],
+      }),
+    }
+    const sessionProjections = {
+      stateOf: () => ({ pending: { provider: 'deepseek-official', model: 'deepseek-v4-pro' } }),
+    }
+    const agentDefaultModel = {
+      currentSelection: () => ({ provider: 'deepseek-official', model: 'deepseek-flash' }),
+    }
     const effects: Array<() => void> = []
     const ctx = {
       connection,
+      get: (name: string) => name === 'llm'
+        ? llm
+        : name === 'sessionController'
+          ? sessionController
+          : name === 'sessionProjections'
+            ? sessionProjections
+            : name === 'agentDefaultModel'
+              ? agentDefaultModel
+              : undefined,
       sessions: { get: (id: string) => id === 'main' ? session : undefined },
       workingDirectory: { get: () => directory },
       webServer: {
@@ -91,6 +132,19 @@ describe('Harness 0.2 host integration', () => {
     const cookie = login.headers.get('set-cookie')?.split(';')[0]
     expect(cookie).toBeTruthy()
     const headers = { cookie: cookie!, 'content-type': 'application/json' }
+    const modelCatalog = await fetch(`${base}/dsh-vscode/api/commit.models`, {
+      method: 'POST', headers, body: JSON.stringify({ sessionId: 'main' }),
+    })
+    expect(await modelCatalog.json()).toMatchObject({
+      value: {
+        models: [
+          { provider: 'deepseek-official', model: 'deepseek-flash', providerName: 'DeepSeek', badge: { text: '1017', tone: 'info' } },
+          { provider: 'deepseek-official', model: 'deepseek-v4-pro', providerName: 'DeepSeek' },
+        ],
+        unavailable: [],
+        defaultModel: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
+      },
+    })
     const workspace = (id = 'main') => fetch(`${base}/dsh-vscode/api/workspace`, { method: 'POST', headers, body: JSON.stringify({ sessionId: id }) })
     expect(await (await workspace()).json()).toMatchObject({ value: { cwd: original } })
     directory = changed

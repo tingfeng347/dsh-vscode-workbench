@@ -32,7 +32,7 @@ describe('workbench settings section', () => {
     const styles = read('src/client/styles.ts')
     expect(panel).toContain('className="dvw-set-selector"')
     expect(panel).toContain('className="dvw-set-button"')
-    expect(styles).toContain('.dvw-set-selector{border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-module-platform')
+    expect(styles).toContain('.dvw-set-selector{max-width:min(420px,40vw);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-module-platform')
     expect(styles).toContain('.dvw-set-button{height:36px;padding:0 14px;border:0;border-radius:var(--dsw-radius-md,12px)')
   })
 

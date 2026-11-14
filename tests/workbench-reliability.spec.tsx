@@ -84,7 +84,20 @@ async function mount(service = new WorkbenchController(), visible = true, dshPan
   await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" dshPanelId={dshPanelId} onOpenDshPanel={handlers.open} onRestoreConversation={handlers.restore}/>) })
   return service
 }
-async function setup(binary = false, saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' }, changes: typeof reviewChanges = [], gitChanges: GitChange[] = []) {
+type FakeModelCatalog = {
+  models: Array<{ provider: string; model: string; id: string; name: string; providerName: string; badge?: { text: string; tone: 'neutral' | 'info' | 'success' | 'warning' } }>
+  unavailable: Array<{ provider: string; providerName: string; message: string }>
+  defaultModel?: { provider: string; model: string }
+}
+const defaultModelCatalog: FakeModelCatalog = {
+  models: [
+    { provider: 'deepseek-official', model: 'deepseek-pro', id: 'deepseek-pro', name: 'DeepSeek-V4-Pro', providerName: 'DeepSeek' },
+    { provider: 'deepseek-official', model: 'deepseek-flash', id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', providerName: 'DeepSeek', badge: { text: '1017', tone: 'info' } },
+  ],
+  unavailable: [],
+  defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' },
+}
+async function setup(binary = false, saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' }, changes: typeof reviewChanges = [], gitChanges: GitChange[] = [], modelCatalog: FakeModelCatalog = defaultModelCatalog) {
   disk = 'disk'; revision = 'r1'; completeSave = undefined; state.editor = undefined
   projectSource = 'export const a = 1'; projectReads = 0; reviewChanges = changes
   localStorage.setItem('dvw:/tmp/audit', JSON.stringify(saved))
@@ -98,6 +111,8 @@ async function setup(binary = false, saved: Record<string, unknown> = { paths: [
     else if (method === 'fs.list') value = []
     else if (method === 'git.status') value = { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
     else if (method === 'git.action') value = body.action === 'log' ? [] : { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
+    else if (method === 'commit.models') value = modelCatalog
+    else if (method === 'git.commitMessage') value = { message: 'feat(git): generate the message directly' }
     else if (method === 'fs.read') value = doc()
     else if (method === 'project.sources') { projectReads++; value = { files: [{ path: 'a.ts', content: projectSource }], truncated: false } }
     else if (method === 'review.feed') value = { cursor: 9, changes: reviewChanges, busy: false }
@@ -241,6 +256,69 @@ it('shows an empty staged commit as a centered recovery dialog and can stage eve
     expect(actions).toContain('stage.all')
     expect(actions).toContain('commit')
   })
+})
+
+it('lets the host resolve the current chat model until the user configures one', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: ['a.txt'], active: 'a.txt' }, [], [{
+    path: 'a.txt', index: '?', worktree: '?', staged: false, untracked: true,
+  }])
+  const generate = await vi.waitFor(() => {
+    const button = document.querySelector<HTMLButtonElement>('.dvw-commit-ai')
+    expect(button).not.toBeNull()
+    expect(button!.disabled).toBe(false)
+    return button!
+  })
+  await act(async () => generate.click())
+  await vi.waitFor(() => {
+    const request = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/git.commitMessage'))
+    expect(request).toBeDefined()
+    const body = JSON.parse(String(request![1]?.body)) as Record<string, unknown>
+    expect(body).toMatchObject({
+      sessionId: 's',
+      detail: 'standard',
+      language: 'auto',
+    })
+    expect(body).not.toHaveProperty('provider')
+    expect(body).not.toHaveProperty('model')
+  })
+  expect(document.querySelector<HTMLTextAreaElement>('.dvw-commit-input')?.value).toBe('feat(git): generate the message directly')
+  expect(localStorage.getItem('dvw:commit-model')).toBeNull()
+})
+
+it('uses an explicitly configured commit model instead of the active chat model', async () => {
+  localStorage.setItem('dvw:commit-model', JSON.stringify({ provider: 'deepseek-official', model: 'deepseek-pro' }))
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: ['a.txt'], active: 'a.txt' }, [], [{
+    path: 'a.txt', index: '?', worktree: '?', staged: false, untracked: true,
+  }])
+  const generate = await vi.waitFor(() => {
+    const button = document.querySelector<HTMLButtonElement>('.dvw-commit-ai')
+    expect(button?.disabled).toBe(false)
+    return button!
+  })
+  await act(async () => generate.click())
+  await vi.waitFor(() => {
+    const request = vi.mocked(fetch).mock.calls.find(([url]) => String(url).endsWith('/git.commitMessage'))
+    expect(JSON.parse(String(request![1]?.body))).toMatchObject({
+      provider: 'deepseek-official',
+      model: 'deepseek-pro',
+    })
+  })
+})
+
+it('keeps a saved generation model when its provider is temporarily unavailable', async () => {
+  const saved = { provider: 'deepseek-official', model: 'deepseek-pro' }
+  localStorage.setItem('dvw:commit-model', JSON.stringify(saved))
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: ['a.txt'], active: 'a.txt' }, [], [], {
+    models: [],
+    unavailable: [{ provider: 'deepseek-official', providerName: 'DeepSeek', message: '连接超时' }],
+  })
+  await vi.waitFor(() => expect(vi.mocked(fetch).mock.calls.some(([url]) => String(url).endsWith('/commit.models'))).toBe(true))
+  await vi.waitFor(() => expect(document.querySelector<HTMLButtonElement>('.dvw-commit-ai')?.disabled).toBe(true))
+  expect(JSON.parse(localStorage.getItem('dvw:commit-model')!)).toEqual(saved)
+  expect(document.querySelector<HTMLButtonElement>('.dvw-commit-ai')?.title).toContain('当前不可用')
 })
 
 it('keeps edits entered while a save is pending and saves them on the next request', async () => {

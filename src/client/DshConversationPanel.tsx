@@ -115,19 +115,22 @@ export function DshReviewActions(props: {
   }, [props.visible, props.files.length])
   if (host === undefined) return null
   return createPortal(
-    <section className="dvw-review-composer" aria-label="AI 改动审阅">
+    <section className="dvw-review-composer" aria-label="AI 改动审阅" aria-busy={props.disabled}>
       <div className="dvw-review-composer-summary">
-        <strong>{props.files.length} 个文件</strong>
-        <span>{props.count} 处 AI 改动待审阅</span>
+        <span className="dvw-review-composer-status" aria-hidden="true"/>
+        <div className="dvw-review-composer-heading">
+          <strong>AI 改动待审阅</strong>
+          <span>{props.files.length} 个文件 · {props.count} 处改动</span>
+        </div>
+        <div className="dvw-review-composer-actions">
+          <button type="button" data-action="reject" disabled={props.disabled} onClick={props.onRejectAll}>全部拒绝</button>
+          <button type="button" data-action="accept" disabled={props.disabled} onClick={props.onAcceptAll}>全部接受</button>
+        </div>
       </div>
-      <div className="dvw-review-composer-files">
+      <div className="dvw-review-composer-files" aria-label="待审阅文件">
         {props.files.map(file => <button type="button" key={file.path} title={file.path} onClick={() => props.onOpen(file.path)}>
           <span>{file.path}</span><b>{file.count}</b>
         </button>)}
-      </div>
-      <div className="dvw-review-composer-actions">
-        <button type="button" data-action="reject" disabled={props.disabled} onClick={props.onRejectAll}>全部拒绝</button>
-        <button type="button" data-action="accept" disabled={props.disabled} onClick={props.onAcceptAll}>全部接受</button>
       </div>
     </section>,
     host,

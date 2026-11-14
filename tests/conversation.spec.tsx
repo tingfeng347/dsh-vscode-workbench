@@ -65,12 +65,17 @@ it('puts project review actions immediately above the DSH composer', async () =>
   const stack = document.getElementById('composer-stack')!
   expect(stack.firstElementChild?.className).toBe('dvw-review-composer-host')
   expect(stack.textContent).toContain('1 个文件')
-  expect(stack.textContent).toContain('2 处 AI 改动待审阅')
-  const buttons = [...stack.querySelectorAll<HTMLButtonElement>('button')]
-  expect(buttons.map(button => button.textContent?.trim())).toEqual(['src/a.ts2', '全部拒绝', '全部接受'])
-  await act(async () => buttons[0]!.click())
-  await act(async () => buttons[1]!.click())
-  await act(async () => buttons[2]!.click())
+  expect(stack.textContent).toContain('2 处改动')
+  const fileButton = stack.querySelector<HTMLButtonElement>('.dvw-review-composer-files button')!
+  const rejectButton = stack.querySelector<HTMLButtonElement>('[data-action=reject]')!
+  const acceptButton = stack.querySelector<HTMLButtonElement>('[data-action=accept]')!
+  expect(fileButton.textContent?.trim()).toBe('src/a.ts2')
+  expect(rejectButton.textContent?.trim()).toBe('全部拒绝')
+  expect(acceptButton.textContent?.trim()).toBe('全部接受')
+  expect(stack.querySelector('.dvw-review-composer')?.getAttribute('aria-busy')).toBeNull()
+  await act(async () => fileButton.click())
+  await act(async () => rejectButton.click())
+  await act(async () => acceptButton.click())
   expect(open).toHaveBeenCalledWith('src/a.ts')
   expect(reject).toHaveBeenCalledTimes(1)
   expect(accept).toHaveBeenCalledTimes(1)

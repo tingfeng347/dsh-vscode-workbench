@@ -194,6 +194,9 @@ function useDshDarkTheme(): boolean {
 /** Workspace-relative directory that would contain `path`. */
 export function parentPath(path: string): string { return path.split('/').slice(0, -1).join('/') }
 
+/** Keep an in-flight tab read scoped to the pane that requested it. */
+function tabLoadKey(groupId: string, path: string): string { return `${groupId}\0${path}` }
+
 /** Absolute path for an Explorer entry, matching the separator the workspace root already uses. */
 export function absoluteEntryPath(root: string, path: string): string {
   const base = root.replace(/[\\/]+$/, '')
@@ -831,14 +834,15 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const epoch = workspaceRequests.current.current()
     // The read may finish after the user moved to another pane; keep writing to the pane that asked.
     const token = Symbol(path)
-    loadingTabs.current.set(path, token)
-    const current = () => workspaceRequests.current.isCurrent(epoch) && loadingTabs.current.get(path) === token
+    const key = tabLoadKey(groupId, path)
+    loadingTabs.current.set(key, token)
+    const current = () => workspaceRequests.current.isCurrent(epoch) && loadingTabs.current.get(key) === token
     const documentPreview = documentPreviewKind(path)
     const image = /\.(?:avif|bmp|gif|ico|jpe?g|png|svg|webp)$/i.test(path)
     if (documentPreview !== undefined || image) {
       const url = `/dsh-vscode/file?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(path)}&v=${Date.now()}`
       setTabsIn(groupId, rows => rows.map(row => row.path === path ? { ...row, loaded: true, ...(image ? { imageUrl: url } : { documentPreview, documentUrl: url }) } : row))
-      loadingTabs.current.delete(path); return
+      loadingTabs.current.delete(key); return
     }
     void api<FileDocument>('fs.read', { sessionId, path }).then(doc => {
       if (!current()) return
@@ -849,7 +853,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
         ? { ...row, external: row.revision !== doc.revision }
         : { ...row, ...doc, draft: doc.content, loaded: true, external: false }))
     }).catch(error => { if (current()) setError(String(error)) })
-      .finally(() => { if (current()) loadingTabs.current.delete(path) })
+      .finally(() => { if (current()) loadingTabs.current.delete(key) })
   }, [sessionId])
   useEffect(() => {
     if (!snapshot.visible || sessionId === undefined || workspace === undefined) return
@@ -876,7 +880,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     if (!snapshot.visible || sessionId === undefined || workspace === undefined) return
     for (const group of groups) {
       const tab = group.tabs.find(row => row.path === group.active)
-      if (tab?.loaded === false && !loadingTabs.current.has(tab.path)) loadTab(tab.path, group.id)
+      if (tab?.loaded === false && !loadingTabs.current.has(tabLoadKey(group.id, tab.path))) loadTab(tab.path, group.id)
     }
   }, [snapshot.visible, sessionId, workspace, groups, loadTab])
   useEffect(() => {
@@ -949,22 +953,19 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     // Not installed: never load Monaco just for this, only release an index a previous install built.
     if(!tsIntellisense){if(window.monaco!==undefined)disposeTypeScriptProject(window.monaco);setTsIndex({state:'idle'});return}
     const existing=typeScriptProjectStatus(cwd)
-    if(existing!==undefined){
-      setTsIndex(current=>current.state==='ready'&&current.files===existing.files&&current.truncated===existing.truncated?current:{state:'ready',...existing})
-      if(!snapshot.visible)return
-      const changed=(event:Event)=>{const paths=(event as CustomEvent<string[]|undefined>).detail;if(Array.isArray(paths)&&window.monaco!==undefined)void refreshIndexedFiles(window.monaco,sessionId,cwd,paths)}
-      window.addEventListener('dvw-files-changed',changed);return()=>window.removeEventListener('dvw-files-changed',changed)
-    }
+    if(existing!==undefined)setTsIndex(current=>current.state==='ready'&&current.files===existing.files&&current.truncated===existing.truncated?current:{state:'ready',...existing})
     if(!snapshot.visible)return
     let cancelled=false
     let changed: ((event: Event) => void) | undefined
-    void loadMonaco().then(monaco=>{
+    const start=(monaco:Awaited<ReturnType<typeof loadMonaco>>)=>{
       if(cancelled)return
-      setTsIndex({state:'loading'})
+      if(existing===undefined)setTsIndex({state:'loading'})
       changed=(event:Event)=>{const paths=(event as CustomEvent<string[]|undefined>).detail;if(Array.isArray(paths))void refreshIndexedFiles(monaco,sessionId,cwd,paths)}
       window.addEventListener('dvw-files-changed',changed)
       void indexTypeScriptProject(monaco,sessionId,cwd).then(result=>{if(!cancelled)setTsIndex({state:'ready',...result})}).catch(error=>{if(!cancelled)setTsIndex({state:'error',error:error instanceof Error?error.message:String(error)})})
-    }).catch(error => { if (!cancelled) setTsIndex({state:"error",error:String(error)}) })
+    }
+    if(window.monaco!==undefined)start(window.monaco)
+    else void loadMonaco().then(start).catch(error => { if (!cancelled) setTsIndex({state:"error",error:String(error)}) })
     return()=>{cancelled=true;if(changed!==undefined)window.removeEventListener('dvw-files-changed',changed)}
   },[snapshot.visible,sessionId,workspace,tsIntellisense])
   useEffect(()=>()=>{if(window.monaco!==undefined)disposeTypeScriptProject(window.monaco)},[])
@@ -972,23 +973,27 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     if(isPreviewDocumentPath(source)&&!path.startsWith('commit:')){openPath(source);return}const binary=isBinaryDiffPath(source);setTabs(rows=>[...rows.filter(row=>row.path!==key),{path:key,title,content:diff.diff,draft:diff.diff,revision:'',size:diff.diff.length,binary,tooLarge:false,dirty:false,diff:binary?undefined:diff,diffMode:'inline',diffSourcePath:source}]);leaveDshPanel();setActive(key)},[openPath,leaveDshPanel])
   useEffect(()=>{const listener=(event:Event)=>void open((event as CustomEvent<string>).detail);window.addEventListener('dvw-open-workspace-path',listener);return()=>window.removeEventListener('dvw-open-workspace-path',listener)},[sessionId,tabs])
   const savingTabs = useRef(new Set<string>())
+  const cancelTabLoads = useCallback((path: string) => {
+    const suffix = `\0${path}`
+    for (const key of loadingTabs.current.keys()) if (key.endsWith(suffix)) loadingTabs.current.delete(key)
+  },[])
   const save = async (tab: Tab) => {
     if (sessionId === undefined || !tab.dirty || savingTabs.current.has(tab.path)) return
     const epoch = workspaceRequests.current.current()
     const groupId = focusedRef.current
     savingTabs.current.add(tab.path)
-    loadingTabs.current.delete(tab.path)
+    cancelTabLoads(tab.path)
     try {
       const doc = await api<FileDocument>('fs.save', { sessionId, path: tab.path, content: tab.draft, revision: tab.revision })
       if (!workspaceRequests.current.isCurrent(epoch)) return
-      loadingTabs.current.delete(tab.path)
+      cancelTabLoads(tab.path)
       setTabsIn(groupId, rows => rows.map(row => row.path === tab.path && row.instance === tab.instance ? { ...row, ...doc, draft: row.draft, dirty: row.draft !== doc.content, external: false } : row))
     } catch (error) { if (workspaceRequests.current.isCurrent(epoch)) setError(String(error)) }
     finally { savingTabs.current.delete(tab.path) }
   }
-  const close=(tab:Tab)=>{if(tab.dirty&&!confirm(`${tab.path} 有未保存更改，确定关闭？`))return;loadingTabs.current.delete(tab.path);setTabs(rows=>rows.filter(row=>row.path!==tab.path));if(active===tab.path)setActive(tabs.filter(row=>row.path!==tab.path).at(-1)?.path)}
+  const close=(tab:Tab)=>{if(tab.dirty&&!confirm(`${tab.path} 有未保存更改，确定关闭？`))return;loadingTabs.current.delete(tabLoadKey(focusedRef.current,tab.path));setTabs(rows=>rows.filter(row=>row.path!==tab.path));if(active===tab.path)setActive(tabs.filter(row=>row.path!==tab.path).at(-1)?.path)}
   const closeAll=()=>{const dirty=tabs.filter(tab=>tab.dirty);if(dirty.length>0&&!confirm(`有 ${dirty.length} 个文件包含未保存更改，确定全部关闭？`))return;loadingTabs.current.clear();setTabs([]);setActive(undefined);setError(undefined);setTabMenu(undefined)}
-  const removeTabs=(targets:Tab[],verb:string)=>{if(targets.length===0)return;const dirty=targets.filter(tab=>tab.dirty).length;if(dirty>0&&!confirm(`有 ${dirty} 个文件包含未保存更改，确定${verb}？`))return;const paths=new Set(targets.map(tab=>tab.path));for(const path of paths)loadingTabs.current.delete(path);const remaining=tabsRef.current.filter(tab=>!paths.has(tab.path));setTabs(remaining);if(active!==undefined&&paths.has(active))setActive(remaining.at(-1)?.path);setTabMenu(undefined)}
+  const removeTabs=(targets:Tab[],verb:string)=>{if(targets.length===0)return;const dirty=targets.filter(tab=>tab.dirty).length;if(dirty>0&&!confirm(`有 ${dirty} 个文件包含未保存更改，确定${verb}？`))return;const paths=new Set(targets.map(tab=>tab.path));for(const path of paths)loadingTabs.current.delete(tabLoadKey(focusedRef.current,path));const remaining=tabsRef.current.filter(tab=>!paths.has(tab.path));setTabs(remaining);if(active!==undefined&&paths.has(active))setActive(remaining.at(-1)?.path);setTabMenu(undefined)}
   const activeTab=tabs.find(tab=>tab.path===active); const Panel=panels.find(panel=>panel.id===snapshot.bottomPanel)?.component; const terminalAvailable=panels.some(panel=>panel.id==='terminal')
   const menuTab=tabMenu===undefined?undefined:tabs.find(tab=>tab.path===tabMenu.path); const menuIndex=menuTab===undefined?-1:tabs.findIndex(tab=>tab.path===menuTab.path); const savedTabs=tabs.filter(tab=>!tab.dirty)
   const selectView=(view:WorkbenchView)=>{if(snapshot.view===view&&primarySideVisible){setPrimarySideVisible(false);return}setPrimarySideVisible(true);service.show(view)}
@@ -1177,7 +1182,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const group = groups.find(row => row.id === groupId)
     if (group === undefined) return
     if (tab.dirty && !confirm(`${tab.path} 有未保存更改，确定关闭？`)) return
-    loadingTabs.current.delete(tab.path)
+    loadingTabs.current.delete(tabLoadKey(groupId,tab.path))
     const rest = group.tabs.filter(row => row.path !== tab.path)
     if (rest.length === 0 && groups.length > 1) {
       const remaining = groups.filter(row => row.id !== groupId)

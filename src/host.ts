@@ -366,7 +366,14 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
       if (clean.code !== 0) throw new WorkbenchError('git-failed', clean.stderr || clean.stdout, 409)
       return gitStatus(cwd)
     }
-    case 'commit': args = ['commit', '-m', value ?? '']; break
+    case 'commit': {
+      const status = await gitStatus(cwd)
+      if (!status.changes.some(change => change.index !== '.' && change.index !== '?')) {
+        throw new WorkbenchError('no-staged-changes', '没有已暂存的更改。请先暂存要提交的文件。', 409)
+      }
+      args = ['commit', '-m', value ?? '']
+      break
+    }
     case 'commit.amend': args = ['commit', '--amend', '-m', value ?? '']; break
     case 'push': {
       let pushed = await run('git', ['push'], repository)

@@ -6,6 +6,7 @@ import { Workbench } from '../src/client/Workbench.tsx'
 import type { MonacoEditor } from '../src/client/MonacoEditor.tsx'
 import { WorkbenchController } from '../src/client/service.ts'
 import { disposeTypeScriptProject } from '../src/client/typescriptProject.ts'
+import type { GitChange } from '../src/types.ts'
 
 type EditorProps = Parameters<typeof MonacoEditor>[0]
 const state = vi.hoisted(() => {
@@ -43,6 +44,7 @@ const state = vi.hoisted(() => {
 vi.mock('../src/client/MonacoEditor.tsx', () => ({
   MonacoEditor: (props: EditorProps) => { state.editor = props; return null },
   MonacoDiffEditor: () => null, preloadMonaco: () => {}, retainEditorModels: () => {},
+  isMacPlatform: () => false,
   loadMonaco: () => Promise.resolve(state.monaco),
 }))
 vi.mock('../src/client/DshConversationPanel.tsx', () => ({ DshConversationPanel: () => null, DshConversationTheme: () => null, DshReviewActions: () => null }))
@@ -82,7 +84,7 @@ async function mount(service = new WorkbenchController(), visible = true, dshPan
   await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" dshPanelId={dshPanelId} onOpenDshPanel={handlers.open} onRestoreConversation={handlers.restore}/>) })
   return service
 }
-async function setup(binary = false, saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' }, changes: typeof reviewChanges = []) {
+async function setup(binary = false, saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' }, changes: typeof reviewChanges = [], gitChanges: GitChange[] = []) {
   disk = 'disk'; revision = 'r1'; completeSave = undefined; state.editor = undefined
   projectSource = 'export const a = 1'; projectReads = 0; reviewChanges = changes
   localStorage.setItem('dvw:/tmp/audit', JSON.stringify(saved))
@@ -94,7 +96,8 @@ async function setup(binary = false, saved: Record<string, unknown> = { paths: [
     let value: unknown
     if (method === 'workspace') value = { cwd: '/tmp/audit', name: 'audit' }
     else if (method === 'fs.list') value = []
-    else if (method === 'git.status') value = { changes: [] }
+    else if (method === 'git.status') value = { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
+    else if (method === 'git.action') value = body.action === 'log' ? [] : { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
     else if (method === 'fs.read') value = doc()
     else if (method === 'project.sources') { projectReads++; value = { files: [{ path: 'a.ts', content: projectSource }], truncated: false } }
     else if (method === 'review.feed') value = { cursor: 9, changes: reviewChanges, busy: false }
@@ -200,6 +203,44 @@ it('uses the file review bar to accept or reject every block in the active file'
   expect(buttons[1]!.title).toContain('Ctrl+Backspace')
   await act(async () => buttons[0]!.click())
   expect(document.querySelector('.dvw-review-filebar')).toBeNull()
+})
+
+it('shows an empty staged commit as a centered recovery dialog and can stage everything', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: ['a.txt'], active: 'a.txt' }, [], [{
+    path: 'a.txt', index: '?', worktree: '?', staged: false, untracked: true,
+  }])
+  const input = await vi.waitFor(() => {
+    const value = document.querySelector<HTMLTextAreaElement>('.dvw-commit-input')
+    expect(value).not.toBeNull()
+    return value!
+  })
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(input, 'initial commit')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () => document.querySelector<HTMLButtonElement>('.dvw-commit-button')!.click())
+  const dialog = await vi.waitFor(() => {
+    const value = document.querySelector<HTMLElement>('.dvw-git-error-dialog')
+    expect(value).not.toBeNull()
+    return value!
+  })
+  expect(document.querySelector('.dvw-side .dvw-git-error-dialog')).toBeNull()
+  expect(dialog.parentElement?.classList.contains('dvw-git-dialog-layer')).toBe(true)
+  expect(dialog.textContent).toContain('没有已暂存的更改')
+  expect(dialog.textContent).toContain('暂存全部并提交')
+  const requestsBefore = vi.mocked(fetch).mock.calls
+    .map(([, options]) => JSON.parse(String(options?.body)) as { action?: string })
+    .map(body => body.action)
+  expect(requestsBefore).not.toContain('commit')
+  await act(async () => [...dialog.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent === '暂存全部并提交')!.click())
+  await vi.waitFor(() => {
+    const actions = vi.mocked(fetch).mock.calls
+      .map(([, options]) => JSON.parse(String(options?.body)) as { action?: string })
+      .map(body => body.action)
+    expect(actions).toContain('stage.all')
+    expect(actions).toContain('commit')
+  })
 })
 
 it('keeps edits entered while a save is pending and saves them on the next request', async () => {

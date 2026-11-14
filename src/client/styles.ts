@@ -247,13 +247,21 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-review-composer-actions button:active:not(:disabled){transform:translateY(1px)}
 .dvw-review-composer-actions button:disabled{opacity:.42;cursor:default}
 .dvw-review-composer :is(button):focus-visible{outline:2px solid color-mix(in srgb,var(--dvw-accent) 72%,transparent);outline-offset:2px}
+.dvw-review-composer-file-strip{position:relative;min-width:0}
 .dvw-review-composer-files{display:flex;gap:5px;overflow-x:auto;overscroll-behavior-inline:contain;padding:7px 11px 8px;scroll-snap-type:x proximity;scrollbar-width:none;-webkit-mask-image:linear-gradient(to right,#000 0,#000 calc(100% - 22px),transparent 100%);mask-image:linear-gradient(to right,#000 0,#000 calc(100% - 22px),transparent 100%)}
+.dvw-review-composer-file-strip[data-scroll-left] .dvw-review-composer-files{padding-left:38px}
+.dvw-review-composer-file-strip[data-scroll-right] .dvw-review-composer-files{padding-right:38px}
 .dvw-review-composer-files::-webkit-scrollbar{display:none}
 .dvw-review-composer-files button{flex:none;display:flex;align-items:center;gap:7px;max-width:220px;height:29px;padding:0 5px 0 9px;border:1px solid color-mix(in srgb,var(--dvw-border) 72%,transparent);border-radius:8px;background:color-mix(in srgb,var(--dvw-surface-2) 58%,var(--dvw-surface-1));color:var(--dvw-text-2);font:inherit;cursor:pointer;scroll-snap-align:start;transition:background-color 120ms ease,border-color 120ms ease,color 120ms ease}
 .dvw-review-composer-files button:hover{border-color:color-mix(in srgb,var(--dvw-accent) 34%,var(--dvw-border));background:color-mix(in srgb,var(--dvw-accent) 8%,var(--dvw-surface-2));color:var(--dvw-text)}
 .dvw-review-composer-files button:active{background:color-mix(in srgb,var(--dvw-accent) 13%,var(--dvw-surface-2))}
 .dvw-review-composer-files span{min-width:0;overflow:hidden;font-size:11px;text-overflow:ellipsis;white-space:nowrap}
 .dvw-review-composer-files b{min-width:19px;height:19px;display:grid;place-items:center;padding:0 4px;border-radius:6px;background:color-mix(in srgb,var(--dvw-accent) 11%,transparent);color:var(--dvw-accent);font-size:10px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1}
+.dvw-review-composer-files:focus-visible{outline:2px solid color-mix(in srgb,var(--dvw-accent) 72%,transparent);outline-offset:-2px}
+.dvw-review-composer-scroll{position:absolute;z-index:2;top:50%;width:25px;height:29px;display:grid;place-items:center;padding:0;border:1px solid color-mix(in srgb,var(--dvw-border) 78%,transparent);border-radius:8px;background:color-mix(in srgb,var(--dvw-surface-1) 92%,transparent);color:var(--dvw-text-2);box-shadow:0 2px 8px rgba(15,23,42,.12);font:600 18px/1 var(--dsw-font-family,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);cursor:pointer;transform:translateY(-50%)}
+.dvw-review-composer-scroll[data-direction=previous]{left:7px}
+.dvw-review-composer-scroll[data-direction=next]{right:7px}
+.dvw-review-composer-scroll:hover{border-color:color-mix(in srgb,var(--dvw-accent) 42%,var(--dvw-border));background:var(--dvw-surface-2);color:var(--dvw-text)}
 @media(max-width:520px){.dvw-review-composer{margin-inline:7px}.dvw-review-composer-summary{gap:7px;padding-inline:9px 7px}.dvw-review-composer-status{width:24px;height:24px}.dvw-review-composer-actions button{height:27px;padding-inline:8px}.dvw-review-composer-heading strong{font-size:12px}}
 @media(prefers-reduced-motion:reduce){.dvw-review-composer :is(button){transition:none}.dvw-review-composer-actions button:active:not(:disabled){transform:none}}
 .dvw-editor .lines-content>.view-zones{z-index:2}

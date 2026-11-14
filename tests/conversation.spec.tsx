@@ -82,3 +82,27 @@ it('puts project review actions immediately above the DSH composer', async () =>
   await act(async () => root.unmount())
   expect(document.querySelector('.dvw-review-composer-host')).toBeNull()
 })
+
+it('keeps overflowed project files reachable with visible scroll controls', async () => {
+  document.body.innerHTML = '<div id="composer-stack"><div data-slot="conversation.composer.bar"></div></div><div id="plugin"></div>'
+  const root = createRoot(document.getElementById('plugin')!)
+  const files = Array.from({ length: 8 }, (_, index) => ({ path: `src/review/file-${index}.ts`, count: 1 }))
+  await act(async () => {
+    root.render(<DshReviewActions visible files={files} count={files.length} onOpen={() => undefined} onAcceptAll={() => undefined} onRejectAll={() => undefined}/>)
+  })
+
+  const list = document.querySelector<HTMLElement>('.dvw-review-composer-files')!
+  Object.defineProperty(list, 'clientWidth', { configurable: true, value: 220 })
+  Object.defineProperty(list, 'scrollWidth', { configurable: true, value: 720 })
+  await act(async () => list.dispatchEvent(new Event('scroll')))
+
+  const next = await vi.waitFor(() => {
+    const button = document.querySelector<HTMLButtonElement>('.dvw-review-composer-scroll[data-direction=next]')
+    expect(button).not.toBeNull()
+    return button!
+  })
+  await act(async () => next.click())
+  expect(list.scrollLeft).toBeGreaterThan(0)
+  expect(document.querySelector('.dvw-review-composer-scroll[data-direction=previous]')).not.toBeNull()
+  await act(async () => root.unmount())
+})

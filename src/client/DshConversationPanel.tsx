@@ -1,4 +1,4 @@
-import { useLayoutEffect, useState } from 'react'
+import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 
 /** Locate the resident DSH conversation without depending on generated CSS module names. */
@@ -81,6 +81,22 @@ export function DshReviewActions(props: {
   onRejectAll(): void
 }) {
   const [host, setHost] = useState<HTMLElement>()
+  const fileList = useRef<HTMLDivElement>(null)
+  const [fileScroll, setFileScroll] = useState({ left: false, right: false })
+  const updateFileScroll = useCallback(() => {
+    const list = fileList.current
+    if (list === null) return
+    const remaining = Math.max(0, list.scrollWidth - list.clientWidth - list.scrollLeft)
+    const next = { left: list.scrollLeft > 1, right: remaining > 1 }
+    setFileScroll(current => current.left === next.left && current.right === next.right ? current : next)
+  }, [])
+  const scrollFiles = (direction: -1 | 1) => {
+    const list = fileList.current
+    if (list === null) return
+    const distance = Math.max(120, Math.round(list.clientWidth * 0.75))
+    list.scrollLeft = Math.max(0, Math.min(list.scrollWidth - list.clientWidth, list.scrollLeft + direction * distance))
+    updateFileScroll()
+  }
   useLayoutEffect(() => {
     if (!props.visible || props.files.length === 0) {
       setHost(undefined)
@@ -113,6 +129,27 @@ export function DshReviewActions(props: {
       setHost(undefined)
     }
   }, [props.visible, props.files.length])
+  useLayoutEffect(() => {
+    const list = fileList.current
+    if (list === null) return
+    updateFileScroll()
+    list.addEventListener('scroll', updateFileScroll, { passive: true })
+    const wheel = (event: WheelEvent) => {
+      if (Math.abs(event.deltaX) >= Math.abs(event.deltaY) || list.scrollWidth <= list.clientWidth) return
+      event.preventDefault()
+      list.scrollLeft += event.deltaY
+    }
+    list.addEventListener('wheel', wheel, { passive: false })
+    const resize = typeof ResizeObserver === 'function' ? new ResizeObserver(updateFileScroll) : undefined
+    resize?.observe(list)
+    window.addEventListener('resize', updateFileScroll)
+    return () => {
+      list.removeEventListener('scroll', updateFileScroll)
+      list.removeEventListener('wheel', wheel)
+      resize?.disconnect()
+      window.removeEventListener('resize', updateFileScroll)
+    }
+  }, [host, props.files, updateFileScroll])
   if (host === undefined) return null
   return createPortal(
     <section className="dvw-review-composer" aria-label="AI 改动审阅" aria-busy={props.disabled}>
@@ -127,10 +164,24 @@ export function DshReviewActions(props: {
           <button type="button" data-action="accept" disabled={props.disabled} onClick={props.onAcceptAll}>全部接受</button>
         </div>
       </div>
-      <div className="dvw-review-composer-files" aria-label="待审阅文件">
-        {props.files.map(file => <button type="button" key={file.path} title={file.path} onClick={() => props.onOpen(file.path)}>
-          <span>{file.path}</span><b>{file.count}</b>
-        </button>)}
+      <div className="dvw-review-composer-file-strip" data-scroll-left={fileScroll.left || undefined} data-scroll-right={fileScroll.right || undefined}>
+        {fileScroll.left && <button type="button" className="dvw-review-composer-scroll" data-direction="previous" aria-label="查看前面的待审阅文件" onClick={() => scrollFiles(-1)}>‹</button>}
+        <div
+          ref={fileList}
+          className="dvw-review-composer-files"
+          aria-label="待审阅文件"
+          tabIndex={fileScroll.left || fileScroll.right ? 0 : undefined}
+          onKeyDown={event => {
+            if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+            event.preventDefault()
+            scrollFiles(event.key === 'ArrowLeft' ? -1 : 1)
+          }}
+        >
+          {props.files.map(file => <button type="button" key={file.path} title={file.path} onClick={() => props.onOpen(file.path)}>
+            <span>{file.path}</span><b>{file.count}</b>
+          </button>)}
+        </div>
+        {fileScroll.right && <button type="button" className="dvw-review-composer-scroll" data-direction="next" aria-label="查看后面的待审阅文件" onClick={() => scrollFiles(1)}>›</button>}
       </div>
     </section>,
     host,

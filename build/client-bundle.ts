@@ -10,6 +10,11 @@ const EXTERNALS = [
 export function dshPackage(packageName: string): UserConfig[] {
   return [
     {
+      entry: { preview: './src/client/previewRuntime.ts' }, outDir: './lib', format: 'esm',
+      platform: 'browser', dts: false, clean: false, deps: { alwaysBundle: () => true },
+      outputOptions: { entryFileNames: 'preview.js', codeSplitting: false },
+    },
+    {
       entry: { index: './src/index.ts' }, outDir: './lib', format: 'esm',
       platform: 'node', dts: false, sourcemap: true, clean: false,
       deps: { neverBundle: true }, outputOptions: { entryFileNames: '[name].js' },

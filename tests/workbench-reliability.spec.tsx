@@ -5,16 +5,45 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { Workbench } from '../src/client/Workbench.tsx'
 import type { MonacoEditor } from '../src/client/MonacoEditor.tsx'
 import { WorkbenchController } from '../src/client/service.ts'
+import { disposeTypeScriptProject } from '../src/client/typescriptProject.ts'
 
 type EditorProps = Parameters<typeof MonacoEditor>[0]
-const state = vi.hoisted(() => ({ editor: undefined as EditorProps | undefined }))
+const state = vi.hoisted(() => {
+  const models = new Map<string, { getValue(): string; isAttachedToEditor(): boolean; isDisposed(): boolean; dispose(): void }>()
+  const defaults = { setCompilerOptions() {}, setEagerModelSync() {}, setDiagnosticsOptions() {} }
+  const monaco = {
+    editor: {
+      getModel: (uri: { toString(): string }) => models.get(uri.toString()) ?? null,
+      createModel: (content: string, _language: string | undefined, uri: { toString(): string }) => {
+        let disposed = false
+        const model = {
+          getValue: () => content,
+          isAttachedToEditor: () => false,
+          isDisposed: () => disposed,
+          dispose: () => { disposed = true; models.delete(uri.toString()) },
+        }
+        models.set(uri.toString(), model)
+        return model
+      },
+      registerEditorOpener: () => ({ dispose() {} }),
+    },
+    Uri: { parse: (value: string) => ({ toString: () => value }) },
+    languages: {
+      typescript: {
+        ScriptTarget: { ESNext: 1 }, ModuleKind: { ESNext: 1 },
+        ModuleResolutionKind: { NodeJs: 1 }, JsxEmit: { ReactJSX: 1 },
+        typescriptDefaults: defaults, javascriptDefaults: defaults,
+      },
+    },
+  }
+  return { editor: undefined as EditorProps | undefined, models, monaco }
+})
 // Monaco and the DSH conversation are external rendering integrations. Exercise
 // the workbench's real state and HTTP client with a controlled network boundary.
 vi.mock('../src/client/MonacoEditor.tsx', () => ({
   MonacoEditor: (props: EditorProps) => { state.editor = props; return null },
   MonacoDiffEditor: () => null, preloadMonaco: () => {}, retainEditorModels: () => {},
-  // The workbench registers a cross-file opener for editor navigation as soon as it mounts.
-  loadMonaco: () => Promise.resolve({ editor: { registerEditorOpener: () => ({ dispose() {} }) } }),
+  loadMonaco: () => Promise.resolve(state.monaco),
 }))
 vi.mock('../src/client/DshConversationPanel.tsx', () => ({ DshConversationPanel: () => null, DshConversationTheme: () => null }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -22,6 +51,8 @@ let root: Root | undefined
 let disk = 'disk'
 let revision = 'r1'
 let completeSave: (() => void) | undefined
+let projectSource = 'export const a = 1'
+let projectReads = 0
 const sockets: FakeSocket[] = []
 class FakeSocket {
   onmessage?: (event: { data: string }) => void
@@ -32,6 +63,8 @@ class FakeSocket {
 }
 afterEach(async () => {
   await act(async () => { root?.unmount() }); root = undefined
+  disposeTypeScriptProject(state.monaco as never)
+  state.models.clear()
   vi.unstubAllGlobals(); localStorage.clear(); document.body.replaceChildren(); sockets.length = 0
 })
 async function mount(service = new WorkbenchController(), visible = true, dshPanelId?: string, handlers: { open?(panelId: string): void; restore?(): void } = {}) {
@@ -40,9 +73,10 @@ async function mount(service = new WorkbenchController(), visible = true, dshPan
   await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" dshPanelId={dshPanelId} onOpenDshPanel={handlers.open} onRestoreConversation={handlers.restore}/>) })
   return service
 }
-async function setup(binary = false) {
+async function setup(binary = false, saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' }) {
   disk = 'disk'; revision = 'r1'; completeSave = undefined; state.editor = undefined
-  localStorage.setItem('dvw:/tmp/audit', JSON.stringify({ paths: ['a.txt'], active: 'a.txt' }))
+  projectSource = 'export const a = 1'; projectReads = 0
+  localStorage.setItem('dvw:/tmp/audit', JSON.stringify(saved))
   vi.stubGlobal('WebSocket', FakeSocket)
   vi.stubGlobal('fetch', vi.fn(async (url: string, options: { body: string }) => {
     const method = url.split('/').at(-1)
@@ -52,6 +86,7 @@ async function setup(binary = false) {
     else if (method === 'fs.list') value = []
     else if (method === 'git.status') value = { changes: [] }
     else if (method === 'fs.read') value = doc()
+    else if (method === 'project.sources') { projectReads++; value = { files: [{ path: 'a.ts', content: projectSource }], truncated: false } }
     else if (method === 'fs.save') return new Promise(resolve => {
       const body = JSON.parse(options.body)
       completeSave = () => { disk = body.content; revision = 'r2'; resolve({ ok: true, json: async () => ({ ok: true, value: doc() }) }) }
@@ -241,4 +276,66 @@ it('returns to the conversation from the DSH chat button while a panel is open',
   expect(restore).toHaveBeenCalledTimes(1)
   expect(document.querySelector<HTMLElement>('[data-dvw-dsh-tab]')?.dataset.active).toBe('false')
   expect(document.querySelector('.dvw-chat')).not.toBeNull()
+})
+
+
+it('refreshes each visible directory once per refresh click', async () => {
+  await setup()
+  vi.mocked(fetch).mockClear()
+  await act(async () => document.querySelector<HTMLButtonElement>('button[title="刷新"]')!.click())
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/fs.list'))).toHaveLength(1)
+})
+
+it('does not read restored documents while hidden', async () => {
+  const service = await setup()
+  await act(async () => root!.unmount()); root = undefined
+  service.hide()
+  vi.mocked(fetch).mockClear()
+  await mount(service, false)
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/fs.read'))).toHaveLength(0)
+})
+
+it('loads the active document in every visible pane', async () => {
+  await setup(false, {
+    groups: [
+      { id: 'pane-1', paths: ['a.txt'], active: 'a.txt' },
+      { id: 'pane-2', paths: ['b.txt'], active: 'b.txt' },
+    ],
+    layout: {
+      kind: 'split', id: 'split-1', direction: 'horizontal', ratio: 0.5,
+      first: { kind: 'leaf', group: 'pane-1' }, second: { kind: 'leaf', group: 'pane-2' },
+    },
+  })
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/fs.read'))).toHaveLength(2)
+  expect(document.body.textContent).not.toContain('正在加载文件')
+})
+
+it('keeps concurrent reads of the same file scoped to each pane', async () => {
+  await setup(false, {
+    groups: [
+      { id: 'pane-1', paths: ['a.txt'], active: 'a.txt' },
+      { id: 'pane-2', paths: ['a.txt'], active: 'a.txt' },
+    ],
+    layout: {
+      kind: 'split', id: 'split-1', direction: 'horizontal', ratio: 0.5,
+      first: { kind: 'leaf', group: 'pane-1' }, second: { kind: 'leaf', group: 'pane-2' },
+    },
+  })
+  expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/fs.read'))).toHaveLength(2)
+  expect(document.body.textContent).not.toContain('正在加载文件')
+})
+
+it('reindexes retained TypeScript models after returning from hidden', async () => {
+  localStorage.setItem('dvw:lsp:typescript', 'on')
+  const service = await setup()
+  const model = () => state.models.get('file:///tmp/audit/a.ts')
+  expect(projectReads).toBe(1)
+  expect(model()).toBeDefined()
+
+  projectSource = 'export const a = 2'
+  await act(async () => service.hide())
+  await act(async () => service.show())
+
+  expect(projectReads).toBe(2)
+  expect(model()?.getValue()).toBe('export const a = 2')
 })

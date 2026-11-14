@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
-import { projectModelPath, workspacePathFromModel } from '../src/client/typescriptProject.ts'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { disposeTypeScriptProject, indexTypeScriptProject, projectModelPath, workspacePathFromModel } from '../src/client/typescriptProject.ts'
+
+afterEach(() => vi.unstubAllGlobals())
 
 describe('TypeScript project models', () => {
   it('uses the same file URIs as editor tabs', () => {
@@ -12,6 +14,25 @@ describe('TypeScript project models', () => {
     expect(workspacePathFromModel('D:\\code\\repo', 'file:///d%3A/code/repo/src/%E6%96%87.ts')).toBe('src/文.ts')
     expect(workspacePathFromModel('/Users/me/repo', 'file:///Users/me/other/a.ts')).toBeUndefined()
     expect(workspacePathFromModel('/Users/me/repo', 'file:///node_modules/@types/node/index.d.ts')).toBeUndefined()
+  })
+
+  it('does not create models from a response that arrives after disposal', async () => {
+    let finish!: () => void
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(resolve => {
+      finish = () => resolve({ ok: true, json: async () => ({ ok: true, value: { files: [{ path: 'a.ts', content: 'export const a = 1' }], truncated: false } }) })
+    })))
+    const models: string[] = []
+    const defaults = { setCompilerOptions() {}, setEagerModelSync() {}, setDiagnosticsOptions() {} }
+    const monaco = {
+      languages: { typescript: { ScriptTarget: { ESNext: 1 }, ModuleKind: { ESNext: 1 }, ModuleResolutionKind: { NodeJs: 1 }, JsxEmit: { ReactJSX: 1 }, typescriptDefaults: defaults, javascriptDefaults: defaults } },
+      Uri: { parse: (value: string) => ({ toString: () => value }) },
+      editor: { getModel: () => null, createModel: (content: string) => models.push(content) },
+    }
+    const pending = indexTypeScriptProject(monaco as never, 's', '/tmp/audit')
+    disposeTypeScriptProject(monaco as never)
+    finish()
+    await pending
+    expect(models).toEqual([])
   })
 })
 

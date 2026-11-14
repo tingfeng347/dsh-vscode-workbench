@@ -1,6 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from './api.ts'
 
+let previewLoading: Promise<typeof import('./previewRuntime.ts')> | undefined
+let previewAttempt = 0
+function loadPreviewRuntime() {
+  const url = `/dsh-vscode/preview.js?v=${previewAttempt}`
+  return previewLoading ??= import(/* @vite-ignore */ url).catch(error => {
+    previewLoading = undefined; previewAttempt += 1; throw error
+  })
+}
+
 type XlsxModule = typeof import('xlsx')
 let xlsxLoading: Promise<XlsxModule> | undefined
 
@@ -15,9 +24,9 @@ export function loadXlsx(): Promise<XlsxModule> {
       const value = (window as Window & { XLSX?: XlsxModule }).XLSX
       if (value === undefined) reject(new Error('SheetJS 加载失败')); else resolve(value)
     }
-    script.onerror = () => reject(new Error('SheetJS 加载失败'))
+    script.onerror = () => { script.remove(); reject(new Error('SheetJS 加载失败')) }
     document.head.append(script)
-  })
+  }).catch(error => { xlsxLoading = undefined; throw error })
   return xlsxLoading
 }
 
@@ -95,7 +104,7 @@ function DocxPreview({ src }: { src: string }) {
       try {
         const response = await fetch(src, { signal: controller.signal })
         if (!response.ok) throw new Error(`无法读取文档 (${response.status})`)
-        const { renderAsync } = await import('docx-preview')
+        const { renderAsync } = await loadPreviewRuntime()
         if (controller.signal.aborted) return
         target.replaceChildren()
         await renderAsync(await response.blob(), target, undefined, { inWrapper: false, ignoreWidth: false, ignoreHeight: false })
@@ -128,7 +137,7 @@ function PdfPreview({ src, path }: { src: string; path: string }) {
     setPage(1); setPages(0); setError(undefined)
     void (async () => {
       try {
-        const pdfjs = await import('pdfjs-dist/legacy/build/pdf.mjs')
+        const { pdf: pdfjs } = await loadPreviewRuntime()
         pdfjs.GlobalWorkerOptions.workerSrc = '/dsh-vscode/pdfjs/worker.mjs'
         document = await pdfjs.getDocument(src).promise as PdfDocument
         if (cancelled) { document.destroy(); return }

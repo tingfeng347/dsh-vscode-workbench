@@ -84,6 +84,16 @@ export function apply(ctx: HostContext): void {
     return () => { void fiber.dispose?.() }
   }, 'dsh-vscode-workbench: optional DSH services')
   ctx.effect(() => ctx.webServer.register({
+    kind: 'exact', path: '/dsh-vscode/preview.js', handler: async (req, res) => {
+      if (!authorize(req, res, ctx.connection)) return
+      try {
+        const content = await readFile(new URL('./preview.js', import.meta.url))
+        res.writeHead(200, { 'content-type': 'text/javascript; charset=utf-8', 'cache-control': 'no-cache' })
+        res.end(content)
+      } catch (error) { sendError(res, error) }
+    },
+  }), 'dsh-vscode-workbench: preview runtime')
+  ctx.effect(() => ctx.webServer.register({
     kind: 'exact', path: '/dsh-vscode/codicons/codicon.ttf', handler: async (req, res) => {
       if (!authorize(req, res, ctx.connection)) return
       try {

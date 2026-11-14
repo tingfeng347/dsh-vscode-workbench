@@ -4,7 +4,7 @@ import type { EditorSelection } from './dshComposer.ts'
 import { isIndexedModel } from './typescriptProject.ts'
 
 type Monaco = typeof import('monaco-editor')
-declare global { interface Window { require?: { (ids: string[], done: () => void): void; config(value: unknown): void }; monaco?: Monaco } }
+declare global { interface Window { require?: { (ids: string[], done: () => void, error?: (cause: unknown) => void): void; config(value: unknown): void }; monaco?: Monaco } }
 let loading: Promise<Monaco> | undefined
 /** Monaco chrome used by both editors so only the narrow native scrollbar remains. */
 export const WORKBENCH_EDITOR_CHROME = {
@@ -133,7 +133,7 @@ export function monacoWorkerBootstrap(base: string): string {
 }
 
 export function loadMonaco(): Promise<Monaco> {
-  loading ??= new Promise((resolve, reject) => {
+  loading ??= new Promise<Monaco>((resolve, reject) => {
     const start = () => {
       const loader = window.require
       if (loader === undefined) return reject(new Error('Monaco AMD loader unavailable'))
@@ -145,12 +145,12 @@ export function loadMonaco(): Promise<Monaco> {
           if (window.monaco === undefined) return reject(new Error('Monaco failed to initialize'))
           defineWorkbenchThemes(window.monaco)
           resolve(window.monaco)
-        })
-      })
+        }, reject)
+      }, reject)
     }
     if (window.require !== undefined) { start(); return }
-    const script = document.createElement('script'); script.src = '/dsh-vscode/monaco/vs/loader.js'; script.onload = start; script.onerror = () => reject(new Error('failed to load Monaco')); document.head.append(script)
-  })
+    const script = document.createElement('script'); script.src = '/dsh-vscode/monaco/vs/loader.js'; script.onload = start; script.onerror = () => { script.remove(); reject(new Error('failed to load Monaco')) }; document.head.append(script)
+  }).catch(error => { loading = undefined; throw error })
   return loading
 }
 

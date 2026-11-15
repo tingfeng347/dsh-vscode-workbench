@@ -48,7 +48,8 @@ function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspac
       setMenu({ x: Math.min(event.clientX, window.innerWidth - 172), y: Math.min(event.clientY, window.innerHeight - 152) })
     }
     root.current.addEventListener('contextmenu', contextmenu, true)
-    const input = terminal.onData(data => model.write(data))
+    // `typed` tells the host this input comes from a person, so an agent terminal hands control over instead of ignoring it.
+    const input = terminal.onData(data => model.write(data, true))
     const observer = new ResizeObserver(measure)
     observer.observe(root.current)
     return () => { root.current?.removeEventListener('contextmenu', contextmenu, true); observer.disconnect(); input.dispose(); terminal.dispose(); screen.current = undefined; fit.current = undefined }
@@ -87,7 +88,7 @@ function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspac
   const run = (action: () => void) => { setMenu(undefined); action(); terminal?.focus() }
   return <section className="dvw-terminal-pane">
     {(error || retry || readOnly || ended || state.info === undefined) && <div className="dvw-terminal-notice" role="status">
-      <span>{error ?? (ended ? `进程已退出（${state.info?.exitCode ?? '—'}）` : readOnly ? '其他页面正在控制此终端' : retry ? '终端连接已断开' : '正在启动终端…')}</span>
+      <span>{error ?? (ended ? `进程已退出（${state.info?.exitCode ?? '—'}）` : readOnly ? (state.info?.control === 'agent' ? 'Agent 正在使用此终端' : '其他页面正在控制此终端') : retry ? '终端连接已断开' : '正在启动终端…')}</span>
       {(retry || readOnly) && <button onClick={() => state.info === undefined ? void model.refresh() : model.connect()}>{readOnly ? '接管输入' : '重新连接'}</button>}
     </div>}
     <div ref={root} className="dvw-terminal-host"/>
@@ -95,7 +96,7 @@ function XtermView({ workspace, id, colorScheme }: { workspace: TerminalWorkspac
       <button role="menuitem" disabled={terminal === undefined || !terminal.hasSelection()} onClick={() => run(() => { const text = terminal?.getSelection() ?? ''; if (text !== '') void navigator.clipboard.writeText(text) })}>复制</button>
       <button role="menuitem" disabled={terminal === undefined || !state.writable} onClick={() => run(() => { void navigator.clipboard.readText().then(text => { if (text !== '') terminal?.paste(text) }).catch(() => undefined) })}>粘贴</button>
       <button role="menuitem" disabled={terminal === undefined} onClick={() => run(() => terminal?.selectAll())}>全选</button>
-      <button role="menuitem" disabled={terminal === undefined || !state.writable} onClick={() => run(() => model.write('\x0c'))}>清屏</button>
+      <button role="menuitem" disabled={terminal === undefined || !state.writable} onClick={() => run(() => model.write('\x0c', true))}>清屏</button>
     </div>}
   </section>
 }

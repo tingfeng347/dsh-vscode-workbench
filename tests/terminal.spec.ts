@@ -41,7 +41,7 @@ function harness() {
   const feeds = new Map<string, Feed<TerminalFrame>>()
   const ok = <T,>(value: T) => ({ ok: true as const, value })
   const create = vi.fn(async (session: string, request: { id: WebTerminalInfo['id']; cols: number; rows: number }) => {
-    const info: WebTerminalInfo = { ...request, title: 'zsh', cwd: `/${session}`, shell: { path: '/bin/zsh', name: 'zsh', args: [] }, state: 'running', exitCode: null }
+    const info: WebTerminalInfo = { ...request, title: 'zsh', cwd: `/${session}`, shell: { path: '/bin/zsh', name: 'zsh', args: [] }, state: 'running', exitCode: null, origin: 'user', control: 'user' }
     host.set(info.id, info)
     return ok(info)
   })

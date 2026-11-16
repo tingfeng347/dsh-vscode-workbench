@@ -92,6 +92,48 @@ describe('Activity bar pointer dragging', () => {
     await act(async () => { root.unmount() })
   })
 
+  it('drags the fixed workspace action into the middle views', async () => {
+    const onOrderChange = vi.fn()
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(<ActivityBar views={views} fixed={[{ id: 'workspaces', label: 'workspaces', icon: <span>folder</span>, active: false, onActivate() {} }]} order={['workspaces', 'explorer', 'search', 'git']} hidden={[]} onOrderChange={onOrderChange} onHiddenChange={() => {}}/>)
+    })
+    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-act-id]'))
+    layout(buttons)
+    const pointer = (type: string, y: number) => new MouseEvent(type, { bubbles: true, button: 0, clientX: 5, clientY: y })
+    await act(async () => {
+      buttons[0]!.dispatchEvent(pointer('pointerdown', 5))
+      buttons[0]!.dispatchEvent(pointer('pointermove', 80))
+    })
+    expect(container.querySelector('.dvw-activity-ghost')?.textContent).toBe('folder')
+    await act(async () => { window.dispatchEvent(pointer('pointerup', 80)) })
+    expect(onOrderChange).toHaveBeenCalledWith(['explorer', 'workspaces', 'search', 'git'])
+    await act(async () => { root.unmount() })
+  })
+
+  it('drags a bottom action above the middle views', async () => {
+    const onOrderChange = vi.fn()
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    const bottom = ['home', 'settings'].map(id => ({ id, label: id, icon: null, active: false, onActivate() {} }))
+    await act(async () => {
+      root.render(<ActivityBar views={views} fixed={[]} bottom={bottom} order={['explorer', 'search', 'git', 'home', 'settings']} hidden={[]} onOrderChange={onOrderChange} onHiddenChange={() => {}}/>)
+    })
+    const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-act-id]'))
+    layout(buttons)
+    const pointer = (type: string, y: number) => new MouseEvent(type, { bubbles: true, button: 0, clientX: 5, clientY: y })
+    await act(async () => {
+      buttons[3]!.dispatchEvent(pointer('pointerdown', 150))
+      buttons[3]!.dispatchEvent(pointer('pointermove', 10))
+      window.dispatchEvent(pointer('pointerup', 10))
+    })
+    expect(onOrderChange).toHaveBeenCalledWith(['home', 'explorer', 'search', 'git', 'settings'])
+    await act(async () => { root.unmount() })
+  })
+
   it('still activates a view on a plain click', async () => {
     const onActivate = vi.fn()
     const container = document.createElement('div')
@@ -130,6 +172,24 @@ describe('Activity bar pointer dragging', () => {
     })
     expect(onOrderChange).not.toHaveBeenCalled()
     expect(onActivate).toHaveBeenCalledTimes(1)
+    await act(async () => { root.unmount() })
+  })
+
+  it('keeps only one selected background and lets the clicked action take it', async () => {
+    const container = document.createElement('div')
+    document.body.append(container)
+    const root = createRoot(container)
+    const activeViews = [
+      { id: 'explorer', label: 'explorer', icon: null, active: true, onActivate() {} },
+      { id: 'search', label: 'search', icon: null, active: true, onActivate() {} },
+    ]
+    await act(async () => {
+      root.render(<ActivityBar views={activeViews} fixed={[]} order={['explorer', 'search']} hidden={[]} onOrderChange={() => {}} onHiddenChange={() => {}}/>)
+    })
+    const selected = () => Array.from(container.querySelectorAll<HTMLButtonElement>('[data-act-id]')).filter(button => button.dataset.active === 'true').map(button => button.dataset.actId)
+    expect(selected()).toEqual(['explorer'])
+    await act(async () => { container.querySelector<HTMLButtonElement>('[data-act-id="search"]')!.click() })
+    expect(selected()).toEqual(['search'])
     await act(async () => { root.unmount() })
   })
 })

@@ -79,6 +79,7 @@ describe('workbench settings section', () => {
   it('leaves browser tabs out of the activity bar', () => {
     const workbench = read('src/client/Workbench.tsx')
     expect(workbench).not.toContain("id:'browser',label:'新建浏览器'")
-    expect(workbench).toContain("const ACTIVITY_IDS=['explorer','search','git','terminal','chat'] as const")
+    expect(workbench).toContain("const ACTIVITY_VIEW_IDS = ['explorer','search','git','terminal','chat'] as const")
+    expect(workbench).not.toContain("label:'新建浏览器'")
   })
 })

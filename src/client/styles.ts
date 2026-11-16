@@ -217,6 +217,8 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-workspace-switcher>footer{padding:12px 16px}
 .dvw-workspace-switcher>footer button{height:32px;border-radius:9px;padding:0 16px}
 .dvw-workspace-switcher>footer button.dvw-primary-button:hover:not(:disabled){background:color-mix(in srgb,var(--dvw-accent) 86%,#000)}
+.dvw-workspace-switcher>footer .dvw-workspace-new-session{margin-right:auto;display:inline-flex;align-items:center;gap:6px}
+.dvw-workspace-switcher>footer .dvw-workspace-new-session .codicon{font-size:14px}
 .dvw-workspace-switcher .dvw-icon{border-radius:9px}
 .dvw-dsh-tab-mark{width:16px;height:16px;flex:none;background:currentColor;-webkit-mask:${DSH_MARK_MASK} center/contain no-repeat;mask:${DSH_MARK_MASK} center/contain no-repeat}
 .codicon-globe:before{content:"\eb01"}

@@ -29,6 +29,7 @@ interface SnapshotStore<T> { getSnapshot(): T }
 interface UiWorkspace {
   openSession(id: string): void
   openWorkspace?(id: string, beforeOpen: (nextId: string | undefined) => void, options?: Record<string, unknown>): unknown
+  startSession?(workspaceId?: string): void
 }
 
 /** The slice of DSH's client context the switcher needs, read through `ctx.get` like ui-conversation does. */
@@ -37,6 +38,7 @@ export interface DshNavigation {
   choices(activeSessionId?: string): WorkspaceChoice[]
   openSession(id: string): boolean
   openWorkspace(id: string): boolean
+  startSession(workspaceId?: string): boolean
 }
 
 /** Build display rows from the two snapshot stores, keeping DSH's own workspace and session order. */
@@ -75,6 +77,12 @@ export function createDshNavigation(get: ((name: string) => unknown) | undefined
       const navigation = uiWorkspace()
       if (navigation?.openWorkspace === undefined) return false
       void navigation.openWorkspace(id, () => undefined)
+      return true
+    },
+    startSession(workspaceId) {
+      const navigation = uiWorkspace()
+      if (navigation?.startSession === undefined) return false
+      navigation.startSession(workspaceId)
       return true
     },
   }

@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import { describe, expect, it } from 'vitest'
-import { moveActivity, normalizeActivityOrder, toggleActivityHidden } from '../src/client/ActivityBar.tsx'
+import { moveActivity, normalizeActivityLayout, normalizeActivityOrder, singleActiveActivity, toggleActivityHidden } from '../src/client/ActivityBar.tsx'
 
 const KNOWN = ['explorer', 'search', 'git', 'terminal', 'chat']
 
@@ -18,9 +18,23 @@ describe('Activity bar order', () => {
     expect(moveActivity(KNOWN, 'missing', 'git')).toEqual(KNOWN)
   })
 
+  it('keeps one order for fixed, middle and bottom actions', () => {
+    expect(normalizeActivityLayout(['chat', 'workspaces', 'home'], ['workspaces'], KNOWN, ['home', 'settings']))
+      .toEqual(['chat', 'workspaces', 'home', 'explorer', 'search', 'git', 'terminal', 'settings'])
+    expect(normalizeActivityLayout(['home', 'workspaces', 'explorer'], ['workspaces'], KNOWN, ['home', 'settings']))
+      .toEqual(['home', 'workspaces', 'explorer', 'search', 'git', 'terminal', 'chat', 'settings'])
+  })
+
   it('toggles hidden views', () => {
     expect(toggleActivityHidden([], 'git')).toEqual(['git'])
     expect(toggleActivityHidden(['git', 'chat'], 'git')).toEqual(['chat'])
+  })
+
+  it('keeps at most one selected activity, preferring the last clicked one', () => {
+    expect(singleActiveActivity(['explorer', 'terminal', 'chat'])).toBe('explorer')
+    expect(singleActiveActivity(['explorer', 'terminal', 'chat'], 'chat')).toBe('chat')
+    expect(singleActiveActivity(['explorer', 'terminal'], 'chat')).toBe('explorer')
+    expect(singleActiveActivity([], 'chat')).toBeUndefined()
   })
 })
 

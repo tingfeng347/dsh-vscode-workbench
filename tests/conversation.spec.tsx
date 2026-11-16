@@ -28,11 +28,16 @@ it('does not attach an embedded conversation outside the main phase container', 
   expect(findDshConversationRoot()).toBeNull()
 })
 
+it('prefers a visible conversation over an older hidden session root', () => {
+  document.body.innerHTML = '<div id="old" data-phase="active" style="display:none"><div data-conversation-scroll></div></div><div id="new" data-phase="hero"><div data-conversation-scroll></div></div>'
+  expect(findDshConversationRoot()).toBe(document.getElementById('new'))
+})
+
 it('ignores workbench-only DOM churn and re-attaches once per frame', async () => {
   document.body.innerHTML = '<div class="dvw-overlay"><div id="editor"></div></div><div id="plugin"></div>'
   const root = createRoot(document.getElementById('plugin')!)
   await act(async () => { root.render(<DshConversationPanel visible width={420} statusHeight={24}/>) })
-  const query = vi.spyOn(document, 'querySelector')
+  const query = vi.spyOn(document, 'querySelectorAll')
   const editor = document.getElementById('editor')!
   for (let line = 0; line < 20; line++) editor.append(document.createElement('div'))
   await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)) })

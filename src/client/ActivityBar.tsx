@@ -29,10 +29,28 @@ export function toggleActivityHidden(hidden: readonly string[], id: string): str
   return hidden.includes(id) ? hidden.filter(value => value !== id) : [...hidden, id]
 }
 
+/** Only one action keeps the selected background; the most recently clicked active one wins. */
+export function singleActiveActivity(active: readonly string[], preferred?: string): string | undefined {
+  return preferred !== undefined && active.includes(preferred) ? preferred : active[0]
+}
+
+/** Keep a saved layout, while making sure newly added actions are still visible. */
+export function normalizeActivityLayout(order: readonly string[], fixed: readonly string[], views: readonly string[], bottom: readonly string[]): string[] {
+  const known = [...fixed, ...views, ...bottom]
+  const saved = [...new Set(order.filter(id => known.includes(id)))]
+  return [
+    ...fixed.filter(id => !saved.includes(id)),
+    ...saved,
+    ...views.filter(id => !saved.includes(id)),
+    ...bottom.filter(id => !saved.includes(id)),
+  ]
+}
+
 /**
- * VS Code-style activity bar: every view can be dragged into a new slot while `fixed` actions stay pinned on
- * top and `bottom` actions stay pinned at the foot. Reordering is computed from pointer position so it keeps
- * working when the DOM shifts under a fast drag.
+ * VS Code-style activity bar: every action can be dragged into a new slot. `fixed` and `bottom` only provide
+ * the default slots for newly added actions; after that the saved order wins. Actions in the trailing bottom
+ * group stay at the foot until another action is placed below them. Reordering is computed from pointer
+ * position so it keeps working when the DOM shifts under a fast drag.
  */
 export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderChange, onHiddenChange }: {
   views: ActivityView[]
@@ -52,6 +70,7 @@ export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderC
   const [draggingId, setDraggingId] = useState<string>()
   const [ghost, setGhost] = useState<{ x: number; y: number }>()
   const [preview, setPreview] = useState<string[]>()
+  const [lastActivated, setLastActivated] = useState<string>()
   const previewRef = useRef<string[]>()
   const orderRef = useRef(order)
   const visibleRef = useRef<ActivityView[]>([])
@@ -83,10 +102,17 @@ export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderC
     }
   })
 
-  const visible = views.filter(view => !hidden.includes(view.id))
+  const visibleViews = views.filter(view => !hidden.includes(view.id))
+  const visible = [...fixed, ...visibleViews, ...bottom]
   visibleRef.current = visible
-  const currentOrder = preview ?? order
+  const currentOrder = normalizeActivityLayout(preview ?? order, fixed.map(view => view.id), visibleViews.map(view => view.id), bottom.map(view => view.id))
   const ordered = currentOrder.flatMap(id => visible.filter(view => view.id === id))
+  const bottomIds = new Set(bottom.map(view => view.id))
+  let bottomStart = ordered.length
+  while (bottomStart > 0 && bottomIds.has(ordered[bottomStart - 1]!.id)) bottomStart -= 1
+  const main = ordered.slice(0, bottomStart)
+  const footer = ordered.slice(bottomStart)
+  const activeId = singleActiveActivity(visible.filter(view => view.active).map(view => view.id), lastActivated)
   const toggled = (id: string) => onHiddenChange(toggleActivityHidden(hidden, id))
   const target = menu?.target === undefined ? undefined : views.find(view => view.id === menu.target)
 
@@ -160,22 +186,21 @@ export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderC
     ref={element => { if (element === null) nodes.current.delete(view.id); else nodes.current.set(view.id, element) }}
     className="dvw-act"
     data-act-id={view.id}
-    data-active={view.active}
+    data-active={view.id === activeId}
     data-dragging={draggingId === view.id || undefined}
     disabled={view.disabled}
     title={view.label}
     onPointerDown={event => beginDrag(event, view.id)}
-    onClick={() => { if (didDrag.current) { didDrag.current = false; return } view.onActivate() }}
-    onContextMenu={event => { event.preventDefault(); event.stopPropagation(); setMenu({ x: event.clientX, y: event.clientY, target: view.id }) }}
+    onClick={() => { if (didDrag.current) { didDrag.current = false; return } setLastActivated(view.id); view.onActivate() }}
+    onContextMenu={event => { event.preventDefault(); event.stopPropagation(); setMenu({ x: event.clientX, y: event.clientY, target: views.includes(view) ? view.id : undefined }) }}
   >{view.icon}</button>
 
   return <>
     <nav className="dvw-activity" onContextMenu={event => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY }) }}>
-      {fixed.map(view => <button key={view.id} className="dvw-act" data-act-id={view.id} data-active={view.active} disabled={view.disabled} title={view.label} onClick={view.onActivate}>{view.icon}</button>)}
-      {ordered.length === 0 ? <span className="dvw-activity-empty" aria-hidden="true"/> : ordered.map(renderView)}
-      <div className="dvw-activity-bottom">{bottom.map(view => <button key={view.id} className="dvw-act" data-act-id={view.id} data-active={view.active} disabled={view.disabled} title={view.label} onClick={view.onActivate}>{view.icon}</button>)}</div>
+      {main.length === 0 && footer.length === 0 ? <span className="dvw-activity-empty" aria-hidden="true"/> : main.map(renderView)}
+      {footer.length > 0 && <div className="dvw-activity-bottom">{footer.map(renderView)}</div>}
     </nav>
-    {draggingId !== undefined && ghost !== undefined && <div className="dvw-activity-ghost" style={{ left: ghost.x, top: ghost.y }} aria-hidden="true">{views.find(view => view.id === draggingId)?.icon}</div>}
+    {draggingId !== undefined && ghost !== undefined && <div className="dvw-activity-ghost" style={{ left: ghost.x, top: ghost.y }} aria-hidden="true">{visible.find(view => view.id === draggingId)?.icon}</div>}
     {menu !== undefined && <div className="dvw-context-menu dvw-activity-menu" role="menu" style={{ left: menu.x, top: menu.y }} onPointerDown={event => event.stopPropagation()}>
       {target !== undefined && <button role="menuitem" onClick={() => { toggled(target.id); setMenu(undefined) }}>隐藏“{target.label}”</button>}
       {target !== undefined && <div className="dvw-menu-separator"/>}

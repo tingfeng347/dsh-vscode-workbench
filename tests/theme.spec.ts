@@ -91,7 +91,10 @@ describe('workbench dark theme', () => {
   it('offers a centered workspace switcher below the DSH conversation button', () => {
     const workbench = read('src/client/Workbench.tsx')
     expect(workbench).toContain('打开工作区 / 切换会话')
+    expect(workbench).not.toContain("label:'新建会话'")
     expect(workbench).toContain('<WorkspaceSwitcher choices={switcherChoices}')
+    expect(workbench).toContain('onNewSession={newSession}')
+    expect(workbench).toContain('navigation?.startSession(target)')
     expect(workbench).toContain("api<{opened:boolean;workspace?:{id:string}}>('workspace.open'")
     expect(read('src/client/index.tsx')).toContain('createDshNavigation(')
     expect(read('src/index.ts')).toContain("ctx.inject(['directoryPicker', 'workspaceRegistry']")
@@ -103,6 +106,7 @@ describe('workbench dark theme', () => {
     expect(switcher).toContain('createPortal(')
     expect(switcher).toContain('className="dvw-workspace-backdrop"')
     expect(switcher).toContain('className="dvw-overlay dvw-workspace-layer"')
+    expect(switcher).toContain('新建会话')
     expect(styles).toContain('.dvw-workspace-layer{position:fixed!important;inset:0!important;z-index:1000!important;')
     expect(styles).toContain('.dvw-workspace-backdrop{position:absolute;inset:0;z-index:50;display:grid;place-items:center;padding:24px;background:var(--dsw-alias-bg-mask-1,rgba(0,0,0,.24));backdrop-filter:none}')
     expect(styles).toContain('.dvw-workspace-switcher{width:min(640px,calc(100vw - 48px));height:min(680px,calc(100vh - 48px));max-height:none;border-radius:18px;')

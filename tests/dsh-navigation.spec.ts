@@ -28,7 +28,8 @@ describe('Workspace switcher data', () => {
   it('reads DSH client services through get and switches sessions', () => {
     const openSession = vi.fn()
     const openWorkspace = vi.fn()
-    const stores: Record<string, unknown> = { workspaces: { list: { getSnapshot: () => workspaces } }, sessions: { list: { getSnapshot: () => sessions } }, uiWorkspace: { openSession, openWorkspace } }
+    const startSession = vi.fn()
+    const stores: Record<string, unknown> = { workspaces: { list: { getSnapshot: () => workspaces } }, sessions: { list: { getSnapshot: () => sessions } }, uiWorkspace: { openSession, openWorkspace, startSession } }
     const navigation = createDshNavigation(name => stores[name])
     expect(navigation.available).toBe(true)
     expect(navigation.choices('s2').map(choice => choice.sessions.map(session => session.active))).toEqual([[false, true], []])
@@ -36,6 +37,8 @@ describe('Workspace switcher data', () => {
     expect(openSession).toHaveBeenCalledWith('s2')
     expect(navigation.openWorkspace('w1')).toBe(true)
     expect(openWorkspace).toHaveBeenCalledWith('w1', expect.any(Function))
+    expect(navigation.startSession('w1')).toBe(true)
+    expect(startSession).toHaveBeenCalledWith('w1')
   })
 
   it('reports unavailability when the client stores are absent', () => {
@@ -44,5 +47,6 @@ describe('Workspace switcher data', () => {
     expect(navigation.choices()).toEqual([])
     expect(navigation.openSession('s1')).toBe(false)
     expect(navigation.openWorkspace('w1')).toBe(false)
+    expect(navigation.startSession('w1')).toBe(false)
   })
 })

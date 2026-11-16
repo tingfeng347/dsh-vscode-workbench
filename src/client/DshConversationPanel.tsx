@@ -3,9 +3,27 @@ import { createPortal } from 'react-dom'
 
 /** Locate the resident DSH conversation without depending on generated CSS module names. */
 export function findDshConversationRoot(documentRoot: Document = document): HTMLElement | null {
-  const scroller = documentRoot.querySelector<HTMLElement>('[data-phase] [data-conversation-scroll]')
-  const root = scroller?.closest('[data-phase]')
-  return root instanceof HTMLElement && root.dataset.phase !== undefined ? root : null
+  const roots = new Set<HTMLElement>()
+  for (const scroller of documentRoot.querySelectorAll<HTMLElement>('[data-phase] [data-conversation-scroll]')) {
+    const root = scroller.closest<HTMLElement>('[data-phase]')
+    if (root instanceof HTMLElement && root.dataset.phase !== undefined) roots.add(root)
+  }
+  let first: HTMLElement | undefined
+  let fallback: HTMLElement | undefined
+  let visible: HTMLElement | undefined
+  let best = -1
+  for (const root of roots) {
+    first ??= root
+    const style = typeof getComputedStyle === 'function' ? getComputedStyle(root) : undefined
+    if (root.hidden || root.getAttribute('aria-hidden') === 'true' || style?.display === 'none' || style?.visibility === 'hidden') continue
+    fallback ??= root
+    const rect = root.getBoundingClientRect()
+    const area = Math.max(0, rect.width) * Math.max(0, rect.height)
+    // jsdom has no layout; a rendered root still wins through the document-order fallback.
+    if (area > best) { visible = root; best = area }
+    else if (best === 0 && root.getClientRects().length > 0) { visible = root; best = 1 }
+  }
+  return visible ?? fallback ?? first ?? null
 }
 
 /** Keep the official conversation mounted while presenting it in the workbench's right column. */

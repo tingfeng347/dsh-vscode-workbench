@@ -19,7 +19,7 @@ import { createLeaf, dropPosition, MAX_PANES, paneCount, normalizeLayout, remove
 import { moveTabToGroup, swapActiveTab } from './tabs.ts'
 import type { NativeBrowser, BrowserSnapshot } from './browser.ts'
 import { dshPanelLabel } from './dshPanels.ts'
-import { ActivityBar, normalizeActivityOrder, type ActivityView } from './ActivityBar.tsx'
+import { ActivityBar, normalizeActivityLayout, normalizeActivityOrder, type ActivityView } from './ActivityBar.tsx'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.tsx'
 import type { DshNavigation, WorkspaceChoice } from './dshNavigation.ts'
 import { LspManager, type LspServerStatus } from './lsp.ts'
@@ -205,7 +205,23 @@ export function directoryAffected(directory:string,changedPaths:string[]):boolea
 /** Return the basename shown in a tab while preserving its full internal path. */
 export function tabLabel(tab:Pick<Tab,'path'|'title'|'diffSourcePath'>):string{const path=tab.title??tab.diffSourcePath??tab.path.replace(/^diff:/,'');return path.split(/[\\/]/).at(-1)??path}
 
+const ACTIVITY_VIEW_IDS = ['explorer','search','git','terminal','chat'] as const
+const ACTIVITY_FIXED_IDS = ['workspaces'] as const
+const ACTIVITY_BOTTOM_IDS = ['home','settings'] as const
+const ACTIVITY_IDS = [...ACTIVITY_FIXED_IDS, ...ACTIVITY_VIEW_IDS, ...ACTIVITY_BOTTOM_IDS] as const
 function readActivityJSON(key: string): unknown { try { return JSON.parse(localStorage.getItem(key) ?? '[]') } catch { return [] } }
+function readActivityOrder(): string[] {
+  try {
+    const stored = localStorage.getItem('dvw:activity-order-v2')
+    if (stored !== null) {
+      const value = JSON.parse(stored)
+      const saved = Array.isArray(value) ? value.filter((id): id is string => typeof id === 'string' && (ACTIVITY_IDS as readonly string[]).includes(id)) : []
+      return normalizeActivityLayout(saved, ACTIVITY_FIXED_IDS, ACTIVITY_VIEW_IDS, ACTIVITY_BOTTOM_IDS)
+    }
+  } catch {}
+  const legacy = normalizeActivityOrder(readActivityJSON('dvw:activity-order'), ACTIVITY_VIEW_IDS)
+  return normalizeActivityLayout([...ACTIVITY_FIXED_IDS, ...legacy, ...ACTIVITY_BOTTOM_IDS], ACTIVITY_FIXED_IDS, ACTIVITY_VIEW_IDS, ACTIVITY_BOTTOM_IDS)
+}
 
 /** Return the horizontal scroll offset that keeps an active tab inside the tab strip. */
 export function tabScrollLeft(scrollLeft:number,viewport:{left:number;right:number},tab:{left:number;right:number}):number{
@@ -1038,6 +1054,23 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   useEffect(()=>{if(!snapshot.visible||theme==='dsh')return;const body=document.body;const root=document.documentElement;const wasDark=body.hasAttribute('data-ds-dark-theme');const previousColorScheme=root.style.colorScheme;body.toggleAttribute('data-ds-dark-theme',theme==='dark');root.style.colorScheme=theme==='dark'?'dark':'light';return()=>{body.toggleAttribute('data-ds-dark-theme',wasDark);if(previousColorScheme==='')root.style.removeProperty('color-scheme');else root.style.colorScheme=previousColorScheme}},[snapshot.visible,theme])
   useEffect(()=>localStorage.setItem('dvw:outline',outlineVisible?'open':'closed'),[outlineVisible])
   useEffect(()=>localStorage.setItem('dvw:dsh-chat-visible',chatVisible?'open':'closed'),[chatVisible])
+  // A session created from DSH's own menu (including Creator mode) must land in the
+  // conversation panel rather than leaving the workbench on the previous panel.
+  const sessionIdRef=useRef(sessionId)
+  const sessionHydrated=useRef(sessionId!==undefined)
+  useEffect(()=>{
+    if(!sessionHydrated.current){
+      if(sessionId===undefined)return
+      sessionIdRef.current=sessionId
+      sessionHydrated.current=true
+      return
+    }
+    if(sessionIdRef.current===sessionId)return
+    sessionIdRef.current=sessionId
+    if(sessionId===undefined)return
+    setDshTabActive(false)
+    if(snapshot.visible)setChatVisible(true)
+  },[sessionId,snapshot.visible])
   useEffect(()=>localStorage.setItem('dvw:dsh-chat-width',String(Math.round(chatWidth))),[chatWidth])
   useEffect(()=>localStorage.setItem('dvw:primary-side-visible',primarySideVisible?'open':'closed'),[primarySideVisible])
   useEffect(()=>localStorage.setItem('dvw:status-bar-visible',statusVisible?'open':'closed'),[statusVisible])
@@ -1251,7 +1284,12 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const openPath=useCallback((path:string,line?:number,column?:number,highlight?:string,focusOnReveal=true)=>openRef.current(path,line,column,highlight,focusOnReveal),[])
   const [switcherOpen,setSwitcherOpen]=useState(false);const [switcherChoices,setSwitcherChoices]=useState<WorkspaceChoice[]>([]);const [switcherBusy,setSwitcherBusy]=useState(false);const [switcherError,setSwitcherError]=useState<string>()
   const openSwitcher=useCallback(()=>{setSwitcherError(undefined);setSwitcherChoices(navigation?.choices(sessionId)??[]);setSwitcherOpen(true)},[navigation,sessionId])
-  const switchSession=useCallback((id:string)=>{navigation?.openSession(id);setSwitcherOpen(false)},[navigation])
+  const showConversationAfterSwitch=useCallback(()=>{setSwitcherOpen(false);setDshTabActive(false);setChatVisible(true)},[])
+  const switchSession=useCallback((id:string)=>{navigation?.openSession(id);showConversationAfterSwitch()},[navigation,showConversationAfterSwitch])
+  const newSession=useCallback((workspaceId?:string)=>{
+    const target=workspaceId??navigation?.choices(sessionId).find(choice=>choice.sessions.some(session=>session.id===sessionId))?.id
+    if(navigation?.startSession(target)===true)showConversationAfterSwitch()
+  },[navigation,sessionId,showConversationAfterSwitch])
   const enterWorkspace=useCallback((id:string)=>{navigation?.openWorkspace(id);setSwitcherOpen(false)},[navigation])
   const createWorkspace=useCallback(async()=>{
     if(sessionId===undefined)return
@@ -1401,10 +1439,9 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const Panel=panels.find(panel=>panel.id===snapshot.bottomPanel)?.component; const terminalAvailable=panels.some(panel=>panel.id==='terminal')
   const menuTab=tabMenu===undefined?undefined:tabs.find(tab=>tab.path===tabMenu.path); const menuIndex=menuTab===undefined?-1:tabs.findIndex(tab=>tab.path===menuTab.path); const savedTabs=tabs.filter(tab=>!tab.dirty)
   const selectView=(view:WorkbenchView)=>{if(snapshot.view===view&&primarySideVisible){setPrimarySideVisible(false);return}setPrimarySideVisible(true);service.show(view)}
-  const ACTIVITY_IDS=['explorer','search','git','terminal','chat'] as const
-  const [activityOrder,setActivityOrder]=useState<string[]>(()=>normalizeActivityOrder(readActivityJSON('dvw:activity-order'),ACTIVITY_IDS))
-  const [activityHidden,setActivityHidden]=useState<string[]>(()=>{const value=readActivityJSON('dvw:activity-hidden');return Array.isArray(value)?value.filter((id):id is string=>typeof id==='string'&&(ACTIVITY_IDS as readonly string[]).includes(id)):[]})
-  useEffect(()=>localStorage.setItem('dvw:activity-order',JSON.stringify(activityOrder)),[activityOrder])
+  const [activityOrder,setActivityOrder]=useState<string[]>(readActivityOrder)
+  const [activityHidden,setActivityHidden]=useState<string[]>(()=>{const value=readActivityJSON('dvw:activity-hidden');return Array.isArray(value)?value.filter((id):id is string=>typeof id==='string'&&(ACTIVITY_VIEW_IDS as readonly string[]).includes(id)):[]})
+  useEffect(()=>localStorage.setItem('dvw:activity-order-v2',JSON.stringify(activityOrder)),[activityOrder])
   useEffect(()=>localStorage.setItem('dvw:activity-hidden',JSON.stringify(activityHidden)),[activityHidden])
   useEffect(()=>{
     if(activityHidden.includes('chat')&&chatVisible)setChatVisible(false)
@@ -1716,7 +1753,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     <DshConversationTheme visible={chatShown} colorScheme={colorScheme} followDsh={false}/>
     <DshReviewActions visible={chatShown&&reviewEnabled} files={reviewFiles} count={reviewSnapshot.changes.length} disabled={reviewSnapshot.busy||reviewSnapshot.working} onOpen={path=>void openPath(path)} onAcceptAll={keepAllReview} onRejectAll={()=>void rejectAllReview()}/>
     {chatShown&&<aside className="dvw-chat"><PanelResizer className="dvw-chat-resizer" label="拖动调整 DSH 对话栏宽度" width={chatWidth} min={DSH_CHAT_MIN_WIDTH} max={DSH_CHAT_MAX_WIDTH} defaultWidth={DSH_CHAT_DEFAULT_WIDTH} direction={-1} hideBelow={200} onHide={()=>setChatVisible(false)} onWidth={setChatWidth}/><header className="dvw-chat-head"><span><DshMark/> DSH</span><button className="dvw-icon" title="关闭 DSH 对话栏" onClick={()=>setChatVisible(false)}><Icon name="close"/></button></header><div className="dvw-chat-body"/></aside>}
-    {switcherOpen&&<WorkspaceSwitcher choices={switcherChoices} activeSessionId={sessionId} unavailable={navigation?.available===false} busy={switcherBusy} error={switcherError} theme={colorScheme} onCreate={()=>void createWorkspace()} onSwitch={switchSession} onOpenWorkspace={enterWorkspace} onClose={()=>setSwitcherOpen(false)}/>}
+    {switcherOpen&&<WorkspaceSwitcher choices={switcherChoices} activeSessionId={sessionId} unavailable={navigation?.available===false} busy={switcherBusy} error={switcherError} theme={colorScheme} onCreate={()=>void createWorkspace()} onNewSession={newSession} onSwitch={switchSession} onOpenWorkspace={enterWorkspace} onClose={()=>setSwitcherOpen(false)}/>}
     {settingsNode!==undefined&&createPortal(settingsPage,settingsNode)}
     <ActivityBar
         views={[

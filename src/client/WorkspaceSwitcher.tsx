@@ -4,7 +4,7 @@ import { Icon } from './Icon.tsx'
 import type { WorkspaceChoice } from './dshNavigation.ts'
 
 /** Centered switcher: existing workspaces, their sessions, and a new-workspace action. */
-export function WorkspaceSwitcher({ choices, activeSessionId, unavailable, busy, error, theme, onCreate, onSwitch, onOpenWorkspace, onClose }: {
+export function WorkspaceSwitcher({ choices, activeSessionId, unavailable, busy, error, theme, onCreate, onNewSession, onSwitch, onOpenWorkspace, onClose }: {
   choices: WorkspaceChoice[]
   activeSessionId?: string
   unavailable: boolean
@@ -12,6 +12,7 @@ export function WorkspaceSwitcher({ choices, activeSessionId, unavailable, busy,
   error?: string
   theme?: 'dark' | 'light' | 'white' | 'eyecare'
   onCreate(): void
+  onNewSession(workspaceId?: string): void
   onSwitch(sessionId: string): void
   onOpenWorkspace(workspaceId: string): void
   onClose(): void
@@ -50,7 +51,11 @@ export function WorkspaceSwitcher({ choices, activeSessionId, unavailable, busy,
           </div>)}
       </div>
       {error !== undefined && <p className="dvw-workspace-error">{error}</p>}
-      <footer><button className="dvw-primary-button" disabled={busy} onClick={onCreate}>{busy ? '正在打开…' : '新建工作区…'}</button><button onClick={onClose}>取消</button></footer>
+      <footer>
+        <button className="dvw-workspace-new-session" disabled={unavailable} onClick={() => onNewSession(current)}><Icon name="add"/>新建会话</button>
+        <button className="dvw-primary-button" disabled={busy} onClick={onCreate}>{busy ? '正在打开…' : '新建工作区…'}</button>
+        <button onClick={onClose}>取消</button>
+      </footer>
     </section>
     </div>
   </div>, document.body)

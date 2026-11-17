@@ -296,6 +296,24 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-float-handle[data-handle=ne]{top:34px;right:0;width:12px;height:12px;cursor:nesw-resize}
 .dvw-float-handle[data-handle=sw]{bottom:0;left:0;width:12px;height:12px;cursor:nesw-resize}
 .dvw-float-handle[data-handle=se]{right:0;bottom:0;width:12px;height:12px;cursor:nwse-resize}
+.dvw-unsupported{position:absolute;inset:0;z-index:5;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:var(--dvw-surface-1)}
+.dvw-unsupported-icon{font-size:44px!important;line-height:1;color:color-mix(in srgb,var(--dvw-text) 38%,transparent)}
+.dvw-unsupported-label{font-size:14px;color:var(--dvw-text-2);max-width:80%;text-align:center;word-break:break-all}
+.dvw-editor-body:has(.dvw-unsupported)>.dvw-message{display:none}
+.dvw-open-with{display:inline-flex;flex-direction:column;align-items:center;gap:10px}
+.dvw-open-with-buttons{display:inline-flex;align-items:stretch;min-width:132px;border:1px solid var(--dvw-border);border-radius:10px;background:transparent;overflow:hidden}
+.dvw-open-with-main,.dvw-open-with-more{border:0;background:transparent;color:var(--dvw-text);font:inherit;font-size:14px;display:inline-flex;align-items:center;justify-content:center;gap:8px;cursor:pointer}
+.dvw-open-with-main{height:40px;padding:0 18px;flex:1}
+.dvw-open-with-more{width:40px;height:40px;padding:0;border-left:1px solid var(--dvw-border)}
+.dvw-open-with-main .codicon,.dvw-open-with-more .codicon{font-size:16px}
+.dvw-open-with-main:hover:not(:disabled),.dvw-open-with-more:hover:not(:disabled){background:var(--dvw-hover)}
+.dvw-open-with-main:disabled,.dvw-open-with-more:disabled{opacity:.6;cursor:default}
+.dvw-open-with-main img,.dvw-open-with-menu img{object-fit:contain;flex:none}
+.dvw-open-with{position:relative}
+.dvw-open-with-menu{position:absolute!important;left:50%;top:calc(100% + 8px)!important;bottom:auto!important;transform:translateX(-50%);z-index:8;min-width:208px;padding:6px;border-radius:10px}
+.dvw-open-with-menu button{white-space:nowrap;display:flex;align-items:center;gap:9px;height:36px;padding:0 10px;font-size:13px;border-radius:7px}
+.dvw-open-with-note{font-size:12px;color:var(--dvw-text-3)}
+.dvw-open-with-error{color:var(--dvw-warn)}
 `
 
 export function installStyles(): () => void {

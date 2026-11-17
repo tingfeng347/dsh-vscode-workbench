@@ -21,6 +21,7 @@ import type { NativeBrowser, BrowserSnapshot } from './browser.ts'
 import { dshPanelLabel } from './dshPanels.ts'
 import { ActivityBar, normalizeActivityLayout, normalizeActivityOrder, type ActivityView } from './ActivityBar.tsx'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.tsx'
+import { CenteredOpenWith, openExternal } from './OpenWith.tsx'
 import type { DshNavigation, WorkspaceChoice } from './dshNavigation.ts'
 import { LspManager, type LspServerStatus } from './lsp.ts'
 import { TS_INTELLISENSE_KEY, disposeTypeScriptProject, indexTypeScriptProject, refreshIndexedFiles, tsIntellisenseEnabled, typeScriptProjectStatus, workspacePathFromModel } from './typescriptProject.ts'
@@ -32,7 +33,7 @@ import { resetWorkspaceDocuments, WorkspaceRequestScope } from './workspaceState
 import { WorkbenchSettings } from './SettingsPanel.tsx'
 import { settingsHost } from './settingsHost.ts'
 import { applyFloatGesture, clampFloatRect, defaultFloatRect, FLOAT_BAR_HEIGHT, FLOAT_MAX_KEY, FLOAT_RECT_KEY, readFloatMax, readFloatRect, readOpenMode, writeOpenMode, type FloatGesture, type FloatRect, type WorkbenchOpenMode } from './floatWindow.ts'
-import { DEEPSEEK_CHAT_PROVIDER_ID, type CommitDetail, type CommitLanguage, type CommitMessagePreferences, type CommitModelCatalog, type CommitModelOption, type CommitModelSelection } from '../commit-message.ts'
+import type { CommitDetail, CommitLanguage, CommitMessagePreferences, CommitModelCatalog, CommitModelOption, CommitModelSelection } from '../commit-message.ts'
 import { outermostTreeEntries, remapTreeSelectionPaths, selectAllTreePaths, selectTreePath, type TreeSelection } from './treeSelection.ts'
 
 interface Tab extends FileDocument { instance?: symbol; dirty: boolean; draft: string; loaded?: boolean; line?: number; column?: number; highlight?: string; focusOnReveal?: boolean; external?: boolean; preview?: boolean; title?: string; diff?: GitDiff; diffMode?: 'inline' | 'split'; diffSourcePath?:string; imageUrl?:string; documentPreview?:DocumentPreviewKind; documentUrl?:string }
@@ -100,8 +101,8 @@ function readStoredCommitModel(): CommitModelSelection | undefined {
     const value: unknown = JSON.parse(saved)
     if (value === null || typeof value !== 'object' || Array.isArray(value)) return undefined
     const { provider, model } = value as Record<string, unknown>
-    return provider === DEEPSEEK_CHAT_PROVIDER_ID && typeof model === 'string' && model.trim() !== ''
-      ? { provider, model: model.trim() }
+    return typeof provider === 'string' && provider.trim() !== '' && typeof model === 'string' && model.trim() !== ''
+      ? { provider: provider.trim(), model: model.trim() }
       : undefined
   } catch { return undefined }
 }
@@ -385,6 +386,8 @@ function Tree({ sessionId, root, path, depth, expanded, selected, selectedPaths,
       {single && <button role="menuitem" onClick={() => { onAddToDsh(context.entry.path, context.entry.kind === 'directory'); setContext(undefined) }}><DshMark size={14}/>添加到 DSH 对话<kbd>{ADD_TO_DSH_SHORTCUT}</kbd></button>}
       <button role="menuitem" onClick={() => { void copyText(paths.join('\n')); setContext(undefined) }}><Icon name="copy"/>复制{single ? '相对路径' : ` ${paths.length} 个相对路径`}</button>
       <button role="menuitem" onClick={() => { void copyText(paths.map(path => absoluteEntryPath(root, path)).join('\n')); setContext(undefined) }}><Icon name="copy"/>复制{single ? '绝对路径' : ` ${paths.length} 个绝对路径`}</button>
+      {single && <button role="menuitem" onClick={() => { void openExternal(sessionId, context.entry.path).catch(error => alert(error instanceof Error ? error.message : String(error))); setContext(undefined) }}><Icon name="link-external"/>用默认应用打开</button>}
+      {single && <button role="menuitem" onClick={() => { void openExternal(sessionId, context.entry.path, { reveal: true }).catch(error => alert(error instanceof Error ? error.message : String(error))); setContext(undefined) }}><Icon name="folder-opened"/>显示文件位置</button>}
       {single && <button role="menuitem" onClick={() => { setRenaming({ path: context.entry.path, value: context.entry.name }); setContext(undefined) }}><Icon name="edit"/>重命名</button>}
       <button className="dvw-context-delete" role="menuitem" onClick={() => { onDelete(selectedForContext ? selectedEntries : [context.entry]); setContext(undefined) }}><Icon name="trash"/>删除{selectedForContext && selectedEntries.length > 1 ? ` ${selectedEntries.length} 个项目` : ''}</button>
     </div>
@@ -1017,9 +1020,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
         throw new Error('DSH 返回的模型目录格式不正确')
       }
       const catalog=result as CommitModelCatalog
-      const defaultModel=catalog.defaultModel?.provider===DEEPSEEK_CHAT_PROVIDER_ID
-        ?{provider:catalog.defaultModel.provider,model:catalog.defaultModel.model}
-        :undefined
+      const defaultModel=catalog.defaultModel===undefined?undefined:{provider:catalog.defaultModel.provider,model:catalog.defaultModel.model}
       if(request!==commitModelsRequest.current)return
       setCommitModels({status:'ready',models:catalog.models,unavailable:Array.isArray(catalog.unavailable)?catalog.unavailable:[],...(defaultModel===undefined?{}:{defaultModel})})
     }catch(error){
@@ -1397,6 +1398,10 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const closeAll=()=>{const dirty=tabs.filter(tab=>tab.dirty);if(dirty.length>0&&!confirm(`有 ${dirty.length} 个文件包含未保存更改，确定全部关闭？`))return;loadingTabs.current.clear();setTabs([]);setActive(undefined);setError(undefined);setTabMenu(undefined)}
   const removeTabs=(targets:Tab[],verb:string)=>{if(targets.length===0)return;const dirty=targets.filter(tab=>tab.dirty).length;if(dirty>0&&!confirm(`有 ${dirty} 个文件包含未保存更改，确定${verb}？`))return;const paths=new Set(targets.map(tab=>tab.path));for(const path of paths)loadingTabs.current.delete(tabLoadKey(focusedRef.current,path));const remaining=tabsRef.current.filter(tab=>!paths.has(tab.path));setTabs(remaining);if(active!==undefined&&paths.has(active))setActive(remaining.at(-1)?.path);setTabMenu(undefined)}
   const activeTab=tabs.find(tab=>tab.path===active)
+  // Files the workbench cannot render fall back to the desktop's own file handlers.
+  const unsupportedTab=activeTab!==undefined&&(activeTab.binary||activeTab.tooLarge)&&!activeTab.path.startsWith('diff:')
+    ?{path:activeTab.path,label:activeTab.binary?'该格式文件暂时无法预览':`文件超过 5 MiB：${activeTab.path}`}
+    :undefined
   const reviewByPath=useMemo(()=>{
     const map=new Map<string,ReviewChange[]>()
     for(const change of reviewSnapshot.changes){const list=map.get(change.path);if(list===undefined)map.set(change.path,[change]);else list.push(change)}
@@ -1512,7 +1517,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   },[reviewEnabled])
   const suppressAttachmentDrop=(event:DragEvent)=>{if(!event.dataTransfer.types.includes('Files'))return;const target=event.target;const insideTree=target instanceof Element&&target.closest('.dvw-tree')!==null;if(!insideTree){event.preventDefault();event.stopPropagation()}}
   const commitModelAvailable=commitModels.status==='ready'&&commitModel!==undefined&&commitModels.models.some(model=>model.provider===commitModel.provider&&model.model===commitModel.model)
-  const commitModelHint=commitModels.status==='loading'||commitModels.status==='idle'?'正在读取 DSH 聊天中的 DeepSeek 模型':commitModels.status==='error'||commitModels.unavailable.length>0?'DeepSeek 聊天模型当前不可用，请在设置中刷新或重新选择':'没有可用的 DeepSeek 聊天模型，请在设置中选择'
+  const commitModelHint=commitModels.status==='loading'||commitModels.status==='idle'?'正在读取 DSH 聊天中的模型':commitModels.status==='error'||commitModels.unavailable.length>0?'聊天模型当前不可用，请在设置中刷新或重新选择':'没有可用的聊天模型，请在设置中选择'
   const settingsPage=<WorkbenchSettings reviewMode={reviewMode} setReviewMode={setReviewMode} reviewFollow={reviewFollow} setReviewFollow={setReviewFollow} theme={theme} setTheme={setTheme} fontSize={fontSize} setFontSize={setFontSize} primarySideVisible={primarySideVisible} setPrimarySideVisible={setPrimarySideVisible} chatVisible={chatVisible} setChatVisible={setChatVisible} statusVisible={statusVisible} setStatusVisible={setStatusVisible} sideWidth={sideWidth} setSideWidth={setSideWidth} chatWidth={chatWidth} setChatWidth={setChatWidth} chatMinWidth={DSH_CHAT_MIN_WIDTH} chatMaxWidth={DSH_CHAT_MAX_WIDTH} markdownView={markdownView} setMarkdownView={setMarkdownView} defaultBrowser={defaultBrowser} setDefaultBrowser={setDefaultBrowser} openMode={openMode} setOpenMode={setOpenMode} resetFloatWindow={resetFloatGeometry} commitDetail={commitDetail} setCommitDetail={setCommitDetail} commitLanguage={commitLanguage} setCommitLanguage={setCommitLanguage} commitModel={commitModel} commitModelConfigured={commitModelConfigured} setCommitModel={selectCommitModel} commitModels={commitModels.models} commitModelStatus={commitModels.status} commitModelUnavailable={commitModels.unavailable} commitModelError={commitModels.error??''} refreshCommitModels={()=>void refreshCommitModels()} tsIntellisense={tsIntellisense} setTsIntellisense={setTsIntellisense} tsIndex={tsIndex} lspServers={lspServers} lspBusy={lspBusy} lspError={lspError} changeLsp={changeLspAction} refreshLsp={refreshLspAction}/>
   if(!snapshot.visible)return settingsNode===undefined?null:createPortal(settingsPage,settingsNode)
   const floatTop=dshTitlebarHeight()
@@ -1755,6 +1760,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     {chatShown&&<aside className="dvw-chat"><PanelResizer className="dvw-chat-resizer" label="拖动调整 DSH 对话栏宽度" width={chatWidth} min={DSH_CHAT_MIN_WIDTH} max={DSH_CHAT_MAX_WIDTH} defaultWidth={DSH_CHAT_DEFAULT_WIDTH} direction={-1} hideBelow={200} onHide={()=>setChatVisible(false)} onWidth={setChatWidth}/><header className="dvw-chat-head"><span><DshMark/> DSH</span><button className="dvw-icon" title="关闭 DSH 对话栏" onClick={()=>setChatVisible(false)}><Icon name="close"/></button></header><div className="dvw-chat-body"/></aside>}
     {switcherOpen&&<WorkspaceSwitcher choices={switcherChoices} activeSessionId={sessionId} unavailable={navigation?.available===false} busy={switcherBusy} error={switcherError} theme={colorScheme} onCreate={()=>void createWorkspace()} onNewSession={newSession} onSwitch={switchSession} onOpenWorkspace={enterWorkspace} onClose={()=>setSwitcherOpen(false)}/>}
     {settingsNode!==undefined&&createPortal(settingsPage,settingsNode)}
+    {unsupportedTab!==undefined&&sessionId!==undefined&&<CenteredOpenWith key={unsupportedTab.path} sessionId={sessionId} path={unsupportedTab.path} label={unsupportedTab.label}/>}
     <ActivityBar
         views={[
           {id:'explorer',label:'资源管理器',icon:<Icon name="files"/>,active:primarySideVisible&&snapshot.view==='explorer',onActivate:()=>selectView('explorer')},

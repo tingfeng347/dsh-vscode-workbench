@@ -61,17 +61,17 @@ describe('commit message generation', () => {
     expect(normalizeCommitPreferences('unexpected', 'fr')).toEqual({ detail: 'standard', language: 'auto' })
     expect(normalizeCommitPreferences('detailed', 'zh')).toEqual({ detail: 'detailed', language: 'zh' })
     expect(normalizeCommitModelSelection(' deepseek-official ', ' deepseek-flash ')).toEqual({ provider: 'deepseek-official', model: 'deepseek-flash' })
-    expect(normalizeCommitModelSelection('gateway', 'team-coder-v1')).toBeUndefined()
+    expect(normalizeCommitModelSelection('gateway', 'team-coder-v1')).toEqual({ provider: 'gateway', model: 'team-coder-v1' })
     expect(normalizeCommitModelSelection('', 'deepseek-chat')).toBeUndefined()
     expect(normalizeCommitModelSelection('deepseek', null)).toBeUndefined()
     expect(firstSupportedCommitModel(
       { provider: 'gateway', model: 'team-coder-v1' },
       { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
       { provider: 'deepseek-official', model: 'deepseek-flash' },
-    )).toEqual({ provider: 'deepseek-official', model: 'deepseek-v4-pro' })
+    )).toEqual({ provider: 'gateway', model: 'team-coder-v1' })
   })
 
-  it('loads only the models used by the DeepSeek chat picker and preserves their badges', async () => {
+  it('loads text models from every provider and preserves their badges', async () => {
     const requested: string[] = []
     const catalog = await loadCommitModelCatalog({
       listProviders: () => [
@@ -89,12 +89,13 @@ describe('commit message generation', () => {
     })
     expect(catalog.models).toEqual([
       { provider: 'deepseek-official', model: 'deepseek-flash', id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', providerName: 'DeepSeek', badge: { text: '1017', tone: 'info' } },
+      { provider: 'gateway', model: 'internal-v1', id: 'internal-v1', name: 'Internal V1', providerName: '内部网关', description: '团队模型' },
     ])
     expect(catalog.unavailable).toEqual([])
-    expect(requested).toEqual(['deepseek-official'])
+    expect(requested).toEqual(['deepseek-official', 'gateway'])
   })
 
-  it('keeps DSH chat model metadata and its default while excluding other providers', () => {
+  it('keeps DSH chat model metadata and its default for every provider', () => {
     expect(commitCatalogFromDsh({
       default: { provider: 'deepseek-official', model: 'deepseek-flash' },
       groups: [
@@ -113,27 +114,40 @@ describe('commit message generation', () => {
       models: [
         { provider: 'deepseek-official', model: 'deepseek-flash', id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', providerName: 'DeepSeek', badge: { text: '1017', tone: 'info' } },
         { provider: 'deepseek-official', model: 'deepseek-v4-pro', id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', providerName: 'DeepSeek' },
+        { provider: 'gateway', model: 'team-coder-v1', id: 'team-coder-v1', name: 'Team Coder', providerName: '团队网关' },
       ],
-      unavailable: [],
+      unavailable: [{ provider: 'other', providerName: '其他来源', message: 'offline' }],
       defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' },
     })
   })
 
-  it('surfaces an unavailable DeepSeek provider instead of treating it as a removed model', async () => {
+  it('falls back to provider models when the chat catalog has none', async () => {
     await expect(loadCommitModelCatalog({
-      listProviders: () => [{ id: 'gateway', name: '团队网关' }],
-      listModels: async () => [],
+      listProviders: () => [{ id: 'magpie', name: 'Magpie' }],
+      listModels: async provider => [{ provider, id: 'gpt-5', name: 'GPT-5' }],
     })).resolves.toEqual({
-      models: [],
-      unavailable: [{ provider: 'deepseek-official', providerName: 'DeepSeek', message: 'DSH 没有注册 DeepSeek 聊天模型来源' }],
+      models: [{ provider: 'magpie', model: 'gpt-5', id: 'gpt-5', name: 'GPT-5', providerName: 'Magpie' }],
+      unavailable: [],
     })
     expect(commitCatalogFromDsh({
       default: { provider: 'deepseek-official', model: 'deepseek-flash' },
-      groups: [{ id: 'gateway', name: '团队网关', models: [{ id: 'team-coder-v1', name: 'Team Coder' }] }],
+      groups: [],
       failures: [],
     })).toEqual({
       models: [],
-      unavailable: [{ provider: 'deepseek-official', providerName: 'DeepSeek', message: 'DSH 聊天没有提供 DeepSeek 模型目录' }],
+      unavailable: [{ provider: 'chat', providerName: 'DSH 聊天模型', message: '聊天面板没有提供可用的文本模型' }],
+    })
+  })
+
+  it('keeps a custom-provider chat catalog when no DeepSeek group exists', () => {
+    expect(commitCatalogFromDsh({
+      default: { provider: 'magpie', model: 'gpt-5' },
+      groups: [{ id: 'magpie', name: 'Magpie', models: [{ id: 'gpt-5', name: 'GPT-5' }] }],
+      failures: [],
+    })).toEqual({
+      models: [{ provider: 'magpie', model: 'gpt-5', id: 'gpt-5', name: 'GPT-5', providerName: 'Magpie' }],
+      unavailable: [],
+      defaultModel: { provider: 'magpie', model: 'gpt-5' },
     })
   })
 

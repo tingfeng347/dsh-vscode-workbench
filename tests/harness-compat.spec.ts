@@ -64,6 +64,9 @@ describe('Harness 0.2 host integration', () => {
         : [{ provider, id: 'team-coder-v1', name: 'Team Coder' }],
     }
     const sessionController = {
+      canOpenWorkspacePath: () => true,
+      workspacePathApplications: async () => [{ id: 'com.example.player', name: 'Test Player', default: true, icon: null }],
+      openWorkspacePath: vi.fn(async () => ({ opened: true as const })),
       modelCatalog: async () => ({
         default: { provider: 'deepseek-official', model: 'deepseek-flash' },
         groups: [
@@ -140,6 +143,7 @@ describe('Harness 0.2 host integration', () => {
         models: [
           { provider: 'deepseek-official', model: 'deepseek-flash', providerName: 'DeepSeek', badge: { text: '1017', tone: 'info' } },
           { provider: 'deepseek-official', model: 'deepseek-v4-pro', providerName: 'DeepSeek' },
+          { provider: 'gateway', model: 'team-coder-v1', providerName: '团队网关' },
         ],
         unavailable: [],
         defaultModel: { provider: 'deepseek-official', model: 'deepseek-v4-pro' },
@@ -152,6 +156,20 @@ describe('Harness 0.2 host integration', () => {
     expect((await workspace('missing')).status).toBe(404)
     expect((await fetch(`${base}/dsh-vscode/api/workspace`, { method: 'POST', headers: { ...headers, origin: 'https://evil.example' }, body: '{}' })).status).toBe(403)
     directory = process.cwd()
+    const applications = await fetch(`${base}/dsh-vscode/api/fs.applications`, {
+      method: 'POST', headers, body: JSON.stringify({ sessionId: 'main', path: 'package.json' }),
+    })
+    expect(await applications.json()).toMatchObject({
+      value: { available: true, applications: [{ id: 'com.example.player', name: 'Test Player', default: true }] },
+    })
+    const openExternal = await fetch(`${base}/dsh-vscode/api/fs.openExternal`, {
+      method: 'POST', headers, body: JSON.stringify({ sessionId: 'main', path: 'package.json', application: 'com.example.player' }),
+    })
+    expect(await openExternal.json()).toMatchObject({ value: { opened: true } })
+    expect(sessionController.openWorkspacePath).toHaveBeenCalledWith(
+      expect.objectContaining({ path: expect.stringContaining('package.json'), application: 'com.example.player' }),
+      expect.anything(),
+    )
     expect((await fetch(`${base}/dsh-vscode-terminal/api/list`, { method: 'POST', headers, body: '{"sessionId":"main"}' })).status).toBe(404)
     for (const route of upgrades) {
       const socket = { destroy: vi.fn() }

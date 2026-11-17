@@ -10,8 +10,8 @@ import chokidar from 'chokidar'
 import { WebSocket, WebSocketServer } from 'ws'
 import type { HostContext } from './context.ts'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
-import { DEEPSEEK_CHAT_PROVIDER_ID, commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, type CommitModelSelection, type DshChatModelCatalog } from './commit-message.ts'
-import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitCommitContext, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, searchWorkspace, uploadFile, workspacePreviewFile } from './host.ts'
+import { commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, type CommitModelCatalog, type CommitModelSelection, type DshChatModelCatalog } from './commit-message.ts'
+import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitCommitContext, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host.ts'
 import { installLsp, lspStatuses, resolveLsp, uninstallLsp, pipeLanguageServer } from './lsp.ts'
 import { officePdf, officeStatus } from './office.ts'
 import { WorkspaceSite } from './site.ts'
@@ -27,6 +27,15 @@ export const name = 'dsh-vscode-workbench'
 let dshDirectoryPicker: import('./context.ts').DirectoryPickerLike | undefined
 let dshWorkspaceRegistry: import('./context.ts').WorkspaceRegistryLike | undefined
 export const inject = ['webServer', 'sessions', 'connection', 'workingDirectory']
+
+/** The DSH service that hands workspace paths to the desktop, mirroring its own preview actions. */
+interface DesktopOpener {
+  canOpenWorkspacePath?(): boolean
+  openWorkspacePath?(request: { path: string; action?: 'reveal'; application?: string }, signal?: AbortSignal): Promise<{ opened: true }>
+  workspacePathApplications?(request: { path: string }, signal?: AbortSignal): Promise<Array<{ id: string; name: string; default: boolean; icon: string | null }>>
+}
+
+const NATIVE_OPEN_TIMEOUT_MS = 15000
 
 function stringArrayField(body: Record<string, unknown>, key: string): string[] {
   const value = body[key]
@@ -80,9 +89,21 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     if (llm === undefined) throw new WorkbenchError('llm-unavailable', 'DSH 的模型服务当前不可用。', 503)
     try {
       const sessionController = ctx.get('sessionController') as unknown as { modelCatalog(): Promise<DshChatModelCatalog> } | undefined
-      const catalog = sessionController === undefined
-        ? await loadCommitModelCatalog(llm, signal)
-        : commitCatalogFromDsh(await loadChatModelCatalog(sessionController, signal))
+      let catalog: CommitModelCatalog | undefined
+      if (sessionController !== undefined) {
+        try {
+          catalog = commitCatalogFromDsh(await loadChatModelCatalog(sessionController, signal))
+        } catch (error) {
+          if (signal?.aborted === true) throw error
+        }
+      }
+      // Custom provider setups can expose an empty chat catalog; fall back to the LLM runtime instead
+      // of failing the whole picker.
+      if (catalog === undefined || catalog.models.length === 0) {
+        const fallback = await loadCommitModelCatalog(llm, signal)
+        if (fallback.models.length > 0) catalog = fallback
+        else if (catalog === undefined) catalog = fallback
+      }
       const sessionId = typeof body.sessionId === 'string' ? body.sessionId : undefined
       const sessionSelection = currentChatCommitModel(ctx, sessionId)
       const defaultModel = sessionSelection !== undefined && catalog.models.some(model => model.provider === sessionSelection.provider && model.model === sessionSelection.model)
@@ -123,6 +144,34 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     case 'fs.create': return createEntry(cwd, stringField(body, 'path'), body.kind === 'directory' ? 'directory' : 'file').then(() => ({ ok: true }))
     case 'fs.rename': return renameEntry(cwd, stringField(body, 'path'), stringField(body, 'nextPath')).then(() => ({ ok: true }))
     case 'fs.delete': return deleteEntry(cwd, stringField(body, 'path')).then(() => ({ ok: true }))
+    case 'fs.applications': {
+      const target = await workspacePath(cwd, stringField(body, 'path'))
+      const opener = ctx.get('sessionController') as unknown as DesktopOpener | undefined
+      if (opener?.canOpenWorkspacePath?.() !== true || opener.workspacePathApplications === undefined) {
+        return { available: false, applications: [] }
+      }
+      const applications = await opener.workspacePathApplications({ path: target.absolute }, AbortSignal.timeout(NATIVE_OPEN_TIMEOUT_MS))
+      return { available: true, applications }
+    }
+    case 'fs.openExternal': {
+      const target = await workspacePath(cwd, stringField(body, 'path'))
+      const opener = ctx.get('sessionController') as unknown as DesktopOpener | undefined
+      if (opener?.canOpenWorkspacePath?.() !== true || opener.openWorkspacePath === undefined) {
+        throw new WorkbenchError('open-unavailable', '当前 DSH 没有提供用本地应用打开文件的能力。', 503)
+      }
+      const application = typeof body.application === 'string' && body.application !== '' ? body.application : undefined
+      const reveal = body.action === 'reveal'
+      try {
+        await opener.openWorkspacePath({
+          path: target.absolute,
+          ...(reveal ? { action: 'reveal' as const } : {}),
+          ...(reveal || application === undefined ? {} : { application }),
+        }, AbortSignal.timeout(NATIVE_OPEN_TIMEOUT_MS))
+      } catch (error) {
+        throw new WorkbenchError('open-failed', error instanceof Error ? error.message : String(error), 502)
+      }
+      return { opened: true }
+    }
     case 'project.sources': return projectSources(cwd)
     case 'office.status': return officeStatus()
     case 'preview.site': {
@@ -138,14 +187,11 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     case 'git.action': return gitAction(cwd, stringField(body, 'action'), typeof body.path === 'string' ? body.path : undefined, typeof body.value === 'string' ? body.value : undefined)
     case 'git.commitMessage': {
       const hasExplicitSelection = body.provider !== undefined || body.model !== undefined
-      if (hasExplicitSelection && (typeof body.provider !== 'string' || body.provider.trim() !== DEEPSEEK_CHAT_PROVIDER_ID)) {
-        throw new WorkbenchError('model-unavailable', '提交信息只支持 DSH 聊天中使用的 DeepSeek 模型，请到 Workbench 设置重新选择。', 409)
-      }
       const selection = hasExplicitSelection
         ? normalizeCommitModelSelection(body.provider, body.model)
         : currentChatCommitModel(ctx, sessionId)
       if (selection === undefined) {
-        throw new WorkbenchError('model-unavailable', '无法读取 DSH 聊天当前使用的 DeepSeek 模型，请到 Workbench 设置中选择模型。', 409)
+        throw new WorkbenchError('model-unavailable', '无法读取 DSH 聊天当前使用的模型，请到 Workbench 设置中选择模型。', 409)
       }
       const llm: LlmRuntime | undefined = ctx.get('llm')
       if (llm === undefined) throw new WorkbenchError('llm-unavailable', 'DSH 的模型服务当前不可用。', 503)

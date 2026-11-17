@@ -56,7 +56,7 @@ export function gitActionErrorNotice(action: string, error: unknown, hasUnstaged
   if (code === 'model-unavailable' || code === 'llm-unavailable') {
     return {
       title: '无法生成提交信息',
-      message: raw || '请到 Workbench 设置的“提交信息”中选择一个可用的 DeepSeek 聊天模型。',
+      message: raw || '请到 Workbench 设置的“提交信息”中选择一个可用的聊天模型。',
     }
   }
   if (action === 'commit' && (code === 'no-staged-changes' || /nothing added to commit|no changes added to commit|nothing to commit/iu.test(raw))) {

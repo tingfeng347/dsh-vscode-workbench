@@ -47,7 +47,7 @@ describe('branchErrorMessage', () => {
     const missing = Object.assign(new Error(''), { code: 'llm-unavailable' })
     expect(gitActionErrorNotice('commitMessage', missing)).toMatchObject({
       title: '无法生成提交信息',
-      message: '请到 Workbench 设置的“提交信息”中选择一个可用的 DeepSeek 聊天模型。',
+      message: '请到 Workbench 设置的“提交信息”中选择一个可用的聊天模型。',
     })
   })
 })

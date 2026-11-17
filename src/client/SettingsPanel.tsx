@@ -224,9 +224,12 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
   const { refreshLsp } = props
   useEffect(() => { refreshLsp() }, [refreshLsp])
   const followedModel=props.commitModels.find(model=>model.provider===props.commitModel?.provider&&model.model===props.commitModel?.model)
+  // Several providers can expose the same display name; disambiguate those with the provider name.
+  const modelNameCount=new Map<string,number>()
+  for (const model of props.commitModels) modelNameCount.set(model.name,(modelNameCount.get(model.name)??0)+1)
   const commitModelOptions: Array<readonly [string, string]> = [
     [FOLLOW_CHAT_MODEL, followedModel===undefined?'跟随 DSH 聊天模型':`跟随 DSH 聊天模型（${followedModel.name}）`],
-    ...props.commitModels.map(model => [modelKey(model), model.name] as const),
+    ...props.commitModels.map(model => [modelKey(model), (modelNameCount.get(model.name)??0)>1?`${model.name} · ${model.providerName}`:model.name] as const),
   ]
   const commitModelBadges: Partial<Record<string, ModelBadge>> = Object.fromEntries(props.commitModels.flatMap(model => model.badge === undefined ? [] : [[modelKey(model), model.badge]]))
   if (followedModel?.badge!==undefined) commitModelBadges[FOLLOW_CHAT_MODEL]=followedModel.badge
@@ -303,7 +306,7 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
       <Row title="语言" description="跟随最近提交会沿用仓库里上一条提交的语言。">
         <Selector label="提交信息语言" value={props.commitLanguage} options={COMMIT_LANGUAGES} onChange={props.setCommitLanguage}/>
       </Row>
-      <Row title="生成模型" description="未手动选择时跟随 DSH 聊天的当前 DeepSeek 模型，不需要先与 AI 对话即可生成提交信息。">
+      <Row title="生成模型" description="未手动选择时跟随 DSH 聊天当前使用的模型，不需要先与 AI 对话即可生成提交信息。">
         {props.commitModelStatus==='ready'&&commitModelOptions.length>0
           ? <><Selector
                 label="提交信息生成模型"

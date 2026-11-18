@@ -30,6 +30,11 @@ async function canonicalRoot(cwd: string): Promise<string> {
   return realpath(cwd).catch(() => { throw new WorkbenchError('cwd-missing', 'session working directory does not exist', 404) })
 }
 
+function isMissingPath(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
 /** Resolve a caller-relative path and reject traversal and symlink escape. */
 export async function workspacePath(cwd: string, raw: string, create = false): Promise<{ root: string; absolute: string }> {
   if (isAbsolute(raw)) throw new WorkbenchError('path-invalid', 'absolute paths are not accepted')
@@ -40,7 +45,10 @@ export async function workspacePath(cwd: string, raw: string, create = false): P
     const parent = await realpath(dirname(absolute)).catch(() => { throw new WorkbenchError('parent-missing', 'parent directory does not exist', 404) })
     if (!inside(root, parent)) throw new WorkbenchError('path-outside', 'path follows a symlink outside the workspace', 403)
   } else {
-    const actual = await realpath(absolute).catch(() => { throw new WorkbenchError('not-found', 'path does not exist', 404) })
+    const actual = await realpath(absolute).catch(error=>{
+      if (isMissingPath(error)) throw new WorkbenchError('not-found', 'path does not exist', 404)
+      throw error
+    })
     if (!inside(root, actual)) throw new WorkbenchError('path-outside', 'path follows a symlink outside the workspace', 403)
   }
   return { root, absolute }
@@ -127,6 +135,15 @@ export async function readDocument(cwd: string, path: string): Promise<FileDocum
       revision: revision(bytes, info.mtimeMs), size: info.size, binary, tooLarge,
     }
   } finally { await handle.close() }
+}
+
+async function readWorktreeDiffText(repository: string, path: string): Promise<string> {
+  const document = await readDocument(repository,path).catch(error=>{
+    if (isMissingPath(error) || error instanceof WorkbenchError && error.code === 'not-found') return undefined
+    throw error
+  })
+  if (document?.tooLarge) throw new WorkbenchError('too-large', `文件超过 5 MiB，无法打开差异视图：${path}`, 413)
+  return document?.content ?? ''
 }
 
 const pendingSaves = new Map<string, Promise<void>>()
@@ -667,7 +684,7 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
         const [diff, original, modified] = await Promise.all([
           checkedGit(repository, ['--literal-pathspecs', 'diff', '--no-ext-diff', '--no-textconv', '--no-color', before, '--', ...new Set([file.previousPath??target,target])]),
           file.status === 'A' ? '' : gitObject(repository, `${before}:${file.previousPath??target}`),
-          file.status === 'D' ? '' : readDocument(repository,target).then(document=>document.content),
+          file.status === 'D' ? '' : readWorktreeDiffText(repository,target),
         ])
         const head = modified ? await gitHead(repository) : undefined
         return { diff, original, modified, blame: {
@@ -805,10 +822,7 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
   const moved = value === 'staged' ? (await gitStatus(cwd)).changes.find(change=>change.path===target)?.originalPath : undefined
   const head = value === 'untracked' ? undefined : await gitHead(repository)
   const original=value==='untracked'||value==='staged'&&!head?'':await gitObject(repository,`${value==='staged'?`${head}:`:':0:'}${moved??target}`)
-  const modified=value==='staged'?await gitObject(repository,`:${target}`):await readDocument(repository,target).then(file=>file.content,error=>{
-    if (error instanceof WorkbenchError && error.code === 'not-file' || (error as NodeJS.ErrnoException).code === 'ENOENT') return ''
-    throw error
-  })
+  const modified = value === 'staged' ? await gitObject(repository,`:${target}`) : await readWorktreeDiffText(repository,target)
   const patch = value === 'untracked' ? undefined : stagingHunks(result.stdout)
   const staging: GitDiff['staging'] = patch && {
     mode: value === 'staged' ? 'staged' : 'worktree',

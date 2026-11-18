@@ -113,6 +113,27 @@ it('compares a tracked working-tree file against a ref', async () => {
   expect(await gitAction(root, 'compare.diff', path, pair)).toMatchObject({ original: 'base\n', modified: 'working copy\n' })
 })
 
+it('opens a deleted tracked file as a deletion in both working-tree diff paths', async () => {
+  const { root } = await repository()
+  const path = 'file with spaces.txt'
+  await rm(join(root,path))
+  const expected = { original:'base\n', modified:'', diff:expect.stringContaining('-base') }
+  expect(await gitAction(root,'diff',path,'worktree')).toMatchObject(expected)
+  expect(await gitAction(root,'compare.diff',path,JSON.stringify(['HEAD',':worktree:']))).toMatchObject(expected)
+})
+
+it('rejects oversized working-tree text instead of substituting an empty snapshot', async () => {
+  const { root, git } = await repository()
+  const path = 'file with spaces.txt'
+  const large = ('x'.repeat(99)+'\n').repeat(52_500)
+  await writeFile(join(root,path),large)
+  await git('commit','-am','large file')
+  await writeFile(join(root,path),large+'added line\n')
+  const expected = {code:'too-large',status:413}
+  await expect(gitAction(root,'diff',path,'worktree')).rejects.toMatchObject(expected)
+  await expect(gitAction(root,'compare.diff',path,JSON.stringify(['HEAD',':worktree:']))).rejects.toMatchObject(expected)
+})
+
 it('attributes clicked lines to the correct snapshot and commit on each side', async () => {
   const { root, git } = await repository()
   const path = 'file with spaces.txt'

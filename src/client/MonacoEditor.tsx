@@ -1,4 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { connectGitSplit } from './GitSplitDiff.ts'
+import type { GitDiff } from '../types.ts'
+import { Icon } from './Icon.tsx'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { locateReviewChange, type ReviewChange } from './aiReview.ts'
 import { searchHighlightRange } from './searchHighlight.ts'
 import type { EditorSelection } from './dshComposer.ts'
@@ -155,14 +158,181 @@ export function loadMonaco(): Promise<Monaco> {
   return loading
 }
 
-export function MonacoDiffEditor(props: { uri: string; original: string; modified: string; mode: 'inline' | 'split'; theme: MonacoColorScheme; fontSize?: number }) {
-  const root=useRef<HTMLDivElement>(null);const editor=useRef<import('monaco-editor').editor.IStandaloneDiffEditor>();const models=useRef<{original:import('monaco-editor').editor.ITextModel;modified:import('monaco-editor').editor.ITextModel}>();const [error,setError]=useState<string>()
-  useEffect(()=>{let disposed=false;void loadMonaco().then(monaco=>{if(disposed||root.current===null)return;const safe=props.uri.replace(/^\/+/, '');const original=monaco.editor.createModel(props.original,undefined,monaco.Uri.parse(`dvw-diff-original:///${safe}`));const modified=monaco.editor.createModel(props.modified,undefined,monaco.Uri.parse(`dvw-diff-modified:///${safe}`));models.current={original,modified};const instance=monaco.editor.createDiffEditor(root.current,{automaticLayout:true,readOnly:true,renderSideBySide:props.mode==='split',useInlineViewWhenSpaceIsLimited:false,theme:monacoThemeFor(props.theme),fontSize:props.fontSize??14,...WORKBENCH_EDITOR_CHROME,originalEditable:false,ignoreTrimWhitespace:false});instance.setModel({original,modified});editor.current=instance}).catch(error=>setError(error instanceof Error?error.message:String(error)));return()=>{disposed=true;editor.current?.dispose();editor.current=undefined;models.current?.original.dispose();models.current?.modified.dispose();models.current=undefined}},[props.uri])
-  useEffect(()=>{const value=models.current;if(value===undefined)return;if(value.original.getValue()!==props.original)value.original.setValue(props.original);if(value.modified.getValue()!==props.modified)value.modified.setValue(props.modified)},[props.original,props.modified])
-  useEffect(()=>{const value=editor.current;if(value===undefined)return;value.updateOptions({renderSideBySide:props.mode==='split'});const frame=requestAnimationFrame(()=>value.layout());return()=>cancelAnimationFrame(frame)},[props.mode])
-  useEffect(()=>{editor.current?.updateOptions({fontSize:props.fontSize??14})},[props.fontSize])
-  useEffect(()=>{if(window.monaco!==undefined)window.monaco.editor.setTheme(monacoThemeFor(props.theme))},[props.theme])
-  return error===undefined?<div className="dvw-diff dvw-monaco-diff" data-mode={props.mode} data-render-side-by-side={props.mode==='split'} ref={root}/>:<div className="dvw-error">{error}</div>
+export type GitDiffStyle = 'classic' | 'ribbon'
+
+type DiffEditor = import('monaco-editor').editor.IStandaloneDiffEditor
+
+export function MonacoDiffEditor(props: {
+  uri: string
+  sourcePath?: string
+  versions?: readonly [string, string]
+  viewControls?: ReactNode
+  original: string
+  modified: string
+  mode: 'inline' | 'split'
+  style?: GitDiffStyle
+  theme: MonacoColorScheme
+  fontSize?: number
+}) {
+  const root = useRef<HTMLDivElement>(null)
+  const board = useRef<HTMLDivElement>(null)
+  const leftPane = useRef<HTMLDivElement>(null)
+  const rightPane = useRef<HTMLDivElement>(null)
+  const ribbon = useRef<SVGSVGElement>(null)
+  const overview = useRef<HTMLInputElement>(null)
+  const marks = useRef<HTMLDivElement>(null)
+  const preview = useRef<HTMLDivElement>(null)
+  const linked = useRef<ReturnType<typeof connectGitSplit>>()
+  const splitPanes = useRef<import('monaco-editor').editor.IStandaloneCodeEditor[]>([])
+  const editor = useRef<DiffEditor>()
+  const ribbonStyle = props.style === 'ribbon'
+  const parallax = ribbonStyle && props.mode === 'split'
+  const [foldPreference, setFoldPreference] = useState<boolean>()
+  const fold = foldPreference ?? ribbonStyle
+  const latest = useRef({ ...props, fold })
+  latest.current = { ...props, fold }
+  const [error, setError] = useState<string>()
+  const [summary, setSummary] = useState<{ count: number; added: number; removed: number }>()
+  const [before, after] = props.versions ?? ['原版本', '对比版本']
+
+  useEffect(() => {
+    let disposed = false
+    let cleanup: (() => void) | undefined
+    setError(undefined)
+    setSummary(undefined)
+    void loadMonaco().then(monaco => {
+      if (disposed || root.current === null) return
+      const current = latest.current
+      const name = (current.sourcePath ?? current.uri).replace(/\\/g, '/').replace(/^\/+/, '')
+      const path = `/diff/${++diffModelSequence}/${name}`
+      const original = monaco.editor.createModel(current.original, undefined, monaco.Uri.from({ scheme: 'dvw-diff-original', path }))
+      const modified = monaco.editor.createModel(current.modified, undefined, monaco.Uri.from({ scheme: 'dvw-diff-modified', path }))
+      const instance = monaco.editor.createDiffEditor(root.current, {
+        automaticLayout: true, readOnly: true, originalEditable: false, ignoreTrimWhitespace: false,
+        ...WORKBENCH_EDITOR_CHROME,
+        theme: monacoThemeFor(current.theme), fontSize: current.fontSize ?? 14,
+        renderSideBySide: current.mode === 'split', useInlineViewWhenSpaceIsLimited:false,
+        ...diffStyleOptions(current.style === 'ribbon' && !parallax, current.fold && !parallax),
+      })
+      if (parallax && board.current && leftPane.current && rightPane.current && ribbon.current && overview.current && marks.current && preview.current) {
+        const hosts = [leftPane.current,rightPane.current] as const
+        const panes = hosts.map((host,index)=>monaco.editor.create(host,{
+          ...WORKBENCH_EDITOR_CHROME,
+          model:index===0?original:modified,
+          theme:monacoThemeFor(current.theme), fontSize:current.fontSize??14,
+          automaticLayout:true, readOnly:true, domReadOnly:true, folding:false, wordWrap:'off',
+          glyphMargin:false, lineDecorationsWidth:8, lineNumbersMinChars:3,
+          renderLineHighlight:'none', stickyScroll:{enabled:false},
+          ariaLabel:index===0?'原版本代码':'对比版本代码',
+          scrollbar:{...WORKBENCH_EDITOR_CHROME.scrollbar, vertical:'hidden', verticalScrollbarSize:0},
+        })) as [import('monaco-editor').editor.IStandaloneCodeEditor,import('monaco-editor').editor.IStandaloneCodeEditor]
+        splitPanes.current = panes
+        linked.current = connectGitSplit(board.current,panes,ribbon.current,overview.current,marks.current,preview.current)
+      }
+      const subscriptions = [
+        instance.onDidUpdateDiff(() => {
+          const changes = instance.getLineChanges()
+          if (changes !== null) {
+            let added = 0, removed = 0
+            for (const change of changes) {
+              if (change.modifiedEndLineNumber) added += change.modifiedEndLineNumber - change.modifiedStartLineNumber + 1
+              if (change.originalEndLineNumber) removed += change.originalEndLineNumber - change.originalStartLineNumber + 1
+            }
+            setSummary({ count: changes.length, added, removed })
+            linked.current?.update(changes,latest.current.fold)
+          }
+        }),
+      ]
+      cleanup = () => {
+        subscriptions.forEach(subscription => subscription.dispose())
+        linked.current?.dispose()
+        linked.current = undefined
+        splitPanes.current.forEach(pane=>pane.dispose())
+        splitPanes.current = []
+        instance.dispose()
+        original.dispose()
+        modified.dispose()
+        editor.current = undefined
+      }
+      instance.setModel({ original, modified })
+      editor.current = instance
+    }).catch(cause => {
+      if (!disposed) setError(cause instanceof Error ? cause.message : String(cause))
+    })
+    return () => { disposed = true; cleanup?.() }
+  }, [props.uri, parallax])
+
+  useEffect(() => {
+    const model = editor.current?.getModel()
+    if (model === null || model === undefined) return
+    if (model.original.getValue() !== props.original) model.original.setValue(props.original)
+    if (model.modified.getValue() !== props.modified) model.modified.setValue(props.modified)
+  }, [props.original, props.modified])
+  useEffect(() => {
+    const value = editor.current
+    if (value === undefined) return
+    value.updateOptions({renderSideBySide:props.mode==='split'})
+    const frame = requestAnimationFrame(()=>{
+      value.layout()
+    })
+    return ()=>cancelAnimationFrame(frame)
+  }, [props.mode, props.style])
+  useEffect(() => {
+    editor.current?.updateOptions(diffStyleOptions(ribbonStyle, fold && !parallax))
+    const changes = editor.current?.getLineChanges()
+    if (changes) linked.current?.update(changes,fold)
+  }, [ribbonStyle, fold, parallax])
+  useEffect(() => {
+    const fontSize = props.fontSize ?? 14
+    editor.current?.updateOptions({ fontSize })
+    splitPanes.current.forEach(pane=>pane.updateOptions({fontSize}))
+  }, [props.fontSize])
+  useEffect(() => { window.monaco?.editor.setTheme(monacoThemeFor(props.theme)) }, [props.theme])
+
+  return <div className="dvw-git-diff-view" data-jetbrains={ribbonStyle || undefined}>
+    <div className="dvw-git-diff-bar">
+      <div className="dvw-git-diff-revisions">
+        <span className="dvw-git-diff-from"><Icon name="lock"/>{before}</span>
+        {props.sourcePath&&<span className="dvw-git-diff-path" title={props.sourcePath}>{props.sourcePath}</span>}
+      </div>
+      <div className="dvw-git-diff-to">{after}</div>
+      <div className="dvw-git-diff-actions" role="group" aria-label="对比操作">
+        <span className="dvw-git-diff-count" role="status">
+          {error !== undefined ? '加载失败' : summary === undefined ? '计算中…' : `${summary.count} 处`}
+        </span>
+        {summary!==undefined&&summary.count>0&&<span className="dvw-git-diff-lines" aria-label={`新增 ${summary.added} 行，删除 ${summary.removed} 行`}>
+          <span>+{summary.added}</span><span>−{summary.removed}</span>
+        </span>}
+        <button className="dvw-icon" title="上一处改动" aria-label="上一处改动" disabled={!summary?.count} onClick={()=>{if(linked.current) linked.current.navigate('previous');else editor.current?.goToDiff('previous')}}><Icon name="chevron-up"/></button>
+        <button className="dvw-icon" title="下一处改动" aria-label="下一处改动" disabled={!summary?.count} onClick={()=>{if(linked.current) linked.current.navigate('next');else editor.current?.goToDiff('next')}}><Icon name="chevron-down"/></button>
+        <button className="dvw-mode-button" title="折叠未改动行" aria-label="折叠未改动行" aria-pressed={fold} onClick={()=>setFoldPreference(!fold)}><Icon name={fold?'unfold':'fold'}/><span>折叠</span></button>
+        {props.viewControls}
+      </div>
+    </div>
+    <div className="dvw-git-diff-body">
+      <div className="dvw-diff dvw-monaco-diff" data-mode={props.mode} data-render-side-by-side={props.mode==='split'} data-compute-only={parallax||undefined} aria-hidden={parallax||undefined} ref={root}/>
+      {parallax&&<div className="dvw-diff-parallax" data-theme={props.theme} ref={board}>
+        <div className="dvw-diff-parallax-pane" ref={leftPane}/>
+        <svg className="dvw-diff-ribbons" aria-hidden="true" ref={ribbon}/>
+        <div className="dvw-diff-parallax-pane" ref={rightPane}/>
+        <div className="dvw-diff-overview">
+          <div className="dvw-diff-overview-marks" ref={marks} aria-hidden="true"/>
+          <input aria-label="差异滚动进度" type="range" min="0" defaultValue="0" step="any" ref={overview}/>
+          <div className="dvw-diff-scroll-preview" ref={preview} aria-hidden="true" hidden/>
+        </div>
+      </div>}
+      {error!==undefined&&<div className="dvw-error" role="alert">{error}</div>}
+    </div>
+  </div>
+}
+
+let diffModelSequence = 0
+
+function diffStyleOptions(ribbon: boolean, fold: boolean): import('monaco-editor').editor.IDiffEditorOptions {
+  return {
+    renderOverviewRuler: ribbon,
+    hideUnchangedRegions: { enabled: fold, contextLineCount: 3 },
+  }
 }
 
 /** Start downloading Monaco in the background so the first opened file does not wait for it. */

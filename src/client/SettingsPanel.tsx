@@ -1,3 +1,4 @@
+import type { GitDiffStyle } from './MonacoEditor.tsx'
 import { useEffect, useId, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { LspServerStatus } from './lsp.ts'
@@ -21,6 +22,8 @@ export interface WorkbenchSettingsProps {
   setReviewFollow?(value: boolean): void
   theme: WorkbenchTheme
   setTheme(value: WorkbenchTheme): void
+  gitDiffStyle: GitDiffStyle
+  setGitDiffStyle(value: GitDiffStyle): void
   fontSize: number
   setFontSize(value: number): void
   primarySideVisible: boolean
@@ -299,6 +302,10 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
     </section>
 
     <section className="dvw-set-group">
+      <h3 className="dvw-set-group-title">Git</h3>
+      <Row title="Git 对比样式" description="VS Code 默认内联。IDEA / PyCharm 默认并排，使用改动连线和联动滚动。">
+        <Selector label="Git 对比样式" value={props.gitDiffStyle} options={[['classic', 'VS Code（默认）'], ['ribbon', 'IDEA / PyCharm']]} onChange={props.setGitDiffStyle}/>
+      </Row>
       <h3 className="dvw-set-group-title">提交信息</h3>
       <Row title="详细程度" description="详细模式会生成标题和 2–4 条说明；简洁模式限制标题长度，标准模式保持单行约定式提交。">
         <Selector label="提交信息详细程度" value={props.commitDetail} options={COMMIT_DETAILS} onChange={props.setCommitDetail}/>

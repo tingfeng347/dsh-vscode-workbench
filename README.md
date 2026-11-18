@@ -34,35 +34,46 @@
 - **两种打开方式**：工作台可以铺满窗口，也可以作为浮动窗口覆盖在 DSH 之上，支持拖动、八向缩放和真正的系统全屏。
 - **贴合 DSH**：右侧直接复用 DSH 对话能力，主题与布局集中在 DSH 设置的 Workbench 页。
 
+## Git 工作流
+
+- 在「源代码管理 → Git 工具」中查看提交或文件历史、比较分支、标签、提交与工作区，管理 Stash、同步分支或处理合并冲突。
+- 在「设置 → 工作台 → Git」中选择对比样式。VS Code 默认内联，IDEA / PyCharm 默认并排并联动滚动。两种样式都可以切换布局、跳转改动和折叠未改动行。
+- 在普通编辑器或差异视图中点击代码行，行尾会显示提交作者、时间、短哈希和摘要。「逐行提交信息」默认开启，可在同一设置区关闭。
+
 ## 演示
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/workbench-light.png" width="800" alt="资源管理器、Markdown 预览、终端与 DSH 对话">
+  <img src="assets/screenshots/workbench-light.png" width="800" alt="资源管理器、Markdown 预览、终端与 DSH 对话">
   <br><em>资源管理器、Markdown 预览、终端与 DSH 对话</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/references-light.png" width="800" alt="编辑器内查找引用与 Peek 结果">
+  <img src="assets/screenshots/references-light.png" width="800" alt="编辑器内查找引用与 Peek 结果">
   <br><em>编辑器内查找引用与 Peek 结果</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control-light.png" width="800" alt="源代码管理、提交图与内联/并排差异">
+  <img src="assets/screenshots/source-control-light.png" width="800" alt="源代码管理、提交图与内联/并排差异">
   <br><em>源代码管理、提交图与内联/并排差异</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/welcome-light.png" width="800" alt="空编辑器可直接新建终端或打开浏览器">
+  <img src="assets/screenshots/git-diff-side-by-side-light.png" width="800" alt="IDEA / PyCharm 并排差异，带改动连线、折叠和差异导航">
+  <br><em>IDEA / PyCharm 并排差异，带改动连线、折叠和差异导航</em>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/welcome-light.png" width="800" alt="空编辑器可直接新建终端或打开浏览器">
   <br><em>空编辑器可直接新建终端或打开浏览器</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/settings-light.png" width="800" alt="DSH 设置里的 DSH Workbench 页：主题、字号、布局、提交信息与语言服务">
-  <br><em>设置直接开在 DSH 官方设置里：主题、字号、布局、提交信息与语言服务</em>
+  <img src="assets/screenshots/settings-light.png" width="800" alt="DSH 内的工作台设置，包括主题、编辑器字号、窗口和布局">
+  <br><em>DSH 内的工作台设置，包括主题、编辑器字号、窗口和布局</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/workspace-switcher-light.png" width="800" alt="打开工作区、切换会话与新建工作区">
+  <img src="assets/screenshots/workspace-switcher-light.png" width="800" alt="打开工作区、切换会话与新建工作区">
   <br><em>打开工作区、切换会话与新建工作区</em>
 </p>
 

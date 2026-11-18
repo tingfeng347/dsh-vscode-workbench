@@ -127,32 +127,35 @@ export function resizedPanelWidth(startWidth: number, startX: number, nextX: num
   return Math.max(min, Math.min(max, Math.round(startWidth + (nextX - startX) * direction)))
 }
 
-function PanelResizer({ className, label, width, min, max, defaultWidth, direction, hideBelow, onHide, onWidth }: { className: string; label: string; width: number; min: number; max: number; defaultWidth: number; direction: ResizeDirection; hideBelow?: number; onHide?(): void; onWidth(width: number): void }) {
+function PanelResizer({ className, label, size, min, max, defaultSize, direction, orientation = 'vertical', hideBelow, onHide, onResize }: { className: string; label: string; size: number; min: number; max: number; defaultSize: number; orientation?: 'vertical' | 'horizontal'; direction: ResizeDirection; hideBelow?: number; onHide?(): void; onResize(size: number): void }) {
+  const adjustsHeight = orientation === 'horizontal'
+  const coordinate = (event: { clientX: number; clientY: number }) => adjustsHeight ? event.clientY : event.clientX
+  const decreaseKey = adjustsHeight ? 'ArrowUp' : 'ArrowLeft'
+  const increaseKey = adjustsHeight ? 'ArrowDown' : 'ArrowRight'
   const [dragging, setDragging] = useState(false)
   const stopDragging = useRef<() => void>(() => {})
   useEffect(() => () => stopDragging.current(), [])
   const stop = () => stopDragging.current()
-  return <div className={className} data-dragging={dragging || undefined} role="separator" aria-label={label} aria-orientation="vertical" aria-valuemin={min} aria-valuemax={max} aria-valuenow={Math.round(width)} tabIndex={0} title={`${label}，双击恢复默认`} onDoubleClick={() => onWidth(defaultWidth)} onKeyDown={event => {
-    if (event.key === 'Home') { event.preventDefault(); onWidth(defaultWidth); return }
-    if (event.key !== 'ArrowLeft' && event.key !== 'ArrowRight') return
+  return <div className={className} data-dragging={dragging || undefined} role="separator" aria-label={label} aria-orientation={orientation} aria-valuemin={min} aria-valuemax={max} aria-valuenow={Math.round(size)} tabIndex={0} title={`${label}，双击恢复默认`} onDoubleClick={() => onResize(defaultSize)} onKeyDown={event => {
+    if (event.key === 'Home') { event.preventDefault(); onResize(defaultSize); return }
+    if (event.key !== decreaseKey && event.key !== increaseKey) return
     event.preventDefault()
-    const pointerDelta = event.key === 'ArrowRight' ? 10 : -10
-    onWidth(Math.max(min, Math.min(max, Math.round(width + pointerDelta * direction))))
+    const pointerDelta = event.key === increaseKey ? 10 : -10
+    onResize(resizedPanelWidth(size, 0, pointerDelta, direction, min, max))
   }} onPointerDown={event => {
     if (event.button !== 0) return
     event.preventDefault()
     stop()
-    const startX = event.clientX
-    const startWidth = width
+    const start = coordinate(event)
     const handle = event.currentTarget
     handle.setPointerCapture?.(event.pointerId)
     const previousCursor = document.body.style.cursor
     const previousUserSelect = document.body.style.userSelect
-    document.body.style.cursor = 'ew-resize'
+    document.body.style.cursor = adjustsHeight ? 'ns-resize' : 'ew-resize'
     document.body.style.userSelect = 'none'
     setDragging(true)
-    const move = (next: PointerEvent) => onWidth(resizedPanelWidth(startWidth, startX, next.clientX, direction, min, max))
-    const cleanup = (commit = false, nextX = startX) => {
+    const move = (next: PointerEvent) => onResize(resizedPanelWidth(size, start, coordinate(next), direction, min, max))
+    const cleanup = (commit = false, end = start) => {
       window.removeEventListener('pointermove', move)
       window.removeEventListener('pointerup', up)
       window.removeEventListener('pointercancel', cancel)
@@ -162,11 +165,11 @@ function PanelResizer({ className, label, width, min, max, defaultWidth, directi
       setDragging(false)
       stopDragging.current = () => {}
       if (!commit) return
-      const nextWidth = Math.round(startWidth + (nextX - startX) * direction)
-      if (hideBelow !== undefined && nextWidth < hideBelow) { onHide?.(); return }
-      onWidth(Math.max(min, Math.min(max, nextWidth)))
+      const nextSize = Math.round(size + (end - start) * direction)
+      if (hideBelow !== undefined && nextSize < hideBelow) { onHide?.(); return }
+      onResize(Math.max(min, Math.min(max, nextSize)))
     }
-    const up = (next: PointerEvent) => cleanup(true, next.clientX)
+    const up = (next: PointerEvent) => cleanup(true, coordinate(next))
     const cancel = () => cleanup()
     stopDragging.current = cancel
     window.addEventListener('pointermove', move)
@@ -174,6 +177,42 @@ function PanelResizer({ className, label, width, min, max, defaultWidth, directi
     window.addEventListener('pointercancel', cancel)
     window.addEventListener('blur', cancel)
   }}/>
+}
+
+const SCM_SPLIT_KEY = 'dvw:scm-changes-fraction'
+
+function ScmPanes({ split, children: [changes, graph] }: { split: boolean; children: [ReactNode, ReactNode] }) {
+  const ref = useRef<HTMLDivElement>(null)
+  const [height, setHeight] = useState(0)
+  const [fraction, setFraction] = useState(() => {
+    const saved = Number(storedValue(SCM_SPLIT_KEY))
+    return saved > 0 && saved < 1 ? saved : 0.5
+  })
+  useEffect(() => {
+    const panes = ref.current!
+    const measure = () => setHeight(panes.clientHeight)
+    measure()
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver(measure)
+    observer.observe(panes)
+    return () => observer.disconnect()
+  }, [])
+
+  const min = Math.min(124, Math.floor(height / 2))
+  const max = height - Math.min(72, Math.floor(height / 2))
+  const changesHeight = resizedPanelWidth(height * fraction, 0, 0, 1, min, max)
+  const resize = (size: number) => {
+    const next = size / height
+    setFraction(next)
+    try { localStorage.setItem(SCM_SPLIT_KEY, String(next)) } catch { /* Browser privacy settings may deny storage. */ }
+  }
+
+  return <div ref={ref} className="dvw-scm-panes" data-split={split} style={split && height > 0 ? { '--dvw-scm-changes-height': `${changesHeight}px` } as CSSProperties : undefined}>
+    {changes}
+    {split && height > 0 && <PanelResizer className="dvw-scm-resizer" label="拖动调整更改和图表的高度" orientation="horizontal"
+      size={changesHeight} min={min} max={max} defaultSize={resizedPanelWidth(height / 2, 0, 0, 1, min, max)} direction={1} onResize={resize}/>}
+    {graph}
+  </div>
 }
 
 /** Read the saved Markdown default without depending on browser storage during unit tests. */
@@ -667,82 +706,121 @@ function Search(props: { sessionId: string; onOpen(path: string, line: number, c
   return <><div className="dvw-side-head">搜索</div><form className="dvw-search-form" onSubmit={event => { event.preventDefault(); void search() }}><input className="dvw-input" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索" autoFocus/><div className="dvw-options">{([['caseSensitive','Aa'],['wholeWord','Ab'],['regex','.*']] as const).map(([key,label]) => <label key={key}><input type="checkbox" checked={flags[key]} onChange={e => setFlags({ ...flags, [key]: e.target.checked })}/>{label}</label>)}<button className="dvw-icon" title="搜索" disabled={busy}><Icon name="search"/></button></div><input className="dvw-input" value={include} onChange={e=>setInclude(e.target.value)} placeholder="包含文件，例如 src/**"/><input className="dvw-input" value={exclude} onChange={e=>setExclude(e.target.value)} placeholder="排除文件，例如 **/*.test.ts"/></form>{error&&<div className="dvw-error">{error}</div>}{limited&&<div className="dvw-message">结果已截断到 2000 条</div>}<div className="dvw-results">{[...groups].map(([path, rows]) => <div key={path}><div className="dvw-result-file"><Icon name="chevron-down"/> {path} <span className="dvw-badge">{rows.length}</span></div>{rows.map((row,index)=><div className="dvw-result" key={`${row.line}:${row.column}:${index}`} onClick={()=>props.onOpen(path,row.line,row.column,row.match||query)}><span className="dvw-line">{row.line}</span><span className="dvw-preview">{row.preview}</span></div>)}</div>)}</div></>
 }
 
+// Two lane widths per row let each branch turn meet the next row vertically.
+const GRAPH_LANE = 11
+const GRAPH_HEIGHT = 2 * GRAPH_LANE
+const GRAPH_MID = GRAPH_HEIGHT / 2
+const GRAPH_CURVE = 5
+const GRAPH_COLORS = ['var(--dvw-graph-ref)','#ffb000','#dc267f','#994f00','#40b0a6','#b66dff']
+function graphColor(color:number):string{return GRAPH_COLORS[color]!}
+function graphX(lane:number):number{return GRAPH_LANE*(lane+1)}
+function graphWidth(row:GraphRow):number{return GRAPH_LANE*(Math.max(row.before.length,row.after.length,row.lane+1)+1)}
+
 export interface GraphTrack { hash: string; color: number }
-export interface GraphRow { commit: GitCommit; lane: number; before: GraphTrack[]; after: GraphTrack[]; parentLanes: number[] }
+export interface GraphRow {
+  commit: GitCommit
+  lane: number
+  color: number
+  before: GraphTrack[]
+  after: GraphTrack[]
+  parentLanes: number[]
+}
+
+function isGraphHead(commit: GitCommit): boolean {
+  return commit.refs.some(ref => ref === 'HEAD' || ref.startsWith('HEAD ->'))
+}
+
 export function graphRows(commits: GitCommit[]): GraphRow[] {
-  const visible = new Set(commits.map(commit => commit.hash))
+  const visible = new Map(commits.map(commit => [commit.hash, commit]))
   let nextColor = 0
-  let lanes: GraphTrack[] = commits[0] ? [{ hash: commits[0].hash, color: nextColor++ }] : []
+  const branchColor = (commit: GitCommit) => isGraphHead(commit) ? 0 : 1 + nextColor++ % (GRAPH_COLORS.length - 1)
+  let lanes: GraphTrack[] = []
+
   return commits.map(commit => {
-    let lane = lanes.findIndex(track => track.hash === commit.hash)
-    if (lane < 0) { lanes = [{ hash: commit.hash, color: nextColor++ }, ...lanes]; lane = 0 }
-    const before = [...lanes]
-    const current = before[lane]!
-    const after = before.filter(track => track.hash !== commit.hash)
-    const parents = commit.parents.filter(parent => visible.has(parent))
-    parents.forEach((parent, index) => {
-      if (after.some(track => track.hash === parent)) return
-      const color = index === 0 ? current.color : nextColor++
-      after.splice(Math.min(lane + index, after.length), 0, { hash: parent, color })
+    const before = lanes
+    const incoming = before.findIndex(track => track.hash === commit.hash)
+    const lane = incoming < 0 ? before.length : incoming
+    const color = before[incoming]?.color ?? branchColor(commit)
+    const after: GraphTrack[] = []
+    const parentLanes: number[] = []
+    const firstParent = commit.parents[0]
+
+    // Each incoming edge keeps its lane until its own target row, even when
+    // multiple lanes lead to the same commit. Only the first continues below it.
+    for (const track of before) {
+      if (track.hash !== commit.hash) after.push(track)
+      else if (track === before[lane] && firstParent && visible.has(firstParent)) {
+        parentLanes.push(after.length)
+        after.push({ hash: firstParent, color })
+      }
+    }
+    commit.parents.forEach((hash, index) => {
+      const parent = visible.get(hash)
+      if (!parent || (index === 0 && incoming >= 0)) return
+      parentLanes.push(after.length)
+      after.push({ hash, color: index === 0 ? color : branchColor(parent) })
     })
-    const parentLanes = parents.map(parent => after.findIndex(track => track.hash === parent)).filter(index => index >= 0)
     lanes = after
-    return { commit, lane, before, after, parentLanes }
+    return { commit, lane, color, before, after, parentLanes }
   })
 }
 
-// VS Code SCM graph geometry: 11px swimlanes, lane-width arcs into and out of the node, 5px lane-shift curves.
-const GRAPH_LANE = 11
-const GRAPH_CURVE = 5
-const GRAPH_HEIGHT = 38
-const GRAPH_MID = GRAPH_HEIGHT / 2
-const GRAPH_COLORS = ['var(--dvw-graph-ref)','#ffb000','#dc267f','#994f00','#40b0a6','#b66dff']
-function graphColor(color:number):string{return GRAPH_COLORS[color%GRAPH_COLORS.length]!}
-function graphX(lane:number):number{return GRAPH_LANE*(lane+1)}
-function graphWidth(row:GraphRow):number{return GRAPH_LANE*(Math.max(row.before.length,row.after.length,row.lane+1,1)+1)}
-
-/** Move a passing lane to its new column with two 5px arcs around the row midline. */
-export function graphTrackPath(from: number, to: number, startY: number, endY: number, bendY: number): string {
-  if (from === to) return `M ${from} ${startY} V ${endY}`
+/** Move a passing lane with two tangent quarter circles on either side of the midline. */
+export function graphTrackPath(from: number, to: number): string {
+  if (from === to) return `M ${from} 0 V ${GRAPH_HEIGHT}`
   const direction = Math.sign(to - from)
-  const radius = Math.min(GRAPH_CURVE, Math.abs(to - from) / 2, Math.abs(bendY - startY), Math.abs(endY - bendY))
+  const radius = GRAPH_CURVE
   const sweep = direction < 0 ? 1 : 0
-  return `M ${from} ${startY} V ${bendY - radius} A ${radius} ${radius} 0 0 ${sweep} ${from + direction * radius} ${bendY} H ${to - direction * radius} A ${radius} ${radius} 0 0 ${1 - sweep} ${to} ${bendY + radius} V ${endY}`
+  return `M ${from} 0 V ${GRAPH_MID - radius} A ${radius} ${radius} 0 0 ${sweep} ${from + direction * radius} ${GRAPH_MID} H ${to - direction * radius} A ${radius} ${radius} 0 0 ${1 - sweep} ${to} ${GRAPH_MID + radius} V ${GRAPH_HEIGHT}`
 }
 
-/** Leave the node horizontally and turn down into a parent lane with a lane-width arc. */
-export function graphParentPath(from: number, to: number, midY: number, endY: number): string {
-  if (from === to) return `M ${from} ${midY} V ${endY}`
+export function graphParentPath(from: number, to: number): string {
+  if (from === to) return `M ${from} ${GRAPH_MID} V ${GRAPH_HEIGHT}`
   const direction = Math.sign(to - from)
-  return `M ${from} ${midY} H ${to - direction * GRAPH_LANE} A ${GRAPH_LANE} ${GRAPH_LANE} 0 0 ${direction > 0 ? 1 : 0} ${to} ${midY + GRAPH_LANE} V ${endY}`
+  return `M ${from} ${GRAPH_MID} H ${to - direction * GRAPH_LANE} A ${GRAPH_LANE} ${GRAPH_LANE} 0 0 ${direction > 0 ? 1 : 0} ${to} ${GRAPH_HEIGHT}`
+}
+
+function graphMergePath(from: number, to: number): string {
+  return `M ${from} 0 A ${GRAPH_LANE} ${GRAPH_LANE} 0 0 1 ${from - GRAPH_LANE} ${GRAPH_MID} H ${to}`
 }
 
 function GraphNode({row,x,color}:{row:GraphRow;x:number;color:string}) {
-  if(row.commit.refs.some(ref=>ref==='HEAD'||ref.startsWith('HEAD ->')))return <><circle className="dvw-graph-node" cx={x} cy={GRAPH_MID} r="7" style={{fill:color}}/><circle className="dvw-graph-node" cx={x} cy={GRAPH_MID} r="2" strokeWidth="4"/></>
+  if(isGraphHead(row.commit))return <><circle className="dvw-graph-node" cx={x} cy={GRAPH_MID} r="7" style={{fill:color}}/><circle className="dvw-graph-node" cx={x} cy={GRAPH_MID} r="2" style={{strokeWidth:4}}/></>
   if(row.commit.parents.length>1)return <><circle className="dvw-graph-node" cx={x} cy={GRAPH_MID} r="6" style={{fill:color}}/><circle className="dvw-graph-node" cx={x} cy={GRAPH_MID} r="3" style={{fill:color}}/></>
   return <circle className="dvw-graph-node" cx={x} cy={GRAPH_MID} r="5" style={{fill:color}}/>
 }
 
-function GraphTracks({row}:{row:GraphRow}) {
-  const width=graphWidth(row);const x=graphX(row.lane);const current=row.before[row.lane]!
-  return <svg className="dvw-graph-svg" width={width} height={GRAPH_HEIGHT} viewBox={`0 0 ${width} ${GRAPH_HEIGHT}`} aria-hidden="true">
-    {row.before.map((track,lane)=>{if(track.hash===row.commit.hash)return null;const target=row.after.findIndex(next=>next.hash===track.hash);const nextLane=target>=0?target:lane;return <path className="dvw-graph-line" key={`continue-${track.hash}`} d={graphTrackPath(graphX(lane),graphX(nextLane),0,GRAPH_HEIGHT,GRAPH_MID)} style={{stroke:graphColor(track.color)}}/>})}
-    <path className="dvw-graph-line" d={`M ${x} 0 V ${GRAPH_MID}`} style={{stroke:graphColor(current.color)}}/>
-    {row.parentLanes.map((parent,index)=>{const track=row.after[parent]!;return <path className="dvw-graph-line" key={`parent-${track.hash}-${index}`} d={graphParentPath(x,graphX(parent),GRAPH_MID,GRAPH_HEIGHT)} style={{stroke:graphColor(track.color)}}/>})}
-    <GraphNode row={row} x={x} color={graphColor(current.color)}/>
+function GraphTracks({ row }: { row: GraphRow }) {
+  const width = graphWidth(row)
+  const x = graphX(row.lane)
+  return <svg className="dvw-graph-svg" width={width} height={GRAPH_HEIGHT} aria-hidden="true">
+    {row.before.map((track, lane) => {
+      const from = graphX(lane)
+      let path: string
+      if (track.hash !== row.commit.hash) {
+        // Passing tracks retain object identity, including parallel tracks to the same hash.
+        path = graphTrackPath(from, graphX(row.after.indexOf(track)))
+      } else {
+        path = lane === row.lane ? `M ${x} 0 V ${GRAPH_MID}` : graphMergePath(from, x)
+      }
+      return <path key={lane} className="dvw-graph-line" d={path} style={{ stroke: graphColor(track.color) }}/>
+    })}
+    {row.parentLanes.map(lane => <path key={lane} className="dvw-graph-line"
+      d={graphParentPath(x, graphX(lane))} style={{ stroke: graphColor(row.after[lane]!.color) }}/>)}
+    <GraphNode row={row} x={x} color={graphColor(row.color)}/>
   </svg>
 }
 
 function GraphContinuation({row}:{row:GraphRow}) {
   const width=graphWidth(row)
-  return <svg className="dvw-graph-continuation" width={width} height="100%" viewBox={`0 0 ${width} 100`} preserveAspectRatio="none" aria-hidden="true">{row.after.map((track,lane)=><line className="dvw-graph-line" key={track.hash} x1={graphX(lane)} y1="0" x2={graphX(lane)} y2="100" style={{stroke:graphColor(track.color)}}/>)}</svg>
+  return <svg className="dvw-graph-continuation" width={width} height="100%" viewBox={`0 0 ${width} 100`} preserveAspectRatio="none" aria-hidden="true">{row.after.map((track,lane)=><line className="dvw-graph-line" key={lane} x1={graphX(lane)} y1="0" x2={graphX(lane)} y2="100" style={{stroke:graphColor(track.color)}}/>)}</svg>
 }
 
-function CommitGraph({ commits, expanded, files, onToggle, onOpenFile, onTools }: { commits: GitCommit[]; expanded?: string; files: Map<string,GitCommitFile[]>; onToggle(commit:GitCommit):void; onOpenFile(commit:GitCommit,file:GitCommitFile):void; onTools(commit:GitCommit):void }) {
+export function CommitGraph({ commits, expanded, files, onToggle, onOpenFile, onTools }: { commits: GitCommit[]; expanded?: string; files: Map<string,GitCommitFile[]>; onToggle(commit:GitCommit):void; onOpenFile(commit:GitCommit,file:GitCommitFile):void; onTools(commit:GitCommit):void }) {
   return <div className="dvw-graph-list">{graphRows(commits).map(row => {
     const opened=expanded===row.commit.hash
     return <div className="dvw-graph-entry" data-expanded={opened} key={row.commit.hash}>
-      <button className="dvw-graph-row" aria-expanded={opened} onClick={()=>onToggle(row.commit)} title={`${row.commit.hash}\n${row.commit.author}`}><GraphTracks row={row}/><span className="dvw-graph-copy"><span className="dvw-graph-subject">{row.commit.subject}</span><span className="dvw-graph-meta">{row.commit.author} · {new Date(row.commit.date).toLocaleDateString()}</span></span>{row.commit.refs.slice(0,2).map(ref=><span className="dvw-ref" key={ref}>{ref}</span>)}<Icon name={opened?'chevron-down':'chevron-right'}/></button>
+      <button className="dvw-graph-row" style={{height:GRAPH_HEIGHT}} aria-expanded={opened} onClick={()=>onToggle(row.commit)} title={`${row.commit.hash}\n${row.commit.author}`}><GraphTracks row={row}/><span className="dvw-graph-copy"><span className="dvw-graph-subject">{row.commit.subject}</span><span className="dvw-graph-meta">{row.commit.author} · {new Date(row.commit.date).toLocaleDateString()}</span></span>{row.commit.refs.slice(0,2).map(ref=><span className="dvw-ref" key={ref}>{ref}</span>)}<Icon name={opened?'chevron-down':'chevron-right'}/></button>
       {opened&&<div className="dvw-commit-files" style={{paddingLeft:graphWidth(row)+7}}><GraphContinuation row={row}/><div className="dvw-commit-file-list"><button className="dvw-commit-file" onClick={()=>onTools(row.commit)}><Icon name="history"/> 提交详情与操作</button>{(files.get(row.commit.hash)??[]).map(file=><button className="dvw-commit-file" key={`${file.status}:${file.path}`} onClick={()=>onOpenFile(row.commit,file)}><FileIcon name={file.path.split('/').at(-1) ?? file.path} className="dvw-file-icon"/><span className="dvw-commit-file-name">{file.path.split('/').at(-1)}</span><span className="dvw-commit-file-dir">{file.path.split('/').slice(0,-1).join('/')}</span><span className="dvw-badge">{file.status}</span></button>)}</div></div>}
     </div>
   })}</div>
@@ -816,11 +894,14 @@ function Git(props: { sessionId: string; preferences: CommitMessagePreferences; 
   const renderChange=(change:GitStatus['changes'][number],group:'staged'|'worktree')=><div className="dvw-change" key={`${group}:${change.path}`} onClick={()=>void action('diff',change.path,change.untracked?'untracked':group)}><FileIcon name={change.path.split('/').at(-1) ?? change.path}/><span className="dvw-change-path">{change.path}</span><button className="dvw-icon" title="文件历史与逐行归属" onClick={event=>{event.stopPropagation();openTools({path:change.path})}}><Icon name="history"/></button><span className="dvw-badge">{change.untracked?'U':group==='staged'?change.index:change.worktree}</span><button className="dvw-icon" title={group==='staged'?'取消暂存':'暂存更改'} onClick={event=>{event.stopPropagation();void action(group==='staged'?'unstage':'stage',change.path)}}><Icon name={group==='staged'?'remove':'add'}/></button>{group==='worktree'&&<button className="dvw-icon" title="放弃更改" onClick={event=>{event.stopPropagation();if(confirm(`放弃 ${change.path} 的更改？此操作无法撤销。`))void action('discard',change.path,change.untracked?'untracked':undefined)}}><Icon name="discard"/></button>}</div>
   return <>
     <div className="dvw-side-head">源代码管理<div className="dvw-toolbar">{status&&<button className="dvw-icon" title="Git 工具" aria-label="Git 工具" onClick={()=>openTools()}><Icon name="tools"/></button>}<button className="dvw-icon" title="刷新" disabled={busy} onClick={refresh}><Icon name="refresh"/></button></div></div>
-    {status&&<>
+    {status&&<ScmPanes split={expanded.graph}>
+      <section className="dvw-scm-changes" data-expanded={true}>
       <div className="dvw-git-head"><button className="dvw-branch" aria-haspopup="menu" aria-expanded={branchMenu} onClick={()=>void openBranchMenu()}><Icon name="git-branch"/> {status.branch} <Icon name="chevron-down" className="dvw-branch-caret"/></button><span>↑{status.ahead} ↓{status.behind}</span>{branchMenu&&<div className="dvw-branch-menu" role="menu" onPointerDown={event=>event.stopPropagation()}><div className="dvw-branch-current">当前分支：{status.branch}</div><div className="dvw-branch-list">{branches.map(branch=><button key={branch.name} role="menuitem" data-active={branch.name===status.branch} disabled={busy||branch.worktree!==undefined} title={branch.worktree!==undefined?`已在工作树 ${branch.worktree} 中检出`:undefined} onClick={()=>void switchBranch(branch.name)}><Icon name={branch.name===status.branch?'check':'git-branch'}/><span>{branch.name}</span>{branch.worktree!==undefined&&<span className="dvw-branch-worktree">工作树</span>}</button>)}</div><div className="dvw-branch-create"><input className="dvw-input" value={newBranch} placeholder="新分支名称" onChange={event=>setNewBranch(event.target.value)} onKeyDown={event=>{if(event.key==='Enter'){event.preventDefault();void createBranch()}}}/><button className="dvw-icon dvw-branch-create-button" title="创建并切换分支" disabled={busy||!newBranch.trim()} onClick={()=>void createBranch()}><Icon name="add"/></button></div></div>}</div>
       <div className="dvw-commit"><div className="dvw-commit-box"><textarea className="dvw-textarea dvw-commit-input" rows={1} value={message} onChange={event=>setMessage(event.target.value)} onKeyDown={event=>{if((event.ctrlKey||event.metaKey)&&event.key==='Enter'&&message.trim()){event.preventDefault();void commitChanges()}}} placeholder={`消息 (${isMacPlatform()?'⌘':'Ctrl+'}Enter 在“${status.branch}”提交)`}/><button className="dvw-commit-ai" disabled={busy||generating||!props.modelAvailable||status.changes.length===0} title={generating?'正在生成提交信息':props.modelAvailable?'根据当前更改生成提交信息':props.modelHint} aria-label="生成提交信息" onClick={()=>void generateMessage()}><Icon name="sparkle"/></button></div><div className="dvw-commit-actions"><button className="dvw-commit-button" disabled={busy||!message.trim()||status.changes.length===0} title={staged.length===0?'没有已暂存的更改':'提交暂存的更改'} onClick={()=>void commitChanges()}><Icon name="check"/> 提交</button><button className="dvw-commit-more" disabled={busy||!message.trim()||status.changes.length===0} aria-haspopup="menu" aria-expanded={commitMenu} title="更多提交操作" aria-label="更多提交操作" onClick={()=>setCommitMenu(value=>!value)}><Icon name="chevron-down"/></button>{commitMenu&&<div className="dvw-commit-menu" role="menu" onPointerDown={event=>event.stopPropagation()}><button role="menuitem" onClick={()=>{setCommitMenu(false);void commitChanges()}}>提交</button><button role="menuitem" onClick={()=>{setCommitMenu(false);void commitChanges('commit.amend')}}>提交（修改）</button><div className="dvw-commit-menu-sep" role="separator"/><button role="menuitem" onClick={()=>void commitThen('push')}>提交和推送</button><button role="menuitem" onClick={()=>void commitThen('sync')}>提交和同步</button></div>}</div></div>
-      <div className="dvw-git">{(status.operation||status.changes.some(change=>change.conflicted))&&<button className="dvw-commit-file" onClick={()=>openTools({ view: 'conflicts' })}><Icon name="warning"/> 处理 Git 操作与冲突</button>}{staged.length>0&&<section><GitGroupHeader title="暂存的更改" count={staged.length} expanded={expanded.staged} onToggle={()=>setExpanded(value=>({...value,staged:!value.staged}))}><button className="dvw-icon" title="取消暂存所有更改" onClick={()=>void action('unstage.all')}><Icon name="remove"/></button></GitGroupHeader>{expanded.staged&&staged.map(change=>renderChange(change,'staged'))}</section>}<section><GitGroupHeader title="更改" count={changed.length} expanded={expanded.changes} onToggle={()=>setExpanded(value=>({...value,changes:!value.changes}))}><button className="dvw-icon" title="放弃所有更改" onClick={()=>{if(confirm('放弃所有已跟踪和未跟踪的更改？此操作无法撤销。'))void action('discard.all')}}><Icon name="discard"/></button><button className="dvw-icon" title="暂存所有更改" onClick={()=>void action('stage.all')}><Icon name="add"/></button></GitGroupHeader>{expanded.changes&&changed.map(change=>renderChange(change,'worktree'))}</section><section className="dvw-graph"><GitGroupHeader title="图表" count={commits.length} expanded={expanded.graph} onToggle={()=>setExpanded(value=>({...value,graph:!value.graph}))}><button className="dvw-icon" title="刷新提交图表" onClick={refresh}><Icon name="refresh"/></button></GitGroupHeader>{expanded.graph&&<CommitGraph commits={commits} expanded={expandedCommit} files={commitFileMap} onToggle={commit=>void toggleCommit(commit)} onOpenFile={(commit,file)=>void openCommitFile(commit,file)} onTools={commit=>openTools({commit:commit.hash})}/>}</section></div>
-    </>}
+      <div className="dvw-git">{(status.operation||status.changes.some(change=>change.conflicted))&&<button className="dvw-commit-file" onClick={()=>openTools({ view: 'conflicts' })}><Icon name="warning"/> 处理 Git 操作与冲突</button>}{staged.length>0&&<section><GitGroupHeader title="暂存的更改" count={staged.length} expanded={expanded.staged} onToggle={()=>setExpanded(value=>({...value,staged:!value.staged}))}><button className="dvw-icon" title="取消暂存所有更改" onClick={()=>void action('unstage.all')}><Icon name="remove"/></button></GitGroupHeader>{expanded.staged&&staged.map(change=>renderChange(change,'staged'))}</section>}<section><GitGroupHeader title="更改" count={changed.length} expanded={expanded.changes} onToggle={()=>setExpanded(value=>({...value,changes:!value.changes}))}><button className="dvw-icon" title="放弃所有更改" onClick={()=>{if(confirm('放弃所有已跟踪和未跟踪的更改？此操作无法撤销。'))void action('discard.all')}}><Icon name="discard"/></button><button className="dvw-icon" title="暂存所有更改" onClick={()=>void action('stage.all')}><Icon name="add"/></button></GitGroupHeader>{expanded.changes&&changed.map(change=>renderChange(change,'worktree'))}</section></div>
+      </section>
+      <section className="dvw-graph" data-expanded={expanded.graph}><GitGroupHeader title="图表" count={commits.length} expanded={expanded.graph} onToggle={()=>setExpanded(value=>({...value,graph:!value.graph}))}><button className="dvw-icon" title="刷新提交图表" onClick={refresh}><Icon name="refresh"/></button></GitGroupHeader>{expanded.graph&&<CommitGraph commits={commits} expanded={expandedCommit} files={commitFileMap} onToggle={commit=>void toggleCommit(commit)} onOpenFile={(commit,file)=>void openCommitFile(commit,file)} onTools={commit=>openTools({commit:commit.hash})}/>}</section>
+    </ScmPanes>}
     {status&&toolsSelection&&<GitTools key={JSON.stringify(toolsSelection)} open={toolsOpen} sessionId={props.sessionId} status={status} selection={toolsSelection} onClose={()=>setToolsOpen(false)} onRefresh={refresh} onOpenFile={props.onOpenFile} onDiff={props.onDiff}/>}
     {actionError!==undefined&&createPortal(<div className="dvw-confirm-backdrop dvw-git-dialog-layer" role="presentation" onMouseDown={()=>setActionError(undefined)}><section className="dvw-confirm dvw-git-error-dialog" role="alertdialog" aria-modal="true" aria-labelledby="dvw-git-error-title" aria-describedby="dvw-git-error-message" onMouseDown={event=>event.stopPropagation()}><header className="dvw-git-error-head"><span className="dvw-git-error-mark" aria-hidden="true"><Icon name="git-commit"/></span><div><h2 id="dvw-git-error-title">{actionError.title}</h2><p id="dvw-git-error-message">{actionError.message}</p></div></header>{actionError.detail!==undefined&&<details className="dvw-git-error-detail"><summary>技术详情</summary><pre>{actionError.detail}</pre></details>}<footer><button autoFocus onClick={()=>setActionError(undefined)}>{actionError.canStageAll?'取消':'知道了'}</button>{actionError.canStageAll&&<button className="dvw-git-error-primary" onClick={()=>void stageAllAndCommit()}>暂存全部并提交</button>}</footer></section></div>,document.body)}
     {branchError!==undefined&&<div className="dvw-confirm-backdrop" role="presentation" onMouseDown={()=>setBranchError(undefined)}><section className="dvw-confirm" role="alertdialog" aria-modal="true" aria-labelledby="dvw-branch-error-title" onMouseDown={event=>event.stopPropagation()}><h2 id="dvw-branch-error-title">无法切换分支</h2><p className="dvw-branch-error-message">{branchError}</p><footer><button autoFocus onClick={()=>setBranchError(undefined)}>确定</button></footer></section></div>}
@@ -1810,7 +1891,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     <DshConversationPanel visible={chatShown} width={chatWidth} statusHeight={statusVisible?30:6}/>
     <DshConversationTheme visible={chatShown} colorScheme={colorScheme} followDsh={false}/>
     <DshReviewActions visible={chatShown&&reviewEnabled} files={reviewFiles} count={reviewSnapshot.changes.length} disabled={reviewSnapshot.busy||reviewSnapshot.working} onOpen={path=>void openPath(path)} onAcceptAll={keepAllReview} onRejectAll={()=>void rejectAllReview()}/>
-    {chatShown&&<aside className="dvw-chat"><PanelResizer className="dvw-chat-resizer" label="拖动调整 DSH 对话栏宽度" width={chatWidth} min={DSH_CHAT_MIN_WIDTH} max={DSH_CHAT_MAX_WIDTH} defaultWidth={DSH_CHAT_DEFAULT_WIDTH} direction={-1} hideBelow={200} onHide={()=>setChatVisible(false)} onWidth={setChatWidth}/><header className="dvw-chat-head"><span><DshMark/> DSH</span><button className="dvw-icon" title="关闭 DSH 对话栏" onClick={()=>setChatVisible(false)}><Icon name="close"/></button></header><div className="dvw-chat-body"/></aside>}
+    {chatShown&&<aside className="dvw-chat"><PanelResizer className="dvw-chat-resizer" label="拖动调整 DSH 对话栏宽度" size={chatWidth} min={DSH_CHAT_MIN_WIDTH} max={DSH_CHAT_MAX_WIDTH} defaultSize={DSH_CHAT_DEFAULT_WIDTH} direction={-1} hideBelow={200} onHide={()=>setChatVisible(false)} onResize={setChatWidth}/><header className="dvw-chat-head"><span><DshMark/> DSH</span><button className="dvw-icon" title="关闭 DSH 对话栏" onClick={()=>setChatVisible(false)}><Icon name="close"/></button></header><div className="dvw-chat-body"/></aside>}
     {switcherOpen&&<WorkspaceSwitcher choices={switcherChoices} activeSessionId={sessionId} unavailable={navigation?.available===false} busy={switcherBusy} error={switcherError} theme={colorScheme} onCreate={()=>void createWorkspace()} onNewSession={newSession} onSwitch={switchSession} onOpenWorkspace={enterWorkspace} onClose={()=>setSwitcherOpen(false)}/>}
     {settingsNode!==undefined&&createPortal(settingsPage,settingsNode)}
     {unsupportedTab!==undefined&&sessionId!==undefined&&<CenteredOpenWith key={unsupportedTab.path} sessionId={sessionId} path={unsupportedTab.path} label={unsupportedTab.label}/>}
@@ -1830,7 +1911,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
         order={activityOrder} hidden={activityHidden}
         onOrderChange={setActivityOrder} onHiddenChange={setActivityHidden}/>
     <aside className="dvw-side" data-side-width={sideWidth}>{snapshot.view==='explorer'&&workspace!==undefined&&<ExplorerView sessionId={sessionId} cwd={workspace.cwd} selected={active} onOpen={openFromView} onAddToDsh={addEntryToDsh}/>} {snapshot.view==='search'&&<SearchView sessionId={sessionId} onOpen={openFromView}/>} {snapshot.view==='git'&&<GitView sessionId={sessionId} preferences={commitPreferences} model={commitModel} key={sessionId} onOpenFile={openFromView} modelConfigured={commitModelConfigured} modelAvailable={commitModelAvailable} modelHint={commitModelHint} onDiff={(path,diff,title,source,preview)=>{leaveDshPanel();openDiff(path,diff,title,source,preview)}}/>}</aside>
-    <PanelResizer className="dvw-side-resizer" label="拖动调整源码管理侧边栏宽度" width={sideWidth} min={210} max={640} defaultWidth={210} direction={1} hideBelow={105} onHide={()=>setPrimarySideVisible(false)} onWidth={setSideWidth}/>
+    <PanelResizer className="dvw-side-resizer" label="拖动调整源码管理侧边栏宽度" size={sideWidth} min={210} max={640} defaultSize={210} direction={1} hideBelow={105} onHide={()=>setPrimarySideVisible(false)} onResize={setSideWidth}/>
     <main className="dvw-main" onDragOverCapture={paneDragOver} onDragLeaveCapture={paneDragLeave} onDropCapture={paneDropHandler}><div className="dvw-panes">{renderNode(layout)}</div>{snapshot.bottomPanel===undefined&&<div className="dvw-bottom-reveal" title="向上拖动打开终端" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();service.toggleBottomPanel('terminal');const statusHeight=statusVisible?24:0;const heightAt=(clientY:number)=>Math.max(120,Math.min(window.innerHeight-160,window.innerHeight-clientY-statusHeight));const move=(e:PointerEvent)=>setPanelHeight(heightAt(e.clientY));const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>}</main>
     {tabMenu&&menuTab&&<div className="dvw-context-menu dvw-tab-menu" role="menu" style={{left:Math.min(tabMenu.x,window.innerWidth-240),top:Math.min(tabMenu.y,window.innerHeight-180)}} onPointerDown={event=>event.stopPropagation()}>
       <button role="menuitem" onClick={()=>{setTabMenu(undefined);close(menuTab)}}>关闭<span>Ctrl+F4</span></button>

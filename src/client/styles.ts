@@ -52,6 +52,19 @@ body[data-ds-dark-theme] .dvw-overlay,.dvw-overlay[data-dvw-theme=dark]{color-sc
 .dvw-git-merge-sources{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:8px 0}
 .dvw-git-merge-sources>section{padding:6px;border:1px solid var(--dvw-border)}
 .dvw-git-merge-sources pre{height:118px;overflow:auto;white-space:pre}
+.dvw-scm-panes,.dvw-scm-changes,.dvw-scm-panes>.dvw-graph{display:flex;flex-direction:column;min-height:0}
+.dvw-scm-panes,.dvw-scm-panes>section[data-expanded=true]{flex:1 1 0}
+.dvw-scm-panes>section[data-expanded=false]{flex:none}
+.dvw-scm-panes>.dvw-graph{margin:0;padding:0;border-top:1px solid var(--dvw-border)}
+.dvw-scm-panes[data-split=true]>.dvw-scm-changes{flex:0 0 var(--dvw-scm-changes-height,50%)}
+.dvw-scm-panes[data-split=true]>.dvw-graph{border-top:0}
+.dvw-scm-resizer{position:relative;z-index:6;flex:0 0 6px;margin-block:-3px;cursor:ns-resize;touch-action:none}
+.dvw-scm-resizer::after{content:"";position:absolute;inset:2px 0 auto;height:1px;background:var(--dvw-border);pointer-events:none}
+.dvw-scm-resizer:is(:hover,:focus-visible,[data-dragging=true])::after{height:2px;background:var(--dvw-accent)}
+.dvw-scm-changes .dvw-git,.dvw-scm-panes .dvw-graph-list{min-height:0;overflow:auto;overscroll-behavior:contain}
+.dvw-scm-panes .dvw-group-head{flex:none}
+.dvw-scm-panes :is(.dvw-group-head,.dvw-scm-head):is(:hover,:focus-within){background:var(--dvw-hover)}
+.dvw-scm-panes .dvw-group-toggle:hover{background:transparent}
 .dvw-git-merge textarea{height:auto;resize:vertical;font-family:monospace;padding:6px;white-space:pre}
 .dvw-git-merge form>button{margin-top:8px}
 .dvw-git-diff-view{position:absolute;inset:0;display:flex;flex-direction:column;min-width:0;min-height:0}

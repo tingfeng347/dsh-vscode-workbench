@@ -328,6 +328,35 @@ it('lets the host resolve the current chat model until the user configures one',
   expect(localStorage.getItem('dvw:commit-model')).toBeNull()
 })
 
+it('resizes the graph split by pointer and keyboard and restores it after collapsing the graph', async () => {
+  const height = vi.spyOn(HTMLElement.prototype, 'clientHeight', 'get').mockReturnValue(600)
+  try {
+    await setup()
+    await act(async () => { document.querySelector<HTMLButtonElement>('button[title="源代码管理"]')!.click() })
+    const handle = () => document.querySelector<HTMLElement>('.dvw-scm-resizer')
+    const position = () => handle()?.getAttribute('aria-valuenow')
+    const pointer = (type: string, clientY: number) => new MouseEvent(type, { bubbles: true, button: 0, clientY })
+    expect(position()).toBe('300')
+    await act(async () => {
+      handle()!.dispatchEvent(pointer('pointerdown', 300))
+      window.dispatchEvent(pointer('pointermove', 220))
+    })
+    expect(position()).toBe('220')
+    await act(async () => { window.dispatchEvent(pointer('pointerup', 220)) })
+    const graph = document.querySelector<HTMLButtonElement>('.dvw-graph .dvw-group-toggle')!
+    await act(async () => { graph.click() })
+    expect(handle()).toBeNull()
+    await act(async () => { graph.click() })
+    expect(position()).toBe('220')
+    await act(async () => { handle()!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true })) })
+    expect(position()).toBe('230')
+    await act(async () => { handle()!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })) })
+    expect(position()).toBe('300')
+  } finally {
+    height.mockRestore()
+  }
+})
+
 it('uses an explicitly configured commit model instead of the active chat model', async () => {
   localStorage.setItem('dvw:commit-model', JSON.stringify({ provider: 'deepseek-official', model: 'deepseek-pro' }))
   localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))

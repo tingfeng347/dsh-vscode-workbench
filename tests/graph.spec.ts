@@ -1,6 +1,9 @@
+// @vitest-environment jsdom
+import { createElement } from 'react'
+import { renderToStaticMarkup } from 'react-dom/server'
 import { describe, expect, it } from 'vitest'
 import type { GitCommit } from '../src/types.ts'
-import { absoluteEntryPath, canMoveTo, createdEntryPath, downloadUrlData, movedPath, parentPath, directoryAffected, graphParentPath, graphRows, graphTrackPath, renamedPath, restoreTabPaths, tabLabel, tabScrollLeft, uploadDestination } from '../src/client/Workbench.tsx'
+import { absoluteEntryPath, canMoveTo, createdEntryPath, downloadUrlData, movedPath, parentPath, directoryAffected, CommitGraph, graphParentPath, graphRows, graphTrackPath, renamedPath, restoreTabPaths, tabLabel, tabScrollLeft, uploadDestination } from '../src/client/Workbench.tsx'
 import { markdownHeadings, markdownWorkspacePath } from '../src/client/MarkdownPreview.tsx'
 
 function commit(hash: string, parents: string[]): GitCommit {
@@ -10,14 +13,29 @@ function commit(hash: string, parents: string[]): GitCommit {
 describe('Git graph lanes', () => {
   it('keeps a linear history on one lane', () => {
     const rows=graphRows([commit('c',['b']),commit('b',['a']),commit('a',[])])
-    expect(rows.map(row=>[row.before.length,row.after.length])).toEqual([[1,1],[1,1],[1,0]])
+    expect(rows.map(row=>[row.before.length,row.after.length])).toEqual([[0,1],[1,1],[1,0]])
   })
 
-  it('opens and then converges merge lanes', () => {
-    const rows=graphRows([commit('m',['a','b']),commit('a',['p']),commit('b',['p']),commit('p',[])])
-    expect(rows[0]?.after.map(track=>track.hash)).toEqual(['a','b'])
-    expect(rows.at(-1)?.after).toEqual([])
-    expect(Math.max(...rows.map(row=>Math.max(row.before.length,row.after.length)))).toBe(2)
+  it('retains distinct lanes until their shared target, including across consecutive merges', () => {
+    const rows = graphRows([
+      { ...commit('m16', ['m15','test']), refs: ['HEAD -> main'] },
+      commit('test', ['m15']), commit('m15', ['release','fix']),
+      commit('fix', ['release']), commit('release', []),
+    ])
+    expect(rows.map(row => row.after.map(track => [track.hash, track.color]))).toEqual([
+      [['m15',0],['test',1]], [['m15',0],['m15',1]],
+      [['release',0],['fix',2]], [['release',0],['release',2]], [],
+    ])
+    expect(rows.map(row => row.lane)).toEqual([0,1,0,1,0])
+  })
+
+  it('carries unrelated lanes through a root or truncated branch', () => {
+    for (const parents of [[], ['outside']]) {
+      const rows = graphRows([commit('m',['a','b']), commit('a',parents), commit('b',[])])
+      expect(rows[1]!.parentLanes).toEqual([])
+      expect(rows[1]!.after).toEqual([rows[0]!.after[1]])
+      expect(rows[2]!.color).toBe(rows[0]!.after[1]!.color)
+    }
   })
 
   it('does not retain parents outside the visible history window',()=>{
@@ -25,20 +43,55 @@ describe('Git graph lanes', () => {
     expect(rows.map(row=>row.after)).toEqual([[],[],[]])
   })
 
-  it('keeps each branch color stable while lane positions compact', () => {
-    const rows=graphRows([commit('m',['a','b']),commit('a',['p']),commit('b',['p']),commit('p',[])])
-    const branch=rows[0]!.after.find(track=>track.hash==='b')!
-    expect(rows[1]!.before.find(track=>track.hash==='b')?.color).toBe(branch.color)
-    expect(rows[2]!.before.find(track=>track.hash==='b')?.color).toBe(branch.color)
+  it('rounds lane shifts in either direction', () => {
+    expect(graphTrackPath(22,11)).toBe('M 22 0 V 6 A 5 5 0 0 1 17 11 H 16 A 5 5 0 0 0 11 16 V 22')
+    expect(graphTrackPath(11,22)).toBe('M 11 0 V 6 A 5 5 0 0 0 16 11 H 17 A 5 5 0 0 1 22 16 V 22')
+    expect(graphParentPath(11,33)).toBe('M 11 11 H 22 A 11 11 0 0 1 33 22')
   })
 
-  it('draws VS Code style lane shifts and parent arcs', () => {
-    expect(graphTrackPath(11,11,0,38,19)).toBe('M 11 0 V 38')
-    expect(graphTrackPath(22,11,0,38,19)).toBe('M 22 0 V 14 A 5 5 0 0 1 17 19 H 16 A 5 5 0 0 0 11 24 V 38')
-    expect(graphTrackPath(11,22,0,38,19)).toBe('M 11 0 V 14 A 5 5 0 0 0 16 19 H 17 A 5 5 0 0 1 22 24 V 38')
-    expect(graphParentPath(11,11,19,38)).toBe('M 11 19 V 38')
-    expect(graphParentPath(11,22,19,38)).toBe('M 11 19 H 11 A 11 11 0 0 1 22 30 V 38')
-    expect(graphParentPath(33,11,19,38)).toBe('M 33 19 H 22 A 11 11 0 0 0 11 30 V 38')
+  it('renders consecutive merges and keeps both lanes connected across expanded files', () => {
+    const commits = [
+      { ...commit('e2c3415', ['4845605', '0df051f']), refs: ['HEAD -> main'] },
+      commit('0df051f', ['4845605']),
+      commit('4845605', ['62b9947', '247503d']),
+      commit('247503d', ['62b9947']),
+      commit('62b9947', ['3cfd16e']),
+    ]
+    const noop = () => {}
+    const actions = { onToggle: noop, onOpenFile: noop, onTools: noop }
+    const graph = document.createElement('div')
+    graph.innerHTML = renderToStaticMarkup(createElement(CommitGraph, {
+      commits, expanded: '0df051f', files: new Map([['0df051f', [{ path: 'tests/git.spec.ts', status: 'M' }]]]), ...actions,
+    }))
+    expect(graph.querySelector('.dvw-commit-file-name')?.textContent).toBe('git.spec.ts')
+    const rows = graph.querySelectorAll<HTMLButtonElement>('.dvw-graph-row')
+    const svgs = graph.querySelectorAll<SVGSVGElement>('.dvw-graph-svg')
+    expect(svgs).toHaveLength(5)
+    for (const [index, svg] of svgs.entries()) {
+      expect(rows[index]!.style.height).toBe('22px')
+      expect(svg.style.marginTop).toBe('')
+      expect(svg.getAttribute('height')).toBe('22')
+      expect(svg.querySelector('circle')?.getAttribute('cy')).toBe('11')
+    }
+
+    const paths = Array.from(svgs, svg => Array.from(svg.querySelectorAll('path')))
+    expect(paths.map(row => row.map(path => path.getAttribute('d')))).toEqual([
+      ['M 11 11 V 22', 'M 11 11 H 11 A 11 11 0 0 1 22 22'],
+      ['M 11 0 V 22', 'M 22 0 V 11', 'M 22 11 V 22'],
+      ['M 11 0 V 11', 'M 22 0 A 11 11 0 0 1 11 11 H 11', 'M 11 11 V 22', 'M 11 11 H 11 A 11 11 0 0 1 22 22'],
+      ['M 11 0 V 22', 'M 22 0 V 11', 'M 22 11 V 22'],
+      ['M 11 0 V 11', 'M 22 0 A 11 11 0 0 1 11 11 H 11'],
+    ])
+    const continuation = graph.querySelectorAll<SVGLineElement>('.dvw-graph-continuation line')
+    expect(Array.from(continuation, line => [line.getAttribute('x1'), line.getAttribute('x2'), line.style.stroke])).toEqual([
+      ['11', '11', 'var(--dvw-graph-ref)'], ['22', '22', 'rgb(255, 176, 0)'],
+    ])
+    for (const [start, end, color] of [[0, 2, 'rgb(255, 176, 0)'], [2, 4, 'rgb(220, 38, 127)']] as const) {
+      expect(paths[start]!.at(-1)!.style.stroke).toBe(color)
+      expect(svgs[start + 1]!.querySelector('circle')?.style.fill).toBe(color)
+      expect(paths[start + 1]!.slice(1).map(path => path.style.stroke)).toEqual([color, color])
+      expect(paths[end]![1]!.style.stroke).toBe(color)
+    }
   })
 })
 

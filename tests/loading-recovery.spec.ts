@@ -4,7 +4,7 @@ afterEach(() => { vi.resetModules(); document.head.replaceChildren(); Reflect.de
 it('retries Monaco after the script fails', async () => {
   const { loadMonaco } = await import('../src/client/MonacoEditor.tsx')
   const first = loadMonaco()
-  const failure = expect(first).rejects.toThrow('failed to load Monaco')
+  const failure = expect(first).rejects.toThrow('Monaco 编辑器加载失败')
   document.head.querySelector('script')!.dispatchEvent(new Event('error'))
   await failure
   const second = loadMonaco()

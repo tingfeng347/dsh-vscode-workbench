@@ -7,7 +7,7 @@ describe('workbench settings section', () => {
   it('registers a Workbench page in DSH settings and can open it', () => {
     const index = read('src/client/index.tsx')
     expect(index).toContain("name: 'settings.section'")
-    expect(index).toContain("id: SETTINGS_SECTION_ID, order: 40, label: 'Workbench'")
+    expect(index).toContain("id: SETTINGS_SECTION_ID, order: 40, label: '工作台'")
     expect(index).toContain("name: 'settings.section.icon'")
     expect(index).toContain('actions.openSection(SETTINGS_SECTION_ID)')
   })

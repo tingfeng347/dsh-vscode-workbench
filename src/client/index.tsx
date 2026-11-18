@@ -103,7 +103,7 @@ export function apply(ctx: ClientContext): void {
     return () => { disposeIcon(); disposeMain() }
   }))
   ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'dsh-vscode-workbench-overlay', inject: () => ({ service, browser, navigation, openDshPanel, restoreConversation, closeDshPanel, openSettings }) }, Overlay))
-  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: SETTINGS_SECTION_ID, order: 40, label: 'Workbench' }, WorkbenchSettingsSection))
+  ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: SETTINGS_SECTION_ID, order: 40, label: '工作台' }, WorkbenchSettingsSection))
   ctx.slots.inject('settings.section.icon', () => ctx.slots.register({ name: 'settings.section.icon', id: SETTINGS_SECTION_ID }, WorkbenchSettingsIcon))
   ctx.effect(() => {
     const onKey = (event: KeyboardEvent) => {

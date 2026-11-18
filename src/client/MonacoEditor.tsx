@@ -7,6 +7,7 @@ import { locateReviewChange, type ReviewChange } from './aiReview.ts'
 import { searchHighlightRange } from './searchHighlight.ts'
 import type { EditorSelection } from './dshComposer.ts'
 import { isIndexedModel } from './typescriptProject.ts'
+import { completeMonacoChineseMessages, localizeMonacoActions } from './monacoLocale.ts'
 
 type Monaco = typeof import('monaco-editor')
 declare global { interface Window { require?: { (ids: string[], done: () => void, error?: (cause: unknown) => void): void; config(value: unknown): void }; monaco?: Monaco } }
@@ -141,20 +142,21 @@ export function loadMonaco(): Promise<Monaco> {
   loading ??= new Promise<Monaco>((resolve, reject) => {
     const start = () => {
       const loader = window.require
-      if (loader === undefined) return reject(new Error('Monaco AMD loader unavailable'))
+      if (loader === undefined) return reject(new Error('Monaco 编辑器加载器不可用'))
       const base = new URL('/dsh-vscode/monaco/', location.href).href
       window.MonacoEnvironment = { getWorkerUrl: () => URL.createObjectURL(new Blob([monacoWorkerBootstrap(base)], { type: 'text/javascript' })) }
       loader.config({ paths: { vs: `${base}vs` }, 'vs/nls': { availableLanguages: { '*': 'zh-cn' } } })
       loader(['vs/nls.messages.zh-cn'], () => {
+        completeMonacoChineseMessages()
         loader(['vs/editor/editor.main'], () => {
-          if (window.monaco === undefined) return reject(new Error('Monaco failed to initialize'))
+          if (window.monaco === undefined) return reject(new Error('Monaco 编辑器初始化失败'))
           defineWorkbenchThemes(window.monaco)
           resolve(window.monaco)
         }, reject)
       }, reject)
     }
     if (window.require !== undefined) { start(); return }
-    const script = document.createElement('script'); script.src = '/dsh-vscode/monaco/vs/loader.js'; script.onload = start; script.onerror = () => { script.remove(); reject(new Error('failed to load Monaco')) }; document.head.append(script)
+    const script = document.createElement('script'); script.src = '/dsh-vscode/monaco/vs/loader.js'; script.onload = start; script.onerror = () => { script.remove(); reject(new Error('Monaco 编辑器加载失败')) }; document.head.append(script)
   }).catch(error => { loading = undefined; throw error })
   return loading
 }
@@ -231,6 +233,7 @@ export function MonacoDiffEditor(props: {
           scrollbar:{...WORKBENCH_EDITOR_CHROME.scrollbar, vertical:'hidden', verticalScrollbarSize:0},
         })) as [import('monaco-editor').editor.IStandaloneCodeEditor,import('monaco-editor').editor.IStandaloneCodeEditor]
         splitPanes.current = panes
+        panes.forEach(localizeMonacoActions)
         linked.current = connectGitSplit(board.current,panes,ribbon.current,overview.current,marks.current,preview.current)
       }
       const subscriptions = [
@@ -290,6 +293,8 @@ export function MonacoDiffEditor(props: {
         modified.dispose()
         editor.current = undefined
       }
+      localizeMonacoActions(instance.getOriginalEditor())
+      localizeMonacoActions(instance.getModifiedEditor())
       instance.setModel({ original, modified })
       editor.current = instance
     }).catch(cause => {
@@ -711,6 +716,7 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
       if (disposed || root.current === null) return
       const props = latest.current
       const instance = monaco.editor.create(root.current, { model: null, automaticLayout: true, theme: monacoThemeFor(props.theme), fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off' })
+      localizeMonacoActions(instance)
       editor.current = instance
       const attribution = createGitLineBlame()
       lineBlame.current = attribution

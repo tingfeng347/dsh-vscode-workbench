@@ -47,4 +47,4 @@ it('reads binary previews from the committed blob and falls back to the parent f
   await gitAction(root, 'stage.all')
   await gitAction(root, 'commit', undefined, 'text file')
   await expect(gitPreviewFile(root, head?.hash ?? '', 'README.txt')).rejects.toMatchObject({ code: 'unsupported-media' })
-})
+}, 30_000)

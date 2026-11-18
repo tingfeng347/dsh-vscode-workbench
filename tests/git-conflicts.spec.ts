@@ -3,7 +3,7 @@ import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it } from 'vitest'
 import type { GitConflictVersions, GitDiff, GitStash } from '../src/types.ts'
-import { gitAction, gitStatus, run } from '../src/host.ts'
+import { gitAction, gitBlameLine, gitBlameRange, gitStatus, readDocument, run } from '../src/host.ts'
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 async function repository() {
@@ -111,6 +111,52 @@ it('compares a tracked working-tree file against a ref', async () => {
   const pair = JSON.stringify(['HEAD', ':worktree:'])
   expect(await gitAction(root, 'compare.files', undefined, pair)).toEqual([{ path, status: 'M' }])
   expect(await gitAction(root, 'compare.diff', path, pair)).toMatchObject({ original: 'base\n', modified: 'working copy\n' })
+})
+
+it('attributes clicked lines to the correct snapshot and commit on each side', async () => {
+  const { root, git } = await repository()
+  const path = 'file with spaces.txt'
+  const first = (await git('rev-parse', 'HEAD')).trim()
+  await git('config', 'user.name', 'Second Author')
+  await writeFile(join(root,path), 'base\ncommitted line\n')
+  await git('commit', '-am', 'second commit')
+  const second = (await git('rev-parse', 'HEAD')).trim()
+  const historical = await gitAction(root,'commit.file.diff',path,second) as GitDiff
+  expect(await gitBlameLine(root,historical.blame?.original,1))
+    .toMatchObject({kind:'commit',hash:first,author:'Test',subject:'base',timestamp:expect.any(Number)})
+  expect(await gitBlameLine(root,historical.blame?.modified,2))
+    .toMatchObject({kind:'commit',hash:second,author:'Second Author',subject:'second commit'})
+
+  await writeFile(join(root,path), 'base\ncommitted line\nstaged line\n')
+  await git('add', path)
+  await writeFile(join(root,path), 'base\nworktree edit\nstaged line\n')
+  const diff = await gitAction(root,'diff',path,'worktree') as GitDiff
+  expect(await gitBlameRange(root,diff.blame?.modified,1,3)).toEqual({
+    startLine:1,lines:[expect.objectContaining({hash:first}),{kind:'uncommitted'},{kind:'uncommitted'}],
+  })
+  expect(await gitBlameLine(root,diff.blame?.original,2)).toMatchObject({hash:second})
+  expect(await gitBlameLine(root,diff.blame?.modified,2)).toEqual({kind:'uncommitted'})
+  expect(await gitBlameLine(root,diff.blame?.original,3)).toEqual({kind:'uncommitted'})
+
+  const document = await readDocument(root,path)
+  const source = {kind:'document',path,revision:document.revision}
+  expect(await gitBlameLine(root,source,1)).toMatchObject({hash:first})
+  expect(await gitBlameLine(root,source,2)).toEqual({kind:'uncommitted'})
+  await writeFile(join(root,path), 'file changed again\n')
+  await expect(gitBlameLine(root,diff.blame?.modified,2)).rejects.toMatchObject({code:'stale-diff'})
+  await expect(gitBlameLine(root,source,1)).rejects.toMatchObject({code:'stale-diff'})
+})
+
+it('preserves the committed history of a staged rename in both the diff and file editor', async () => {
+  const { root, git } = await repository()
+  const path = 'renamed.txt'
+  const head = (await git('rev-parse', 'HEAD')).trim()
+  await git('mv', 'file with spaces.txt', path)
+  const diff = await gitAction(root,'diff',path,'staged') as GitDiff
+  expect(await gitBlameLine(root,diff.blame?.original,1)).toMatchObject({hash:head})
+  expect(await gitBlameLine(root,diff.blame?.modified,1)).toMatchObject({hash:head})
+  const document = await readDocument(root,path)
+  expect(await gitBlameLine(root,{kind:'document',path,revision:document.revision},1)).toMatchObject({hash:head})
 })
 
 it('creates a tag from a selected ref and renames a local branch', async () => {

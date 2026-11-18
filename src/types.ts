@@ -18,10 +18,21 @@ export interface GitStash { ref: string; hash: string; subject: string }
 export interface GitCommit { hash: string; parents: string[]; author: string; date: string; subject: string; refs: string[] }
 /** One path changed by a local commit. */
 export interface GitCommitFile { path: string; previousPath?: string; status: string }
+export type GitBlameSource =
+  | { kind: 'commit'; path: string; revision: string }
+  | { kind: 'index' | 'worktree'; path: string; revision?: string; historyPath?: string; digest: string }
+  | { kind: 'document'; path: string; revision: string }
+  | { kind: 'untracked' }
+export type GitLineBlame =
+  | { kind: 'commit'; hash: string; author: string; timestamp: number; subject: string }
+  | { kind: 'uncommitted' }
+  | { kind: 'unavailable' }
+export interface GitBlameRange { startLine: number; lines: GitLineBlame[] }
 /** Unified patch and full texts used by the Monaco diff editor. */
 export interface GitDiff {
   diff: string
   original: string
   modified: string
+  blame?: { original?: GitBlameSource; modified?: GitBlameSource }
   staging?: { mode: 'staged' | 'worktree'; revision: string; hunks: { label: string; line: number }[] }
 }

@@ -100,6 +100,7 @@ body[data-ds-dark-theme] .dvw-overlay,.dvw-overlay[data-dvw-theme=dark]{color-sc
 .dvw-diff-fold-row:hover{color:var(--dvw-text)}
 .dvw-diff-fold-margin{background:var(--dvw-diff-fold)}
 .dvw-diff-overview{position:relative;min-height:0}
+.dvw-git-line-blame{z-index:4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dvw-text-3);font:11px/18px system-ui;cursor:default}
 .dvw-diff-overview input{appearance:none;writing-mode:vertical-lr;direction:ltr;position:absolute;inset:0;width:100%;height:100%;margin:0;background:none;cursor:ns-resize}
 .dvw-diff-overview input::-webkit-slider-thumb{appearance:none;width:6px;height:28px;border-radius:3px;background:color-mix(in srgb,var(--dvw-text-3) 52%,transparent)}
 .dvw-diff-overview input::-moz-range-thumb{width:6px;height:28px;border:0;border-radius:3px;background:color-mix(in srgb,var(--dvw-text-3) 52%,transparent)}

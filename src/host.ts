@@ -6,7 +6,7 @@ import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, st
 import { constants } from 'node:fs'
 import type { HostContext } from './context.ts'
 import { prioritizeCommitPatch, type CommitContext } from './commit-message.ts'
-import type { FileDocument, FileEntry, GitBranch, GitChange, GitCommit, GitCommitFile, GitConflictVersions, GitDiff, GitStatus, SearchMatch, SearchRequest } from './types.ts'
+import type { FileDocument, FileEntry, GitBlameRange, GitBlameSource, GitBranch, GitChange, GitCommit, GitCommitFile, GitConflictVersions, GitDiff, GitLineBlame, GitStatus, SearchMatch, SearchRequest } from './types.ts'
 import { WorkbenchError } from './wire.ts'
 
 const require = createRequire(import.meta.url)
@@ -311,7 +311,10 @@ async function revisionDiff(repository: string, file: GitCommitFile, after: stri
     file.status === 'A' || before === undefined ? '' : gitObject(repository, `${before}:${paths[0]}`),
     file.status === 'D' ? '' : gitObject(repository, `${after}:${file.path}`),
   ])
-  return { diff, original, modified }
+  return { diff, original, modified, blame: {
+    original: original && before ? {kind:'commit',path:paths[0]!,revision:before} : undefined,
+    modified: modified ? {kind:'commit',path:file.path,revision:after} : undefined,
+  }}
 }
 
 async function checkedGit(repository: string, args: string[]): Promise<string> {
@@ -327,6 +330,113 @@ async function resolveCommit(repository: string, ref: string): Promise<string> {
 async function gitHead(repository: string): Promise<string | undefined> {
   const result = await run('git', ['rev-parse', '--verify', 'HEAD'], repository)
   return result.code === 0 ? result.stdout.trim() : undefined
+}
+
+function blameDigest(text: string): string {
+  return createHash('sha256').update(text).digest('hex')
+}
+
+function snapshotBlame(kind: 'index' | 'worktree', path: string, text: string, revision?: string, historyPath?: string): GitBlameSource | undefined {
+  return text ? { kind, path, revision, historyPath, digest:blameDigest(text) } : undefined
+}
+
+export async function gitBlameLine(cwd: string, value: unknown, line: unknown, signal?: AbortSignal): Promise<GitLineBlame> {
+  return (await gitBlameRange(cwd,value,line,line,signal)).lines[0]!
+}
+
+export async function gitBlameRange(cwd: string, value: unknown, startLine: unknown, endLine: unknown, signal?: AbortSignal): Promise<GitBlameRange> {
+  signal?.throwIfAborted()
+  if (typeof startLine !== 'number' || typeof endLine !== 'number' || !Number.isSafeInteger(startLine) ||
+      !Number.isSafeInteger(endLine) || startLine < 1 || endLine < startLine || endLine > TEXT_LIMIT || endLine - startLine >= 128 ||
+      value === null || typeof value !== 'object') throw new WorkbenchError('bad-request', 'invalid Git line selection')
+  const uniform = (kind: 'uncommitted' | 'unavailable'): GitBlameRange => ({
+    startLine, lines: Array.from({length:endLine-startLine+1},()=>({kind} as GitLineBlame)),
+  })
+  const source = value as Record<string, unknown>
+  if (source.kind === 'untracked') return uniform('uncommitted')
+  if (source.kind !== 'commit' && source.kind !== 'index' && source.kind !== 'worktree' && source.kind !== 'document') {
+    throw new WorkbenchError('bad-request', 'invalid Git blame source')
+  }
+  const repository = await gitRoot(cwd).catch(error=>{
+    if (source.kind === 'document' && error instanceof WorkbenchError && error.code === 'not-repository') return undefined
+    throw error
+  })
+  if (!repository) return uniform('unavailable')
+  const pathField = (item: unknown) => validateGitPath(repository, typeof item === 'string' && !item.includes('\0') ? item : undefined)
+  const workspaceFile = source.kind === 'document' ? await workspacePath(cwd, typeof source.path === 'string' ? source.path : '') : undefined
+  const path = pathField(workspaceFile ? relativePath(repository,workspaceFile.absolute) : source.path)
+  const previousPath = (source.kind === 'index' || source.kind === 'worktree') && source.historyPath !== undefined
+    ? pathField(source.historyPath) : undefined
+  const baseline = source.kind === 'document' ? await gitHead(repository) : source.kind === 'commit' || source.revision !== undefined
+    ? validateCommitHash(typeof source.revision === 'string' ? source.revision : undefined)
+    : undefined
+  let input: string | undefined
+  if (source.kind === 'document') {
+    const document = await readDocument(repository,path)
+    if (document.revision !== source.revision) throw new WorkbenchError('stale-diff', '文件内容已变化，请重新加载文件。',409)
+    if (document.binary || document.tooLarge || document.content === '') return uniform('unavailable')
+    input = document.content
+  } else if (source.kind !== 'commit') {
+    if (typeof source.digest !== 'string' || !/^[a-f0-9]{64}$/.test(source.digest)) throw new WorkbenchError('bad-request', 'invalid Git snapshot')
+    input = source.kind === 'index' ? await gitObject(repository, `:0:${path}`) : await readDocument(repository,path).then(file=>file.content, error=>{
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+      throw error
+    })
+    if (blameDigest(input) !== source.digest) throw new WorkbenchError('stale-diff', '文件内容已变化，请重新打开对比。',409)
+  }
+  let historyPath = path
+  if (input !== undefined) {
+    if (!baseline) return uniform('uncommitted')
+    // Older Git versions accept --contents only with the implicit HEAD.
+    if (source.kind !== 'document' && await gitHead(repository) !== baseline) {
+      throw new WorkbenchError('stale-diff', '当前提交已变化，请重新打开对比。', 409)
+    }
+    const hasBlob = async (target: string) => {
+      signal?.throwIfAborted()
+      const object = await run('git', ['cat-file', '-t', `${baseline}:${target}`], repository, PROCESS_TIMEOUT, signal)
+      return object.code === 0 && object.stdout.trim() === 'blob'
+    }
+    if (!await hasBlob(path)) {
+      signal?.throwIfAborted()
+      const renamed = previousPath ?? parseCommitFiles(await checkedGit(repository, [
+        'diff', '--cached', '--name-status', '-z', '-M', baseline, '--',
+      ])).find(file=>file.path===path && file.status==='R')?.previousPath
+      if (!renamed || !await hasBlob(renamed)) return uniform('uncommitted')
+      historyPath = renamed
+    }
+  }
+  signal?.throwIfAborted()
+  const result = await run('git', [
+    '--literal-pathspecs', 'blame', '--porcelain', '-L', `${startLine},${endLine}`,
+    ...(input === undefined ? [baseline!] : ['--contents', '-']), '--', historyPath,
+  ], repository, PROCESS_TIMEOUT, signal, input)
+  if (input !== undefined && await gitHead(repository) !== baseline) {
+    throw new WorkbenchError('stale-diff', '当前提交已变化，请重新打开文件或对比。', 409)
+  }
+  if (result.code !== 0) throw new WorkbenchError('git-failed', result.stderr || result.stdout, 409)
+  const commits = new Map<string, GitLineBlame>()
+  const lines = new Map<number, GitLineBlame>()
+  let hash = '', line = 0, author = '', timestamp = 0, subject = ''
+  for (const text of result.stdout.split('\n')) {
+    if (text.startsWith('\t') && hash) {
+      const blame = commits.get(hash) ?? (/^0+$/.test(hash)
+        ? {kind:'uncommitted'} : {kind:'commit',hash,author,timestamp,subject})
+      commits.set(hash,blame)
+      lines.set(line,blame)
+      hash = ''
+      continue
+    }
+    const header = !hash && /^([a-f0-9]{40,64}) \d+ (\d+)(?: \d+)?$/.exec(text)
+    if (header) {
+      hash = header[1]!
+      line = Number(header[2])
+      author = ''; timestamp = 0; subject = ''
+    } else if (text.startsWith('author ')) author = text.slice(7)
+    else if (text.startsWith('author-time ')) timestamp = Number(text.slice(12))
+    else if (text.startsWith('summary ')) subject = text.slice(8)
+  }
+  if (lines.size !== endLine-startLine+1) throw new WorkbenchError('git-failed', 'Git 未返回所选行的提交信息。', 409)
+  return {startLine,lines:Array.from({length:endLine-startLine+1},(_,offset)=>lines.get(startLine+offset)!)}
 }
 
 function gitSelection(value: string | undefined, fields: number, allowEmptyLast = false): string[] {
@@ -559,7 +669,11 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
           file.status === 'A' ? '' : gitObject(repository, `${before}:${file.previousPath??target}`),
           file.status === 'D' ? '' : readDocument(repository,target).then(document=>document.content),
         ])
-        return { diff, original, modified } satisfies GitDiff
+        const head = modified ? await gitHead(repository) : undefined
+        return { diff, original, modified, blame: {
+          original: original ? {kind:'commit',path:file.previousPath??target,revision:before} : undefined,
+          modified: snapshotBlame('worktree',target,modified,head,file.previousPath),
+        }} satisfies GitDiff
       }
       const files = await commitFiles(repository, after, before)
       if (action === 'compare.files') return files
@@ -704,7 +818,13 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
       return { label, line: Math.max(1, Number(/\+(\d+)/.exec(label)?.[1] ?? 1)) }
     }),
   }
-  return {diff:result.stdout,original,modified,...(staging ? { staging } : {})} satisfies GitDiff
+  const originalBlame = value === 'staged'
+    ? original && head ? {kind:'commit' as const,path:moved??target,revision:head} : undefined
+    : snapshotBlame('index',target,original,head)
+  const modifiedBlame = value === 'untracked'
+    ? modified ? {kind:'untracked' as const} : undefined
+    : snapshotBlame(value === 'staged' ? 'index' : 'worktree',target,modified,head,moved)
+  return {diff:result.stdout,original,modified,blame:{original:originalBlame,modified:modifiedBlame},...(staging ? { staging } : {})} satisfies GitDiff
 }
 
 /** Resolve the official VS Code Codicon font shipped by @vscode/codicons. */

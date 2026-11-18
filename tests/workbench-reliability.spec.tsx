@@ -242,6 +242,26 @@ it('applies and persists the Git comparison style through Workbench settings', a
   expect(localStorage.getItem('dvw:git-diff-style')).toBe('ribbon')
 })
 
+it('uses one persisted switch for line blame in both the file editor and Git diffs', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: ['a.txt'], active: 'a.txt', view: 'git' }, [], [
+    { path: 'a.txt', index: '.', worktree: 'M', staged: false, untracked: false },
+  ])
+  expect(state.editor?.blame).toMatchObject({sessionId:'s',path:'a.txt',revision:'r1',dirty:false})
+  await act(async () => document.querySelector<HTMLElement>('.dvw-change')!.click())
+  expect(state.diff?.blameSessionId).toBe('s')
+  const settings = document.createElement('div')
+  document.body.append(settings)
+  await act(async () => settingsHost.set(settings))
+  const toggle = settings.querySelector<HTMLButtonElement>('button[aria-label="逐行提交信息"]')!
+  expect(toggle.getAttribute('aria-checked')).toBe('true')
+  await act(async () => toggle.click())
+  expect(state.diff?.blameSessionId).toBeUndefined()
+  expect(localStorage.getItem('dvw:git-line-blame')).toBe('false')
+  await act(async () => document.querySelector<HTMLButtonElement>('button[data-tab-path="a.txt"]')!.click())
+  expect(state.editor?.blame).toBeUndefined()
+})
+
 it('shows an empty staged commit as a centered recovery dialog and can stage everything', async () => {
   localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
   await setup(false, { paths: ['a.txt'], active: 'a.txt' }, [], [{

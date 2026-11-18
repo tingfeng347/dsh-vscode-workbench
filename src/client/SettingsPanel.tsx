@@ -24,6 +24,8 @@ export interface WorkbenchSettingsProps {
   setTheme(value: WorkbenchTheme): void
   gitDiffStyle: GitDiffStyle
   setGitDiffStyle(value: GitDiffStyle): void
+  gitLineBlame: boolean
+  setGitLineBlame(value: boolean): void
   fontSize: number
   setFontSize(value: number): void
   primarySideVisible: boolean
@@ -305,6 +307,9 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
       <h3 className="dvw-set-group-title">Git</h3>
       <Row title="Git 对比样式" description="VS Code 默认内联。IDEA / PyCharm 默认并排，使用改动连线和联动滚动。">
         <Selector label="Git 对比样式" value={props.gitDiffStyle} options={[['classic', 'VS Code（默认）'], ['ribbon', 'IDEA / PyCharm']]} onChange={props.setGitDiffStyle}/>
+      </Row>
+      <Row title="逐行提交信息" description="点击文件编辑器或 Git 对比中的代码行，在代码行尾显示提交作者、时间和摘要。">
+        <Switch label="逐行提交信息" checked={props.gitLineBlame} onChange={props.setGitLineBlame}/>
       </Row>
       <h3 className="dvw-set-group-title">提交信息</h3>
       <Row title="详细程度" description="详细模式会生成标题和 2–4 条说明；简洁模式限制标题长度，标准模式保持单行约定式提交。">

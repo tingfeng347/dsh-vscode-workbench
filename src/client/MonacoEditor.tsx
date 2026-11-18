@@ -1,5 +1,6 @@
 import { connectGitSplit } from './GitSplitDiff.ts'
 import type { GitDiff } from '../types.ts'
+import { clickedCodeLine, clickedDeletedLine, createGitLineBlame, lastBlameLine } from './GitLineBlame.ts'
 import { Icon } from './Icon.tsx'
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { locateReviewChange, type ReviewChange } from './aiReview.ts'
@@ -171,6 +172,8 @@ export function MonacoDiffEditor(props: {
   modified: string
   mode: 'inline' | 'split'
   style?: GitDiffStyle
+  blame?: GitDiff['blame']
+  blameSessionId?: string
   theme: MonacoColorScheme
   fontSize?: number
 }) {
@@ -185,6 +188,7 @@ export function MonacoDiffEditor(props: {
   const linked = useRef<ReturnType<typeof connectGitSplit>>()
   const splitPanes = useRef<import('monaco-editor').editor.IStandaloneCodeEditor[]>([])
   const editor = useRef<DiffEditor>()
+  const lineBlame = useRef<ReturnType<typeof createGitLineBlame>>()
   const ribbonStyle = props.style === 'ribbon'
   const parallax = ribbonStyle && props.mode === 'split'
   const [foldPreference, setFoldPreference] = useState<boolean>()
@@ -243,8 +247,40 @@ export function MonacoDiffEditor(props: {
           }
         }),
       ]
+      const attribution = createGitLineBlame()
+      lineBlame.current = attribution
+      const originalPane = instance.getOriginalEditor()
+      const modifiedPane = instance.getModifiedEditor()
+      const visiblePanes = parallax ? splitPanes.current : [originalPane, modifiedPane]
+      visiblePanes.forEach((pane,index)=>{
+        const lookup = (side: number) => {
+          const {blame,blameSessionId} = latest.current
+          const source = side === 0 ? blame?.original : blame?.modified
+          return blameSessionId && source ? {sessionId:blameSessionId,source} : undefined
+        }
+        subscriptions.push(attribution.watch(pane,()=>index === 0 && !parallax && latest.current.mode === 'inline'
+          ? undefined : lookup(index), (start,end)=>{
+          if (parallax || index !== 1 || latest.current.mode !== 'inline') return
+          const context = lookup(0)
+          if (!context) return
+          const change = instance.getLineChanges()?.find(item=>item.originalEndLineNumber > 0 &&
+            item.modifiedStartLineNumber >= start-1 && item.modifiedStartLineNumber <= end+1)
+          if (change) return {context,line:change.originalStartLineNumber,last:lastBlameLine(originalPane.getModel())}
+        }))
+        subscriptions.push(pane.onMouseDown(event=>{
+          const { blame, blameSessionId, mode } = latest.current
+          if (!blameSessionId || !blame) return
+          const deleted = !parallax && mode === 'inline' && index === 1 ? clickedDeletedLine(monaco,event,instance) : undefined
+          const source = index === 0 || deleted ? blame.original : blame.modified
+          const line = deleted?.line ?? clickedCodeLine(monaco,event,pane)
+          if (line !== undefined && source) attribution.show(pane,line,blameSessionId,source,deleted,
+            deleted ? lastBlameLine(originalPane.getModel()) : undefined)
+        }))
+      })
       cleanup = () => {
         subscriptions.forEach(subscription => subscription.dispose())
+        attribution.reset()
+        lineBlame.current = undefined
         linked.current?.dispose()
         linked.current = undefined
         splitPanes.current.forEach(pane=>pane.dispose())
@@ -262,6 +298,8 @@ export function MonacoDiffEditor(props: {
     return () => { disposed = true; cleanup?.() }
   }, [props.uri, parallax])
 
+  useEffect(() => lineBlame.current?.reset(), [props.blameSessionId, props.blame])
+  useEffect(() => lineBlame.current?.clear(), [props.mode, fold])
   useEffect(() => {
     const model = editor.current?.getModel()
     if (model === null || model === undefined) return
@@ -476,9 +514,10 @@ export interface MonacoReviewProps {
   onReject(id: string): void
 }
 
-export function MonacoEditor(props: { uri: string; value: string; theme: MonacoColorScheme; line?: number; column?: number; fontSize?: number; highlight?: string; focusOnReveal?: boolean; review?: MonacoReviewProps; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
+export function MonacoEditor(props: { uri: string; value: string; theme: MonacoColorScheme; line?: number; column?: number; fontSize?: number; highlight?: string; focusOnReveal?: boolean; review?: MonacoReviewProps; blame?: { sessionId: string; path: string; revision: string; dirty: boolean }; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
   const root = useRef<HTMLDivElement>(null)
   const editor = useRef<import('monaco-editor').editor.IStandaloneCodeEditor>()
+  const lineBlame = useRef<ReturnType<typeof createGitLineBlame>>()
   const decorations = useRef<import('monaco-editor').editor.IEditorDecorationsCollection>()
   const reviewDecorations = useRef<import('monaco-editor').editor.IEditorDecorationsCollection>()
   const reviewZoneIds = useRef<string[]>([])
@@ -673,10 +712,23 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
       const props = latest.current
       const instance = monaco.editor.create(root.current, { model: null, automaticLayout: true, theme: monacoThemeFor(props.theme), fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off' })
       editor.current = instance
+      const attribution = createGitLineBlame()
+      lineBlame.current = attribution
+      const blameWatch = attribution.watch(instance,()=>{
+        const blame = latest.current.blame
+        if (blame && !blame.dirty) return {
+          sessionId:blame.sessionId,source:{kind:'document',path:blame.path,revision:blame.revision},
+        }
+      })
       instance.onDidChangeModelContent(() => latest.current.onChange(instance.getValue()))
       instance.onMouseDown(event => {
         const id = reviewLineIds.current.get(event.target.position?.lineNumber ?? 0)
         if (id !== undefined) latest.current.review?.onFocus(id)
+        const blame = latest.current.blame
+        if (!blame) return
+        const line = clickedCodeLine(monaco,event,instance)
+        if (line === undefined) return
+        attribution.show(instance,line,blame.sessionId,blame.dirty ? undefined : {kind:'document',path:blame.path,revision:blame.revision})
       })
       instance.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => latest.current.onSave())
       instance.addAction({ id: 'dvw.addToDsh', label: '添加到 DSH 对话', contextMenuGroupId: 'navigation', contextMenuOrder: 0, keybindings: [monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | monaco.KeyCode.KeyK], run: () => latest.current.onAddToDsh?.(editorSelection(instance)) })
@@ -707,6 +759,7 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
       root.current.addEventListener('mousedown', onMouseDown, true)
       root.current.addEventListener('contextmenu', onContextMenu, true)
       cleanupListeners.current = () => {
+        blameWatch.dispose()
         root.current?.removeEventListener('mousedown', onMouseDown, true)
         root.current?.removeEventListener('contextmenu', onContextMenu, true)
       }
@@ -715,6 +768,7 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
     return () => {
       disposed = true
       cleanupListeners.current?.(); cleanupListeners.current = undefined
+      lineBlame.current?.reset(); lineBlame.current = undefined
       const instance = editor.current
       const model = instance?.getModel(); const state = instance?.saveViewState()
       if (model && state) viewStates.set(model.uri.toString(), state)
@@ -727,6 +781,7 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
       instance?.dispose(); editor.current = undefined
     }
   }, [])
+  useEffect(() => lineBlame.current?.reset(), [props.uri, props.blame?.sessionId, props.blame?.revision, props.blame?.dirty, props.value])
   useEffect(() => {
     const instance = editor.current; const monaco = window.monaco
     if (instance !== undefined && monaco !== undefined) attach(monaco, instance)

@@ -3,6 +3,7 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeAll, expect, it, vi } from 'vitest'
 import { MonacoEditor, retainEditorModels, reviewLinePresentation } from '../src/client/MonacoEditor.tsx'
+import type { editor } from 'monaco-editor'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -18,7 +19,8 @@ const fake = {
   reviewDecorations: [] as Array<{ range: unknown; options: Record<string, unknown> }>,
   zones: [] as FakeZone[],
   widgets: [] as FakeWidget[],
-  onMouseDown: undefined as undefined | ((event: { target: { position?: { lineNumber: number } } }) => void),
+  onMouseDown: undefined as undefined | ((event: { target: { position?: { lineNumber: number }; type?: number }; event?: {leftButton: boolean} }) => void),
+  blameWidget: undefined as editor.IOverlayWidget | undefined,
   editor: undefined as undefined | {
     model: FakeModel | null
     scroll: number
@@ -42,6 +44,7 @@ const monaco = {
   KeyMod: { CtrlCmd: 1 }, KeyCode: { KeyS: 2 },
   editor: {
     ContentWidgetPositionPreference: { EXACT: 0, ABOVE: 1, BELOW: 2 },
+    MouseTargetType: { CONTENT_TEXT: 6 },
     defineTheme() {}, setTheme() {}, createModel,
     getModel: (uri: { toString(): string }) => fake.models.get(uri.toString()) ?? null,
     getModels: () => [...fake.models.values()],
@@ -68,8 +71,19 @@ const monaco = {
         removeContentWidget(widget: { getDomNode(): HTMLElement }) { fake.widgets = fake.widgets.filter(item => item.domNode !== widget.getDomNode()) },
         onDidChangeModelContent: () => ({ dispose() {} }),
         onMouseDown(callback: typeof fake.onMouseDown) { fake.onMouseDown = callback },
+        getAction: () => null,
         addCommand() {}, addAction() { return { dispose() {} } }, updateOptions() {},
         getTargetAtClientPoint: () => ({ position: { lineNumber: 17, column: 10 } }), setPosition() {},
+        getLayoutInfo: () => ({width:600,height:400,contentLeft:40,contentWidth:550,verticalScrollbarWidth:10,horizontalScrollbarHeight:10}),
+        getScrollTop: () => editor.scroll,
+        getTopForLineNumber: (line: number) => (line - 1) * 20,
+        getVisibleRanges: () => [{startLineNumber:1,endLineNumber:editor.model?.getLineCount() ?? 1}],
+        getScrolledVisiblePosition: (position: {column:number}) => ({left:40 + (position.column - 1) * 8}),
+        addOverlayWidget(widget: editor.IOverlayWidget) { fake.blameWidget = widget },
+        layoutOverlayWidget() {},
+        removeOverlayWidget() { fake.blameWidget = undefined },
+        onDidScrollChange: () => ({dispose() {}}), onDidLayoutChange: () => ({dispose() {}}),
+        onDidChangeHiddenAreas: () => ({dispose() {}}), onKeyDown: () => ({dispose() {}}),
         trigger: (_source: string, id: string) => { actions.push(id) },
         dispose() { if (editor.model) editor.model.attached = false },
       }
@@ -98,6 +112,37 @@ it('reuses one editor across tabs and restores each tab scroll position', async 
   await render({ uri: '/w/a.ts', value: 'a' })
   expect(fake.created).toBe(1)
   expect(fake.editor!.scroll).toBe(640)
+})
+
+it('prefetches line attribution and displays clicks from the same block without a request or loading text', async () => {
+  const blame = {kind:'commit',author:'Bai',timestamp:1_735_732_800,hash:'1a2b3c4d5678',subject:'Implement editor'}
+  const fetch = vi.spyOn(globalThis,'fetch').mockResolvedValue(Response.json({ok:true,value:{startLine:1,lines:[blame,blame]}}))
+  const file = {uri:'/w/blame.ts',value:'first\nsecond'}
+  await render({...file,blame:{sessionId:'s',path:'blame.ts',revision:'r1',dirty:false}})
+  await vi.waitFor(()=>expect(fetch).toHaveBeenCalledOnce())
+  fake.onMouseDown?.({target:{type:6,position:{lineNumber:2}},event:{leftButton:true}})
+  expect(fetch).toHaveBeenCalledWith('/dsh-vscode/api/git.blameRange',expect.objectContaining({
+    body:JSON.stringify({sessionId:'s',source:{kind:'document',path:'blame.ts',revision:'r1'},startLine:1,endLine:2}),
+  }))
+  expect(fake.blameWidget?.getPosition()).toEqual({preference:{top:20,left:104}})
+  expect(fake.blameWidget?.getDomNode().textContent).toMatch(/Bai · .*2025.* · 1a2b3c4d · Implement editor/)
+  fake.onMouseDown?.({target:{type:6,position:{lineNumber:1}},event:{leftButton:true}})
+  expect(fake.blameWidget?.getDomNode().textContent).toContain('Implement editor')
+  expect(fetch).toHaveBeenCalledOnce()
+  await render(file)
+  expect(fake.blameWidget).toBeUndefined()
+})
+
+it('keeps an uncached click quiet and reuses the in-flight prefetch', async () => {
+  let finish!: (response: Response) => void
+  const fetch = vi.spyOn(globalThis,'fetch').mockReturnValue(new Promise(resolve=>{ finish = resolve }))
+  await render({uri:'/w/blame.ts',value:'first\nsecond',blame:{sessionId:'s',path:'blame.ts',revision:'r1',dirty:false}})
+  await vi.waitFor(()=>expect(fetch).toHaveBeenCalledOnce())
+  fake.onMouseDown?.({target:{type:6,position:{lineNumber:2}},event:{leftButton:true}})
+  expect(fake.blameWidget?.getDomNode().textContent).toBe('')
+  expect(fetch).toHaveBeenCalledOnce()
+  finish(Response.json({ok:true,value:{startLine:1,lines:[{kind:'uncommitted'},{kind:'uncommitted'}]}}))
+  await vi.waitFor(()=>expect(fake.blameWidget?.getDomNode().textContent).toBe('尚未提交'))
 })
 
 it('reveals a new search hit in an open tab instead of its saved position', async () => {

@@ -11,7 +11,7 @@ import { WebSocket, WebSocketServer } from 'ws'
 import type { HostContext } from './context.ts'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import { commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, type CommitModelCatalog, type CommitModelSelection, type DshChatModelCatalog } from './commit-message.ts'
-import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitCommitContext, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host.ts'
+import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host.ts'
 import { installLsp, lspStatuses, resolveLsp, uninstallLsp, pipeLanguageServer } from './lsp.ts'
 import { officePdf, officeStatus } from './office.ts'
 import { WorkspaceSite } from './site.ts'
@@ -184,6 +184,8 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     case 'lsp.uninstall': await uninstallLsp(stringField(body, 'id')); return lspStatuses()
     case 'search': return searchWorkspace(cwd, body as unknown as SearchRequest, signal)
     case 'git.status': return gitStatus(cwd)
+    case 'git.blameRange': return gitBlameRange(cwd, body.source, body.startLine, body.endLine, signal)
+    case 'git.blameLine': return gitBlameLine(cwd, body.source, body.line, signal)
     case 'git.action': return gitAction(cwd, stringField(body, 'action'), typeof body.path === 'string' ? body.path : undefined, typeof body.value === 'string' ? body.value : undefined)
     case 'git.commitMessage': {
       const hasExplicitSelection = body.provider !== undefined || body.model !== undefined

@@ -6,7 +6,7 @@ import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, st
 import { constants } from 'node:fs'
 import type { HostContext } from './context.ts'
 import { prioritizeCommitPatch, type CommitContext } from './commit-message.ts'
-import type { FileDocument, FileEntry, GitBranch, GitChange, GitCommit, GitCommitFile, GitDiff, GitStatus, SearchMatch, SearchRequest } from './types.ts'
+import type { FileDocument, FileEntry, GitBlameRange, GitBlameSource, GitBranch, GitChange, GitCommit, GitCommitFile, GitConflictVersions, GitDiff, GitLineBlame, GitStatus, SearchMatch, SearchRequest } from './types.ts'
 import { WorkbenchError } from './wire.ts'
 
 const require = createRequire(import.meta.url)
@@ -30,6 +30,11 @@ async function canonicalRoot(cwd: string): Promise<string> {
   return realpath(cwd).catch(() => { throw new WorkbenchError('cwd-missing', 'session working directory does not exist', 404) })
 }
 
+function isMissingPath(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
 /** Resolve a caller-relative path and reject traversal and symlink escape. */
 export async function workspacePath(cwd: string, raw: string, create = false): Promise<{ root: string; absolute: string }> {
   if (isAbsolute(raw)) throw new WorkbenchError('path-invalid', 'absolute paths are not accepted')
@@ -40,7 +45,10 @@ export async function workspacePath(cwd: string, raw: string, create = false): P
     const parent = await realpath(dirname(absolute)).catch(() => { throw new WorkbenchError('parent-missing', 'parent directory does not exist', 404) })
     if (!inside(root, parent)) throw new WorkbenchError('path-outside', 'path follows a symlink outside the workspace', 403)
   } else {
-    const actual = await realpath(absolute).catch(() => { throw new WorkbenchError('not-found', 'path does not exist', 404) })
+    const actual = await realpath(absolute).catch(error=>{
+      if (isMissingPath(error)) throw new WorkbenchError('not-found', 'path does not exist', 404)
+      throw error
+    })
     if (!inside(root, actual)) throw new WorkbenchError('path-outside', 'path follows a symlink outside the workspace', 403)
   }
   return { root, absolute }
@@ -129,6 +137,15 @@ export async function readDocument(cwd: string, path: string): Promise<FileDocum
   } finally { await handle.close() }
 }
 
+async function readWorktreeDiffText(repository: string, path: string): Promise<string> {
+  const document = await readDocument(repository,path).catch(error=>{
+    if (isMissingPath(error) || error instanceof WorkbenchError && error.code === 'not-found') return undefined
+    throw error
+  })
+  if (document?.tooLarge) throw new WorkbenchError('too-large', `文件超过 5 MiB，无法打开差异视图：${path}`, 413)
+  return document?.content ?? ''
+}
+
 const pendingSaves = new Map<string, Promise<void>>()
 
 export async function saveDocument(cwd: string, path: string, content: string, expected: string): Promise<FileDocument> {
@@ -215,15 +232,17 @@ export function pdfWorkerAsset(): { path: string; type: string } {
 }
 
 interface ProcessResult { stdout: string; stderr: string; code: number }
-export function run(command: string, args: string[], cwd: string, timeout = PROCESS_TIMEOUT, signal?: AbortSignal): Promise<ProcessResult> {
+export function run(command: string, args: string[], cwd: string, timeout = PROCESS_TIMEOUT, signal?: AbortSignal, input?: string): Promise<ProcessResult> {
   return new Promise((resolvePromise, reject) => {
     const child = spawn(command, args, { cwd, shell: false, windowsHide: true })
     let stdout = ''; let stderr = ''; let settled = false
     const timer = setTimeout(() => { child.kill(); if (!settled) reject(new WorkbenchError('timeout', `${command} timed out`, 504)) }, timeout)
     const abort = () => { child.kill(); if (!settled) { settled = true; clearTimeout(timer); reject(new WorkbenchError('cancelled', `${command} cancelled`, 499)) } }
     signal?.addEventListener('abort', abort, { once: true })
-    child.stdout.on('data', chunk => { stdout += String(chunk) })
-    child.stderr.on('data', chunk => { stderr += String(chunk) })
+    child.stdin.on('error', () => { /* Git can reject an input patch before reading it. */ })
+    child.stdin.end(input)
+    child.stdout.setEncoding('utf8').on('data', chunk => { stdout += chunk })
+    child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk })
     child.on('error', error => { clearTimeout(timer); signal?.removeEventListener('abort', abort); if (!settled) { settled = true; reject(error) } })
     child.on('close', code => { clearTimeout(timer); signal?.removeEventListener('abort', abort); if (!settled) { settled = true; resolvePromise({ stdout, stderr, code: code ?? 1 }) } })
   })
@@ -286,7 +305,11 @@ async function commitFiles(repository: string, hash: string, parent: string | un
     ? await run('git',['diff','--name-status','-z','-M',parent,hash,'--'],repository)
     : await run('git', ['diff-tree', '--root', '--no-commit-id', '--name-status', '-r', '-z', '-M', hash], repository)
   if (result.code !== 0) throw new WorkbenchError('git-failed', result.stderr || result.stdout, 409)
-  const tokens = result.stdout.split('\0').filter(Boolean); const files: GitCommitFile[] = []
+  return parseCommitFiles(result.stdout)
+}
+
+function parseCommitFiles(output: string): GitCommitFile[] {
+  const tokens = output.split('\0').filter(Boolean); const files: GitCommitFile[] = []
   for (let index = 0; index < tokens.length;) {
     const status = tokens[index++] ?? ''; const code = status[0] ?? ''
     if (code === 'R' || code === 'C') { const previousPath=tokens[index++]??'';const path=tokens[index++]??'';files.push({path,previousPath,status:code}) }
@@ -295,9 +318,192 @@ async function commitFiles(repository: string, hash: string, parent: string | un
   return files
 }
 
+async function revisionDiff(repository: string, file: GitCommitFile, after: string, before?: string): Promise<GitDiff> {
+  const paths = [...new Set([file.previousPath ?? file.path, file.path])]
+  const options = ['--no-ext-diff', '--no-textconv', '--find-renames', '--patch', '--no-color']
+  const [diff, original, modified] = await Promise.all([
+    checkedGit(repository, ['--literal-pathspecs', ...(before === undefined
+      ? ['show', ...options, '--format=', after, '--', ...paths]
+      : ['diff', ...options, before, after, '--', ...paths])]),
+    file.status === 'A' || before === undefined ? '' : gitObject(repository, `${before}:${paths[0]}`),
+    file.status === 'D' ? '' : gitObject(repository, `${after}:${file.path}`),
+  ])
+  return { diff, original, modified, blame: {
+    original: original && before ? {kind:'commit',path:paths[0]!,revision:before} : undefined,
+    modified: modified ? {kind:'commit',path:file.path,revision:after} : undefined,
+  }}
+}
+
+async function checkedGit(repository: string, args: string[]): Promise<string> {
+  const result = await run('git', args, repository)
+  if (result.code !== 0) throw new WorkbenchError('git-failed', result.stderr || result.stdout, 409)
+  return result.stdout
+}
+
+async function resolveCommit(repository: string, ref: string): Promise<string> {
+  return (await checkedGit(repository, ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`])).trim()
+}
+
+async function gitHead(repository: string): Promise<string | undefined> {
+  const result = await run('git', ['rev-parse', '--verify', 'HEAD'], repository)
+  return result.code === 0 ? result.stdout.trim() : undefined
+}
+
+function blameDigest(text: string): string {
+  return createHash('sha256').update(text).digest('hex')
+}
+
+function snapshotBlame(kind: 'index' | 'worktree', path: string, text: string, revision?: string, historyPath?: string): GitBlameSource | undefined {
+  return text ? { kind, path, revision, historyPath, digest:blameDigest(text) } : undefined
+}
+
+export async function gitBlameLine(cwd: string, value: unknown, line: unknown, signal?: AbortSignal): Promise<GitLineBlame> {
+  return (await gitBlameRange(cwd,value,line,line,signal)).lines[0]!
+}
+
+export async function gitBlameRange(cwd: string, value: unknown, startLine: unknown, endLine: unknown, signal?: AbortSignal): Promise<GitBlameRange> {
+  signal?.throwIfAborted()
+  if (typeof startLine !== 'number' || typeof endLine !== 'number' || !Number.isSafeInteger(startLine) ||
+      !Number.isSafeInteger(endLine) || startLine < 1 || endLine < startLine || endLine > TEXT_LIMIT || endLine - startLine >= 128 ||
+      value === null || typeof value !== 'object') throw new WorkbenchError('bad-request', 'invalid Git line selection')
+  const uniform = (kind: 'uncommitted' | 'unavailable'): GitBlameRange => ({
+    startLine, lines: Array.from({length:endLine-startLine+1},()=>({kind} as GitLineBlame)),
+  })
+  const source = value as Record<string, unknown>
+  if (source.kind === 'untracked') return uniform('uncommitted')
+  if (source.kind !== 'commit' && source.kind !== 'index' && source.kind !== 'worktree' && source.kind !== 'document') {
+    throw new WorkbenchError('bad-request', 'invalid Git blame source')
+  }
+  const repository = await gitRoot(cwd).catch(error=>{
+    if (source.kind === 'document' && error instanceof WorkbenchError && error.code === 'not-repository') return undefined
+    throw error
+  })
+  if (!repository) return uniform('unavailable')
+  const pathField = (item: unknown) => validateGitPath(repository, typeof item === 'string' && !item.includes('\0') ? item : undefined)
+  const workspaceFile = source.kind === 'document' ? await workspacePath(cwd, typeof source.path === 'string' ? source.path : '') : undefined
+  const path = pathField(workspaceFile ? relativePath(repository,workspaceFile.absolute) : source.path)
+  const previousPath = (source.kind === 'index' || source.kind === 'worktree') && source.historyPath !== undefined
+    ? pathField(source.historyPath) : undefined
+  const baseline = source.kind === 'document' ? await gitHead(repository) : source.kind === 'commit' || source.revision !== undefined
+    ? validateCommitHash(typeof source.revision === 'string' ? source.revision : undefined)
+    : undefined
+  let input: string | undefined
+  if (source.kind === 'document') {
+    const document = await readDocument(repository,path)
+    if (document.revision !== source.revision) throw new WorkbenchError('stale-diff', '文件内容已变化，请重新加载文件。',409)
+    if (document.binary || document.tooLarge || document.content === '') return uniform('unavailable')
+    input = document.content
+  } else if (source.kind !== 'commit') {
+    if (typeof source.digest !== 'string' || !/^[a-f0-9]{64}$/.test(source.digest)) throw new WorkbenchError('bad-request', 'invalid Git snapshot')
+    input = source.kind === 'index' ? await gitObject(repository, `:0:${path}`) : await readDocument(repository,path).then(file=>file.content, error=>{
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''
+      throw error
+    })
+    if (blameDigest(input) !== source.digest) throw new WorkbenchError('stale-diff', '文件内容已变化，请重新打开对比。',409)
+  }
+  let historyPath = path
+  if (input !== undefined) {
+    if (!baseline) return uniform('uncommitted')
+    // Older Git versions accept --contents only with the implicit HEAD.
+    if (source.kind !== 'document' && await gitHead(repository) !== baseline) {
+      throw new WorkbenchError('stale-diff', '当前提交已变化，请重新打开对比。', 409)
+    }
+    const hasBlob = async (target: string) => {
+      signal?.throwIfAborted()
+      const object = await run('git', ['cat-file', '-t', `${baseline}:${target}`], repository, PROCESS_TIMEOUT, signal)
+      return object.code === 0 && object.stdout.trim() === 'blob'
+    }
+    if (!await hasBlob(path)) {
+      signal?.throwIfAborted()
+      const renamed = previousPath ?? parseCommitFiles(await checkedGit(repository, [
+        'diff', '--cached', '--name-status', '-z', '-M', baseline, '--',
+      ])).find(file=>file.path===path && file.status==='R')?.previousPath
+      if (!renamed || !await hasBlob(renamed)) return uniform('uncommitted')
+      historyPath = renamed
+    }
+  }
+  signal?.throwIfAborted()
+  const result = await run('git', [
+    '--literal-pathspecs', 'blame', '--porcelain', '-L', `${startLine},${endLine}`,
+    ...(input === undefined ? [baseline!] : ['--contents', '-']), '--', historyPath,
+  ], repository, PROCESS_TIMEOUT, signal, input)
+  if (input !== undefined && await gitHead(repository) !== baseline) {
+    throw new WorkbenchError('stale-diff', '当前提交已变化，请重新打开文件或对比。', 409)
+  }
+  if (result.code !== 0) throw new WorkbenchError('git-failed', result.stderr || result.stdout, 409)
+  const commits = new Map<string, GitLineBlame>()
+  const lines = new Map<number, GitLineBlame>()
+  let hash = '', line = 0, author = '', timestamp = 0, subject = ''
+  for (const text of result.stdout.split('\n')) {
+    if (text.startsWith('\t') && hash) {
+      const blame = commits.get(hash) ?? (/^0+$/.test(hash)
+        ? {kind:'uncommitted'} : {kind:'commit',hash,author,timestamp,subject})
+      commits.set(hash,blame)
+      lines.set(line,blame)
+      hash = ''
+      continue
+    }
+    const header = !hash && /^([a-f0-9]{40,64}) \d+ (\d+)(?: \d+)?$/.exec(text)
+    if (header) {
+      hash = header[1]!
+      line = Number(header[2])
+      author = ''; timestamp = 0; subject = ''
+    } else if (text.startsWith('author ')) author = text.slice(7)
+    else if (text.startsWith('author-time ')) timestamp = Number(text.slice(12))
+    else if (text.startsWith('summary ')) subject = text.slice(8)
+  }
+  if (lines.size !== endLine-startLine+1) throw new WorkbenchError('git-failed', 'Git 未返回所选行的提交信息。', 409)
+  return {startLine,lines:Array.from({length:endLine-startLine+1},(_,offset)=>lines.get(startLine+offset)!)}
+}
+
+function gitSelection(value: string | undefined, fields: number, allowEmptyLast = false): string[] {
+  let selection: unknown
+  try { selection = JSON.parse(value ?? '') } catch { /* Report the same error for malformed selections. */ }
+  if (!Array.isArray(selection) || selection.length !== fields || !selection.every((item, index) => typeof item === 'string' && (item.length > 0 || allowEmptyLast && index === fields - 1) && !item.includes('\0'))) {
+    throw new WorkbenchError('bad-request', 'invalid Git selection')
+  }
+  return selection
+}
+
+function worktreeDiffArgs(path: string, staged: boolean): string[] {
+  return ['--literal-pathspecs', 'diff', '--no-ext-diff', '--no-textconv', '--no-color', '--src-prefix=a/', '--dst-prefix=b/', ...(staged ? ['--cached'] : []), '--', path]
+}
+
+function stagingHunks(patch: string) {
+  const [header = '', ...hunks] = patch.split(/(?=^@@ -)/m)
+  if ((header.match(/^diff --git /gm)?.length ?? 0) !== 1 ||
+      !/^--- "?a\//m.test(header) || !/^\+\+\+ "?b\//m.test(header) ||
+      /^(?:old mode |new mode |rename from |copy from )/m.test(header)) return
+  if (hunks.length === 0) return
+  const revision = createHash('sha256').update(patch).digest('hex')
+  return { header, hunks, revision }
+}
+
+async function gitOperation(repository: string): Promise<GitStatus['operation']> {
+  const markers = ['rebase-merge', 'rebase-apply', 'MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']
+  const paths = await checkedGit(repository, ['rev-parse', ...markers.flatMap(marker => ['--git-path', marker])])
+  const exists = await Promise.all(paths.trimEnd().split('\n').map(path=>access(resolve(repository, path)).then(()=>true,()=>false)))
+  if (exists[0] || exists[1]) return 'rebase'
+  if (exists[2]) return 'merge'
+  if (exists[3]) return 'cherry-pick'
+  if (exists[4]) return 'revert'
+}
+
+function parseGitLog(output: string): GitCommit[] {
+  return output.split('\0').filter(record=>record.trim()!=='').map(record => {
+    const [rawHash = '', parents = '', author = '', date = '', subject = '', refs = ''] = record.split('\x1f')
+    return { hash: rawHash.trim(), parents: parents.split(' ').filter(Boolean), author, date, subject, refs: refs.split(',').map(item => item.trim()).filter(Boolean) }
+  })
+}
+
+const GIT_LOG_FORMAT = '%H%x1f%P%x1f%an%x1f%aI%x1f%s%x1f%D%x00'
+
 export async function gitStatus(cwd: string): Promise<GitStatus> {
   const repository = await gitRoot(cwd)
-  const result = await run('git', ['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all'], repository)
+  const [result, operation] = await Promise.all([
+    run('git', ['status', '--porcelain=v2', '-z', '--branch', '--untracked-files=all'], repository),
+    gitOperation(repository),
+  ])
   if (result.code !== 0) throw new WorkbenchError('git-failed', result.stderr, 500)
   let branch = 'HEAD'; let ahead = 0; let behind = 0
   const changes: GitChange[] = []
@@ -313,10 +519,10 @@ export async function gitStatus(cwd: string): Promise<GitStatus> {
       const parts = record.split(' '); const xy = parts[1] ?? '..'
       const path = parts.slice(renamed ? 9 : record.startsWith('u ') ? 10 : 8).join(' ')
       const originalPath = renamed ? records[++index] : undefined
-      changes.push({ path, ...(originalPath === undefined ? {} : { originalPath }), index: xy[0] ?? '.', worktree: xy[1] ?? '.', staged: xy[0] !== '.', untracked: false })
+      changes.push({ path, ...(originalPath === undefined ? {} : { originalPath }), index: xy[0] ?? '.', worktree: xy[1] ?? '.', staged: xy[0] !== '.', untracked: false, ...(record.startsWith('u ') ? { conflicted: true } : {}) })
     }
   }
-  return { repository, branch, ahead, behind, changes }
+  return { repository, branch, ahead, behind, changes, ...(operation ? { operation } : {}) }
 }
 
 /** Collect the staged (or working-tree) changes and recent subjects used to draft a commit message. */
@@ -348,6 +554,21 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
   const repository = await gitRoot(cwd)
   let args: string[]
   switch (action) {
+    case 'hunk.stage':
+    case 'hunk.unstage': {
+      const target = validateGitPath(repository, path)
+      const [expected, rawIndex] = gitSelection(value, 2)
+      if (!/^\d+$/.test(rawIndex!)) throw new WorkbenchError('bad-request', 'invalid hunk index')
+      const reverse = action === 'hunk.unstage'
+      const patch = stagingHunks(await checkedGit(repository, worktreeDiffArgs(target, reverse)))
+      const hunk = patch?.hunks[Number(rawIndex)]
+      if (patch === undefined || patch.revision !== expected || hunk === undefined) {
+        throw new WorkbenchError('revision-conflict', '差异已变化，请重新打开文件差异后重试', 409)
+      }
+      const result = await run('git', ['apply', '--cached', ...(reverse ? ['--reverse'] : []), '--'], repository, PROCESS_TIMEOUT, undefined, patch.header + hunk)
+      if (result.code !== 0) throw new WorkbenchError('git-failed', result.stderr || result.stdout, 409)
+      return gitAction(cwd, 'diff', target, reverse ? 'staged' : 'worktree')
+    }
     case 'stage': args = ['add', '--', path ?? '']; break
     case 'stage.all': args = ['add', '-A']; break
     case 'unstage': args = ['restore', '--staged', '--', path ?? '']; break
@@ -396,7 +617,15 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
       return gitStatus(cwd)
     }
     case 'branch.create': args = ['switch', '-c', value ?? '']; break
-    case 'branch.switch': args = ['switch', value ?? '']; break
+    case 'branch.rename': {
+      const [current, next] = gitSelection(value, 2)
+      args = ['branch', '-m', '--', current!, next!]
+      break
+    }
+    case 'branch.delete': args = ['branch', '-d', '--', value ?? '']; break
+    case 'tag.create': args = ['tag', '--', value ?? '', await resolveCommit(repository, path ?? 'HEAD')]; break
+    case 'tag.delete': args = ['tag', '-d', '--', value ?? '']; break
+    case 'branch.switch': args = ['switch', '--', value ?? '']; break
     case 'branch.list': {
       const refs = await run('git', ['for-each-ref', '--format=%(refname:short)', 'refs/heads'], repository)
       if (refs.code !== 0) throw new WorkbenchError('git-failed', refs.stderr, 500)
@@ -420,15 +649,145 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
       if (result.code !== 0) throw new WorkbenchError('git-failed', result.stderr, 500)
       return result.stdout.split('\n').filter(Boolean)
     }
+    case 'ref.resolve': return resolveCommit(repository, value ?? '')
+    case 'commit.details':
+      return parseGitLog(await checkedGit(repository, ['show', '-s', '--decorate=short', `--format=format:${GIT_LOG_FORMAT}`, await resolveCommit(repository, validateCommitHash(value))]))
+    case 'refs':
+      return (await checkedGit(repository, ['for-each-ref', '--format=%(refname)', 'refs/heads', 'refs/remotes', 'refs/tags']))
+        .split('\n').filter(ref => ref && !ref.endsWith('/HEAD'))
+    case 'log.all':
+      return parseGitLog(await checkedGit(repository, ['log', '--all', '--topo-order', '--decorate=short', `--format=format:${GIT_LOG_FORMAT}`, '-n', '100']))
+    case 'file.history': {
+      const target = validateGitPath(repository, path)
+      return parseGitLog(await checkedGit(repository, ['--literal-pathspecs', 'log', '--follow', '--decorate=short', `--format=format:${GIT_LOG_FORMAT}`, '-n', '100', '--', target]))
+    }
+    case 'file.blame': {
+      const target = validateGitPath(repository, path)
+      const document = await readDocument(repository, target)
+      if (document.binary || document.tooLarge) throw new WorkbenchError('not-text', '仅支持 5 MiB 以内的文本文件')
+      return checkedGit(repository, ['--no-pager', 'blame', '--date=short', '--', target])
+    }
+    case 'compare.files':
+    case 'compare.diff': {
+      const [from, to] = gitSelection(value, 2)
+      const [before, after] = await Promise.all([
+        resolveCommit(repository, from!),
+        to === ':worktree:' ? undefined : resolveCommit(repository, to!),
+      ])
+      if (after === undefined) {
+        const nameStatus = await checkedGit(repository, ['diff', '--name-status', '-z', '-M', before, '--'])
+        const files = parseCommitFiles(nameStatus)
+        if (action === 'compare.files') return files
+        const target = validateGitPath(repository, path)
+        const file = files.find(item=>item.path===target)
+        if (!file) throw new WorkbenchError('not-found', 'file is not part of the comparison', 404)
+        const modified = file.status === 'D' ? '' : await readWorktreeDiffText(repository,target)
+        const [diff, original] = await Promise.all([
+          checkedGit(repository, ['--literal-pathspecs', 'diff', '--no-ext-diff', '--no-textconv', '--no-color', before, '--', ...new Set([file.previousPath??target,target])]),
+          file.status === 'A' ? '' : gitObject(repository, `${before}:${file.previousPath??target}`),
+        ])
+        const head = modified ? await gitHead(repository) : undefined
+        return { diff, original, modified, blame: {
+          original: original ? {kind:'commit',path:file.previousPath??target,revision:before} : undefined,
+          modified: snapshotBlame('worktree',target,modified,head,file.previousPath),
+        }} satisfies GitDiff
+      }
+      const files = await commitFiles(repository, after, before)
+      if (action === 'compare.files') return files
+      const file = files.find(item => item.path === validateGitPath(repository, path))
+      if (file === undefined) throw new WorkbenchError('not-found', 'file is not part of the comparison', 404)
+      return revisionDiff(repository, file, after, before)
+    }
+    case 'stash.list': {
+      const output = await checkedGit(repository, ['stash', 'list', '--format=%gd%x1f%H%x1f%gs%x00'])
+      return output.split('\0').map(record=>record.trim()).filter(Boolean).map(record => {
+        const [ref = '', hash = '', subject = ''] = record.split('\x1f')
+        return { ref, hash, subject }
+      })
+    }
+    case 'stash.push': args = ['stash', 'push', '--include-untracked', ...(value ? ['-m', value] : [])]; break
+    case 'stash.apply':
+    case 'stash.drop': {
+      const [ref, hash] = gitSelection(value, 2)
+      if (!/^stash@\{\d+\}$/.test(ref!) || await resolveCommit(repository, ref!) !== hash) {
+        throw new WorkbenchError('revision-conflict', 'Stash 已变化，请刷新列表', 409)
+      }
+      args = action === 'stash.apply' ? ['stash', 'apply', '--index', hash!] : ['stash', 'drop', ref!]
+      break
+    }
+    case 'fetch': args = ['fetch', '--all']; break
+    case 'pull': args = ['-c', 'core.editor=true', 'pull', '--ff-only']; break
+    case 'merge': args = ['-c', 'core.editor=true', 'merge', '--no-edit', await resolveCommit(repository, value ?? '')]; break
+    case 'rebase': args = ['-c', 'core.editor=true', 'rebase', await resolveCommit(repository, value ?? '')]; break
+    case 'cherry-pick':
+    case 'revert': args = ['-c', 'core.editor=true', action, '--no-edit', await resolveCommit(repository, value ?? '')]; break
+    case 'operation.continue':
+    case 'operation.abort': {
+      const operation = await gitOperation(repository)
+      if (operation === undefined || operation !== value) throw new WorkbenchError('revision-conflict', 'Git 操作状态已变化，请刷新', 409)
+      args = ['-c', 'core.editor=true', operation, action === 'operation.continue' ? '--continue' : '--abort']
+      break
+    }
+    case 'conflict.versions':
+    case 'conflict.save':
+    case 'conflict.diff':
+    case 'conflict.ours':
+    case 'conflict.theirs': {
+      const target = validateGitPath(repository, path)
+      const entries = await checkedGit(repository, ['--literal-pathspecs', 'ls-files', '-u', '--', target])
+      if (!entries) throw new WorkbenchError('revision-conflict', '该文件已没有待解决的冲突', 409)
+      const revision = createHash('sha256').update(entries).digest('hex')
+      if (action === 'conflict.save') {
+        const [expectedStages, expectedFile, content] = gitSelection(value, 3, true)
+        if (expectedStages !== revision) throw new WorkbenchError('revision-conflict', '冲突版本已变化，请重新加载', 409)
+        const document = await readDocument(repository, target)
+        if (!(await lstat(resolve(repository,target))).isFile() || document.binary || document.tooLarge ||
+            !entries.split('\n').filter(Boolean).every(entry=>/^100(?:644|755) /.test(entry)) ||
+            Buffer.byteLength(content!) > TEXT_LIMIT) {
+          throw new WorkbenchError('not-text', '仅支持合并普通文本文件')
+        }
+        if (/^(?:<{7,}(?: |$)|={7,}$|>{7,}(?: |$)|\|{7,}(?: |$))/m.test(content!)) {
+          throw new WorkbenchError('unresolved-markers', '结果中仍有冲突标记')
+        }
+        await saveDocument(repository, target, content!, expectedFile!)
+        args = ['--literal-pathspecs', 'add', '--', target]
+        break
+      }
+      if (action === 'conflict.versions') {
+        const regular = entries.split('\n').filter(Boolean).every(entry=>/^100(?:644|755) /.test(entry))
+        const document = regular ? await readDocument(repository, target).catch(error=>{
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined
+          throw error
+        }) : undefined
+        if (!document || document.binary || document.tooLarge) return { path: target, revision } satisfies GitConflictVersions
+        const stages = await Promise.all([1, 2, 3].map(async stage=>{
+          const spec = `:${stage}:${target}`
+          if (!entries.split('\n').some(entry=>entry.split('\t')[0]?.endsWith(` ${stage}`))) return undefined
+          const size = Number(await checkedGit(repository, ['cat-file', '-s', spec]))
+          if (size > TEXT_LIMIT) return undefined
+          return checkedGit(repository, ['cat-file', 'blob', spec])
+        }))
+        if (stages.some(text=>text?.includes('\0'))) return { path: target, revision } satisfies GitConflictVersions
+        return { path: target, revision, document, base: stages[0], ours: stages[1], theirs: stages[2] } satisfies GitConflictVersions
+      }
+      if (action === 'conflict.diff') {
+        const [original, modified] = await Promise.all([gitObject(repository, `:2:${target}`), gitObject(repository, `:3:${target}`)])
+        return { diff: '', original, modified } satisfies GitDiff
+      }
+      const ours = action === 'conflict.ours'
+      const stage = ours ? 2 : 3
+      if (!entries.split('\n').some(entry=>entry.split('\t')[0]?.endsWith(` ${stage}`))) {
+        args = ['--literal-pathspecs', 'rm', '--force', '--', target]
+        break
+      }
+      await checkedGit(repository, ['--literal-pathspecs', 'checkout', ours ? '--ours' : '--theirs', '--', target])
+      args = ['--literal-pathspecs', 'add', '--', target]
+      break
+    }
     case 'log': {
       const head = await run('git', ['rev-parse', '--verify', 'HEAD'], repository)
       if (head.code !== 0) return []
-      const result = await run('git', ['log', '--topo-order', '--date=iso-strict', '--decorate=short', '--pretty=format:%H%x1f%P%x1f%an%x1f%aI%x1f%s%x1f%D%x00', '-n', '100'], repository)
-      if (result.code !== 0) throw new WorkbenchError('git-failed', result.stderr || result.stdout, 500)
-      return result.stdout.split('\0').filter(Boolean).map((record): GitCommit => {
-        const [rawHash = '', parents = '', author = '', date = '', subject = '', refs = ''] = record.split('\x1f');const hash=rawHash.trim()
-        return { hash, parents: parents.split(' ').filter(Boolean), author, date, subject, refs: refs.split(',').map(item => item.trim()).filter(Boolean) }
-      })
+      return parseGitLog(await checkedGit(repository, ['log', '--topo-order', '--decorate=short', `--format=format:${GIT_LOG_FORMAT}`, '-n', '100']))
     }
     case 'commit.show': {
       const hash = validateCommitHash(value)
@@ -438,38 +797,48 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
     }
     case 'commit.files': { const hash=validateCommitHash(value); return commitFiles(repository, hash, await commitParent(repository, hash)) }
     case 'commit.file.diff': {
-      const hash=validateCommitHash(value);const target=validateGitPath(repository,path);const parent=await commitParent(repository,hash);const files=await commitFiles(repository,hash,parent);const file=files.find(item=>item.path===target)
+      const hash=await resolveCommit(repository,validateCommitHash(value));const target=validateGitPath(repository,path);const parent=await commitParent(repository,hash);const files=await commitFiles(repository,hash,parent);const file=files.find(item=>item.path===target)
       if (file===undefined) throw new WorkbenchError('not-found','file is not part of the commit',404)
-      // Spawning git is slow on Windows, so the patch and both blobs are read concurrently.
-      const [shown,original,modified]=await Promise.all([
-        parent!==undefined
-          ? run('git',['diff','--no-ext-diff','--find-renames','--patch','--no-color',parent,hash,'--',file.previousPath??target,target],repository)
-          : run('git',['show','--no-ext-diff','--find-renames','--format=','--patch','--no-color',hash,'--',file.previousPath??target,target],repository),
-        file.status==='A'||parent===undefined?'':gitObject(repository,`${parent}:${file.previousPath??target}`),
-        file.status==='D'?'':gitObject(repository,`${hash}:${target}`),
-      ])
-      if(shown.code!==0)throw new WorkbenchError('git-failed',shown.stderr||shown.stdout,409)
-      return {diff:shown.stdout,original,modified} satisfies GitDiff
+      return revisionDiff(repository, file, hash, parent)
     }
     case 'diff': {
+      const target = validateGitPath(repository, path)
       const untracked = value === 'untracked'
       const staged = value === 'staged'
       args = untracked
-        ? ['diff', '--no-index', '--', process.platform === 'win32' ? 'NUL' : '/dev/null', path ?? '']
-        : ['diff', ...(staged ? ['--cached'] : []), '--', path ?? '']
+        ? ['diff', '--no-index', '--', process.platform === 'win32' ? 'NUL' : '/dev/null', target]
+        : worktreeDiffArgs(target, staged)
       break
     }
     default: throw new WorkbenchError('bad-action', `unknown Git action ${action}`)
   }
   if (args.some(arg => arg === '') && action !== 'commit') throw new WorkbenchError('bad-request', 'path or value is required')
+  if (action === 'diff' && value === 'untracked') await workspacePath(repository, validateGitPath(repository, path))
   const result = await run('git', args, repository)
   const expectedUntrackedDifference = action === 'diff' && value === 'untracked' && result.code === 1
   if (result.code !== 0 && !expectedUntrackedDifference) throw new WorkbenchError('git-failed', result.stderr || result.stdout, 409)
   if(action!=='diff')return gitStatus(cwd)
   const target=validateGitPath(repository,path)
-  const original=value==='untracked'?'':await gitObject(repository,`${value==='staged'?'HEAD:':':'}${target}`)
-  const modified=value==='staged'?await gitObject(repository,`:${target}`):await readFile(resolve(repository,target),'utf8').catch(()=> '')
-  return {diff:result.stdout,original,modified} satisfies GitDiff
+  const moved = value === 'staged' ? (await gitStatus(cwd)).changes.find(change=>change.path===target)?.originalPath : undefined
+  const head = value === 'untracked' ? undefined : await gitHead(repository)
+  const original=value==='untracked'||value==='staged'&&!head?'':await gitObject(repository,`${value==='staged'?`${head}:`:':0:'}${moved??target}`)
+  const modified = value === 'staged' ? await gitObject(repository,`:${target}`) : await readWorktreeDiffText(repository,target)
+  const patch = value === 'untracked' ? undefined : stagingHunks(result.stdout)
+  const staging: GitDiff['staging'] = patch && {
+    mode: value === 'staged' ? 'staged' : 'worktree',
+    revision: patch.revision,
+    hunks: patch.hunks.map(hunk=>{
+      const label = hunk.split('\n', 1)[0]!
+      return { label, line: Math.max(1, Number(/\+(\d+)/.exec(label)?.[1] ?? 1)) }
+    }),
+  }
+  const originalBlame = value === 'staged'
+    ? original && head ? {kind:'commit' as const,path:moved??target,revision:head} : undefined
+    : snapshotBlame('index',target,original,head)
+  const modifiedBlame = value === 'untracked'
+    ? modified ? {kind:'untracked' as const} : undefined
+    : snapshotBlame(value === 'staged' ? 'index' : 'worktree',target,modified,head,moved)
+  return {diff:result.stdout,original,modified,blame:{original:originalBlame,modified:modifiedBlame},...(staging ? { staging } : {})} satisfies GitDiff
 }
 
 /** Resolve the official VS Code Codicon font shipped by @vscode/codicons. */

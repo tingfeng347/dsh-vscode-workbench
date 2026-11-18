@@ -3,12 +3,14 @@ import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Workbench } from '../src/client/Workbench.tsx'
-import type { MonacoEditor } from '../src/client/MonacoEditor.tsx'
+import type { MonacoDiffEditor, MonacoEditor } from '../src/client/MonacoEditor.tsx'
+import { settingsHost } from '../src/client/settingsHost.ts'
 import { WorkbenchController } from '../src/client/service.ts'
 import { disposeTypeScriptProject } from '../src/client/typescriptProject.ts'
 import type { GitChange } from '../src/types.ts'
 
 type EditorProps = Parameters<typeof MonacoEditor>[0]
+type DiffProps = Parameters<typeof MonacoDiffEditor>[0]
 const state = vi.hoisted(() => {
   const models = new Map<string, { getValue(): string; isAttachedToEditor(): boolean; isDisposed(): boolean; dispose(): void }>()
   const defaults = { setCompilerOptions() {}, setEagerModelSync() {}, setDiagnosticsOptions() {} }
@@ -37,13 +39,13 @@ const state = vi.hoisted(() => {
       },
     },
   }
-  return { editor: undefined as EditorProps | undefined, models, monaco }
+  return { editor: undefined as EditorProps | undefined, models, monaco, diff: undefined as DiffProps | undefined }
 })
 // Monaco and the DSH conversation are external rendering integrations. Exercise
 // the workbench's real state and HTTP client with a controlled network boundary.
 vi.mock('../src/client/MonacoEditor.tsx', () => ({
   MonacoEditor: (props: EditorProps) => { state.editor = props; return null },
-  MonacoDiffEditor: () => null, preloadMonaco: () => {}, retainEditorModels: () => {},
+  MonacoDiffEditor: (props: DiffProps) => { state.diff = props; return null }, preloadMonaco: () => {}, retainEditorModels: () => {},
   isMacPlatform: () => false,
   loadMonaco: () => Promise.resolve(state.monaco),
 }))
@@ -73,6 +75,8 @@ class FakeSocket {
 }
 afterEach(async () => {
   await act(async () => { root?.unmount() }); root = undefined
+  settingsHost.set(undefined)
+  state.diff = undefined
   disposeTypeScriptProject(state.monaco as never)
   state.models.clear()
   vi.unstubAllGlobals(); localStorage.clear(); document.body.replaceChildren(); sockets.length = 0
@@ -108,8 +112,9 @@ async function setup(binary = false, saved: Record<string, unknown> = { paths: [
     const doc = () => ({ path: 'a.txt', content: binary ? '' : disk, revision, size: binary ? 0 : disk.length, binary, tooLarge: false })
     let value: unknown
     if (method === 'workspace') value = { cwd: '/tmp/audit', name: 'audit' }
-    else if (method === 'fs.list') value = []
+    else if (method === 'fs.list' || method === 'lsp.status') value = []
     else if (method === 'git.status') value = { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
+    else if (method === 'git.action' && body.action === 'diff') value = { diff: '', original: 'before', modified: 'after' }
     else if (method === 'git.action') value = body.action === 'log' ? [] : { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
     else if (method === 'commit.models') value = modelCatalog
     else if (method === 'git.commitMessage') value = { message: 'feat(git): generate the message directly' }
@@ -218,6 +223,43 @@ it('uses the file review bar to accept or reject every block in the active file'
   expect(buttons[1]!.title).toContain('Ctrl+Backspace')
   await act(async () => buttons[0]!.click())
   expect(document.querySelector('.dvw-review-filebar')).toBeNull()
+})
+
+it('applies and persists the Git comparison style through Workbench settings', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: [], view: 'git' }, [], [{ path: 'a.txt', index: '.', worktree: 'M', staged: false, untracked: false }])
+  await act(async () => document.querySelector<HTMLElement>('.dvw-change')!.click())
+  expect(state.diff).toMatchObject({ mode: 'inline', style: 'classic' })
+  const settings = document.createElement('div')
+  document.body.append(settings)
+  await act(async () => settingsHost.set(settings))
+  const selector = settings.querySelector<HTMLButtonElement>('button[aria-label^="Git 对比样式："]')!
+  expect(selector.textContent).toContain('VS Code（默认）')
+  await act(async () => selector.click())
+  const jetBrainsStyle = Array.from(settings.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]')).find(button=>button.textContent?.trim()==='IDEA / PyCharm')!
+  await act(async () => jetBrainsStyle.click())
+  expect(state.diff).toMatchObject({ mode: 'split', style: 'ribbon' })
+  expect(localStorage.getItem('dvw:git-diff-style')).toBe('ribbon')
+})
+
+it('uses one persisted switch for line blame in both the file editor and Git diffs', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: ['a.txt'], active: 'a.txt', view: 'git' }, [], [
+    { path: 'a.txt', index: '.', worktree: 'M', staged: false, untracked: false },
+  ])
+  expect(state.editor?.blame).toMatchObject({sessionId:'s',path:'a.txt',revision:'r1',dirty:false})
+  await act(async () => document.querySelector<HTMLElement>('.dvw-change')!.click())
+  expect(state.diff?.blameSessionId).toBe('s')
+  const settings = document.createElement('div')
+  document.body.append(settings)
+  await act(async () => settingsHost.set(settings))
+  const toggle = settings.querySelector<HTMLButtonElement>('button[aria-label="逐行提交信息"]')!
+  expect(toggle.getAttribute('aria-checked')).toBe('true')
+  await act(async () => toggle.click())
+  expect(state.diff?.blameSessionId).toBeUndefined()
+  expect(localStorage.getItem('dvw:git-line-blame')).toBe('false')
+  await act(async () => document.querySelector<HTMLButtonElement>('button[data-tab-path="a.txt"]')!.click())
+  expect(state.editor?.blame).toBeUndefined()
 })
 
 it('shows an empty staged commit as a centered recovery dialog and can stage everything', async () => {

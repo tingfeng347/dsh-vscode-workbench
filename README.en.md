@@ -34,35 +34,46 @@
 - **Two ways to open**: fill the window as before, or float the workbench over DSH with dragging, eight-way resizing, and real fullscreen.
 - **Built for DSH**: reuse the DSH conversation surface on the right and manage theme and layout from the Workbench page in DSH settings.
 
+## Git workflow
+
+- Open **Git Tools** from Source Control to browse commit or file history, compare branches, tags, commits, or the working tree, manage stashes, sync branches, and resolve merge conflicts.
+- In **Settings → Workbench → Git**, choose a diff style. VS Code opens inline by default. IDEA / PyCharm opens side by side with linked scrolling. Both styles let you switch layouts, navigate changes, and collapse unchanged lines.
+- Click a line in the editor or diff view to see its author, date, short hash, and commit subject at the end of the line. Git line attribution is on by default and can be turned off in the same settings section.
+
 ## Demo
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/workbench-light.png" width="800" alt="Explorer, Markdown preview, terminal, and DSH conversation">
+  <img src="assets/screenshots/workbench-light.png" width="800" alt="Explorer, Markdown preview, terminal, and DSH conversation">
   <br><em>Explorer, Markdown preview, terminal, and DSH conversation</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/references-light.png" width="800" alt="Find references with Peek results in the editor">
+  <img src="assets/screenshots/references-light.png" width="800" alt="Find references with Peek results in the editor">
   <br><em>Find references with Peek results in the editor</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/source-control-light.png" width="800" alt="Source control, commit graph, and inline/split diffs">
+  <img src="assets/screenshots/source-control-light.png" width="800" alt="Source control, commit graph, and inline/split diffs">
   <br><em>Source control, commit graph, and inline/split diffs</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/welcome-light.png" width="800" alt="Start a terminal or open the browser from the empty editor">
+  <img src="assets/screenshots/git-diff-side-by-side-light.png" width="800" alt="IDEA / PyCharm side-by-side diff with change connectors, folding, and navigation">
+  <br><em>IDEA / PyCharm side-by-side diff with change connectors, folding, and navigation</em>
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/welcome-light.png" width="800" alt="Start a terminal or open the browser from the empty editor">
   <br><em>Start a terminal or open the browser from the empty editor</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/settings-light.png" width="800" alt="The DSH Workbench page inside DSH settings: theme, font size, layout, commit messages, and language services">
-  <br><em>Settings live in DSH's own dialog: theme, font size, layout, commit messages, and language services</em>
+  <img src="assets/screenshots/settings-light.png" width="800" alt="Workbench settings inside DSH for theme, font size, window, and layout">
+  <br><em>Workbench settings inside DSH for theme, font size, window, and layout</em>
 </p>
 
 <p align="center">
-  <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/screenshots/workspace-switcher-light.png" width="800" alt="Open a workspace, switch sessions, or create a new workspace">
+  <img src="assets/screenshots/workspace-switcher-light.png" width="800" alt="Open a workspace, switch sessions, or create a new workspace">
   <br><em>Open a workspace, switch sessions, or create a new workspace</em>
 </p>
 

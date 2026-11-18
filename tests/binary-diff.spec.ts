@@ -23,4 +23,11 @@ describe('Binary diffs', () => {
     expect(workbench).toContain('二进制文件无法在文本编辑器或差异视图中打开')
     expect(workbench).toContain('<button onClick={()=>void openPath(activeTab.diffSourcePath!)}>打开文件</button>')
   })
+
+  it('opens previewable files from commit history through the committed blob', () => {
+    const workbench = readFileSync(new URL('../src/client/Workbench.tsx', import.meta.url), 'utf8')
+    expect(workbench).toContain('openCommitPreview(preview.commit,preview.path,title)')
+    expect(workbench).toContain("&commit=${encodeURIComponent(commit)}")
+    expect(workbench).toContain('<img src={activeTab.imageUrl}')
+  })
 })

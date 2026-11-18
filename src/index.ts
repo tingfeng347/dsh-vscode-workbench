@@ -11,9 +11,9 @@ import { WebSocket, WebSocketServer } from 'ws'
 import type { HostContext } from './context.ts'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import { commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, type CommitModelCatalog, type CommitModelSelection, type DshChatModelCatalog } from './commit-message.ts'
-import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host.ts'
+import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitPreviewFile, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host.ts'
 import { installLsp, lspStatuses, resolveLsp, uninstallLsp, pipeLanguageServer } from './lsp.ts'
-import { officePdf, officeStatus } from './office.ts'
+import { officePdf, officePdfBuffer, officeStatus } from './office.ts'
 import { WorkspaceSite } from './site.ts'
 import type { SearchRequest } from './types.ts'
 import { watchIgnore, workspaceWatchIgnores } from './watch-ignore.ts'
@@ -326,7 +326,7 @@ export function apply(ctx: HostContext): void {
   }), 'dsh-vscode-workbench: file upload')
 
   ctx.effect(() => ctx.webServer.register({
-    kind:'prefix',path:'/dsh-vscode/file',handler:async(req,res)=>{if(!authorize(req,res,ctx.connection))return;try{const url=new URL(req.url??'/','http://dsh.local');const sessionId=url.searchParams.get('sessionId');const path=url.searchParams.get('path');if(sessionId===null||path===null)throw new WorkbenchError('bad-request','sessionId and path are required');const asset=await workspacePreviewFile(cwdFor(ctx,sessionId),path);res.writeHead(200,{'content-type':asset.type,'x-content-type-options':'nosniff','cache-control':'no-store'});res.end(await readFile(asset.path))}catch(error){sendError(res,error)}}
+    kind:'prefix',path:'/dsh-vscode/file',handler:async(req,res)=>{if(!authorize(req,res,ctx.connection))return;try{const url=new URL(req.url??'/','http://dsh.local');const sessionId=url.searchParams.get('sessionId');const path=url.searchParams.get('path');const commit=url.searchParams.get('commit');if(sessionId===null||path===null)throw new WorkbenchError('bad-request','sessionId and path are required');const cwd=cwdFor(ctx,sessionId);if(commit===null){const asset=await workspacePreviewFile(cwd,path);res.writeHead(200,{'content-type':asset.type,'x-content-type-options':'nosniff','cache-control':'no-store'});res.end(await readFile(asset.path))}else{const asset=await gitPreviewFile(cwd,commit,path);res.writeHead(200,{'content-type':asset.type,'x-content-type-options':'nosniff','cache-control':'no-store'});res.end(asset.data)}}catch(error){sendError(res,error)}}
   }), 'dsh-vscode-workbench: file preview')
 
   ctx.effect(() => ctx.webServer.register({
@@ -338,9 +338,10 @@ export function apply(ctx: HostContext): void {
       if (!authorize(req, res, ctx.connection)) return
       try {
         const url = new URL(req.url ?? '/', 'http://dsh.local')
-        const sessionId = url.searchParams.get('sessionId'); const path = url.searchParams.get('path')
+        const sessionId = url.searchParams.get('sessionId'); const path = url.searchParams.get('path'); const commit = url.searchParams.get('commit')
         if (sessionId === null || path === null) throw new WorkbenchError('bad-request', 'sessionId and path are required')
-        const pdf = await officePdf(cwdFor(ctx, sessionId), path)
+        const cwd = cwdFor(ctx, sessionId)
+        const pdf = commit === null ? await officePdf(cwd, path) : await officePdfBuffer((await gitPreviewFile(cwd, commit, path)).data, path)
         const info = await stat(pdf.path)
         res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': info.size, 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' })
         createReadStream(pdf.path).on('error', error => res.destroy(error)).pipe(res)

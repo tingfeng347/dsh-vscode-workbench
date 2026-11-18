@@ -248,6 +248,19 @@ export function run(command: string, args: string[], cwd: string, timeout = PROC
   })
 }
 
+function runBuffer(command: string, args: string[], cwd: string, timeout = PROCESS_TIMEOUT): Promise<{ stdout: Buffer; stderr: string; code: number }> {
+  return new Promise((resolvePromise, reject) => {
+    const child = spawn(command, args, { cwd, shell: false, windowsHide: true })
+    const chunks: Buffer[] = []
+    let stderr = ''; let settled = false
+    const timer = setTimeout(() => { child.kill(); if (!settled) { settled = true; reject(new WorkbenchError('timeout', `${command} timed out`, 504)) } }, timeout)
+    child.on('error', error => { clearTimeout(timer); if (!settled) { settled = true; reject(error) } })
+    child.stdout.on('data', chunk => { chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)) })
+    child.stderr.setEncoding('utf8').on('data', chunk => { stderr += chunk })
+    child.on('close', code => { clearTimeout(timer); if (!settled) { settled = true; resolvePromise({ stdout: Buffer.concat(chunks), stderr, code: code ?? 1 }) } })
+  })
+}
+
 export async function searchWorkspace(cwd: string, request: SearchRequest, signal?: AbortSignal): Promise<{ matches: SearchMatch[]; limited: boolean }> {
   if (request.query === '') return { matches: [], limited: false }
   const root = await canonicalRoot(cwd)
@@ -293,6 +306,26 @@ function validateGitPath(repository: string, path?: string): string {
 async function gitObject(repository: string, spec: string): Promise<string> {
   const result = await run('git', ['show', '--no-textconv', spec], repository)
   return result.code === 0 ? result.stdout : ''
+}
+
+async function gitBlob(repository: string, spec: string): Promise<Buffer | undefined> {
+  const result = await runBuffer('git', ['cat-file', 'blob', spec], repository)
+  return result.code === 0 ? result.stdout : undefined
+}
+
+/** Read a previewable file version from a commit without passing it through the text decoder. */
+export async function gitPreviewFile(cwd: string, hash: string, path: string): Promise<{ data: Buffer; type: string; name: string }> {
+  const repository = await gitRoot(cwd)
+  const commit = await resolveCommit(repository, validateCommitHash(hash))
+  const target = validateGitPath(repository, path)
+  const type = PREVIEW_TYPES[extname(target).toLowerCase()]
+  if (type === undefined) throw new WorkbenchError('unsupported-media', 'file is not a supported preview format', 415)
+  const current = await gitBlob(repository, `${commit}:${target}`)
+  const parent = current === undefined ? await commitParent(repository, commit) : undefined
+  const previous = parent === undefined ? undefined : await gitBlob(repository, `${parent}:${target}`)
+  const data = current ?? previous
+  if (data === undefined) throw new WorkbenchError('not-found', 'file is not available in this commit', 404)
+  return { data, type, name: basename(target) }
 }
 
 async function commitParent(repository: string, hash: string): Promise<string | undefined> {

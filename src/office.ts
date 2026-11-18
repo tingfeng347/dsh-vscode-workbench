@@ -1,7 +1,7 @@
 /** Convert Word and PowerPoint documents to PDF with a locally installed LibreOffice, like DSH's own preview. */
 import { execFile, spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { access, mkdir, rename, rm, stat } from 'node:fs/promises'
+import { access, mkdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { basename, extname, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
@@ -86,6 +86,33 @@ export async function officePdf(cwd: string, path: string): Promise<{ path: stri
   try {
     await promisify(execFile)(converter, ['--headless', '--norestore', '--invisible', '--convert-to', 'pdf', '--outdir', output, `-env:UserInstallation=${profile}`, source.absolute], { timeout: 120_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 })
     const produced = join(output, `${basename(source.absolute, extname(source.absolute))}.pdf`)
+    if (!await exists(produced)) throw new WorkbenchError('converter-failed', 'LibreOffice 未能生成 PDF', 500)
+    await rename(produced, target)
+    return { path: target }
+  } finally {
+    await rm(output, { recursive: true, force: true }).catch(() => undefined)
+  }
+}
+
+/** Convert an in-memory document (for example a Git blob) through the same cached PDF pipeline. */
+export async function officePdfBuffer(data: Buffer, name: string): Promise<{ path: string }> {
+  if (!needsOfficeConversion(name)) throw new WorkbenchError('unsupported-media', 'file is not a Word or PowerPoint document', 415)
+  const converter = await findOfficeConverter()
+  if (converter === undefined) throw new WorkbenchError('converter-missing', OFFICE_HINT, 503)
+  const root = join(tmpdir(), 'dsh-vscode-workbench-office')
+  const key = createHash('sha1').update(data).digest('hex').slice(0, 20)
+  const target = join(root, `${key}.pdf`)
+  if (await exists(target)) return { path: target }
+  await mkdir(root, { recursive: true })
+  const output = join(root, `out-${key}`)
+  await mkdir(output, { recursive: true })
+  const safe = basename(name).replace(/[^\w.\- ]+/g, '_') || `document${extname(name)}`
+  const source = join(output, safe)
+  const profile = pathToFileURL(join(root, `profile-${key}-${process.pid}-${Date.now()}`)).href
+  try {
+    await writeFile(source, data)
+    await promisify(execFile)(converter, ['--headless', '--norestore', '--invisible', '--convert-to', 'pdf', '--outdir', output, `-env:UserInstallation=${profile}`, source], { timeout: 120_000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 })
+    const produced = join(output, `${basename(source, extname(source))}.pdf`)
     if (!await exists(produced)) throw new WorkbenchError('converter-failed', 'LibreOffice 未能生成 PDF', 500)
     await rename(produced, target)
     return { path: target }

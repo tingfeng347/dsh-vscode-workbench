@@ -13,7 +13,7 @@ interface GitToolsProps {
   onClose(): void
   onRefresh(): Promise<void>
   onOpenFile(path: string): void
-  onDiff(key: string, diff: GitDiff, title?: string, sourcePath?: string): void
+  onDiff(key: string, diff: GitDiff | undefined, title?: string, sourcePath?: string, preview?: { commit: string; path: string }): void
 }
 
 type View = 'compare' | 'history' | 'stash' | 'conflicts' | 'remote'
@@ -120,7 +120,7 @@ export function GitTools({ open, sessionId, status, selection, onClose, onRefres
 
   async function showDiff(action: string, path: string, value: string, key: string, title?: string) {
     const diff = await request<GitDiff>(action, path, value)
-    onDiff(`commit:${key}:${path}`, diff, title ?? path.split('/').at(-1), path)
+    onDiff(`commit:${key}:${path}`, diff, title ?? path.split('/').at(-1), path, action === 'commit.file.diff' ? { commit: key, path } : undefined)
     onClose()
   }
 

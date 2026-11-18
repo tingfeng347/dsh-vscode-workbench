@@ -65,6 +65,9 @@ body[data-ds-dark-theme] .dvw-overlay,.dvw-overlay[data-dvw-theme=dark]{color-sc
 .dvw-scm-panes .dvw-group-head{flex:none}
 .dvw-scm-panes :is(.dvw-group-head,.dvw-scm-head):is(:hover,:focus-within){background:var(--dvw-hover)}
 .dvw-scm-panes .dvw-group-toggle:hover{background:transparent}
+.dvw-commit-ai[aria-busy=true]{background:var(--dvw-hover);color:var(--dvw-text)}
+.dvw-scm-stop{display:grid;place-items:center;width:16px;height:16px;border:1px solid currentColor;border-radius:50%}
+.dvw-scm-stop::after{content:"";width:6px;height:6px;border-radius:1px;background:currentColor}
 .dvw-git-merge textarea{height:auto;resize:vertical;font-family:monospace;padding:6px;white-space:pre}
 .dvw-git-merge form>button{margin-top:8px}
 .dvw-git-diff-view{position:absolute;inset:0;display:flex;flex-direction:column;min-width:0;min-height:0}

@@ -357,6 +357,27 @@ it('resizes the graph split by pointer and keyboard and restores it after collap
   }
 })
 
+it('stops generation and ignores a late response without changing the draft', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({visible:true, view:'git'}))
+  await setup(false, {}, [], [{path:'a.txt', index:'?', worktree:'?', staged:false, untracked:true}])
+  const button = await vi.waitFor(() => {
+    const element = document.querySelector<HTMLButtonElement>('.dvw-commit-ai')
+    expect(element?.disabled).toBe(false)
+    return element!
+  })
+  let finish!: (response: Response) => void
+  vi.mocked(fetch).mockImplementationOnce(() => new Promise<Response>(resolve => { finish = resolve }))
+  await act(async () => button.click())
+  const signal = vi.mocked(fetch).mock.calls.at(-1)?.[1]?.signal
+  expect(button.getAttribute('aria-label')).toBe('停止生成提交信息')
+  await act(async () => button.click())
+  expect(signal?.aborted).toBe(true)
+  await act(async () => finish(Response.json({ok:true,value:{message:'cancelled'}})))
+  expect(document.querySelector<HTMLTextAreaElement>('.dvw-commit-input')?.value).toBe('')
+  expect(button.getAttribute('aria-label')).toBe('生成提交信息')
+  expect(document.querySelector('.dvw-git-error-dialog')).toBeNull()
+})
+
 it('uses an explicitly configured commit model instead of the active chat model', async () => {
   localStorage.setItem('dvw:commit-model', JSON.stringify({ provider: 'deepseek-official', model: 'deepseek-pro' }))
   localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))

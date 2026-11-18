@@ -305,6 +305,7 @@ export function apply(ctx: HostContext): void {
       try {
         const controller = new AbortController()
         req.once('aborted', () => controller.abort())
+        res.once('close', () => { if (!res.writableEnded) controller.abort() })
         const path = new URL(req.url ?? '/', 'http://dsh.local').pathname
         const method = path.slice('/dsh-vscode/api/'.length)
         send(res, 200, { ok: true, value: await dispatch(ctx, method, await readBody(req), controller.signal, site) })

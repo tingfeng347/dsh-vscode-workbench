@@ -681,10 +681,10 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
         const target = validateGitPath(repository, path)
         const file = files.find(item=>item.path===target)
         if (!file) throw new WorkbenchError('not-found', 'file is not part of the comparison', 404)
-        const [diff, original, modified] = await Promise.all([
+        const modified = file.status === 'D' ? '' : await readWorktreeDiffText(repository,target)
+        const [diff, original] = await Promise.all([
           checkedGit(repository, ['--literal-pathspecs', 'diff', '--no-ext-diff', '--no-textconv', '--no-color', before, '--', ...new Set([file.previousPath??target,target])]),
           file.status === 'A' ? '' : gitObject(repository, `${before}:${file.previousPath??target}`),
-          file.status === 'D' ? '' : readWorktreeDiffText(repository,target),
         ])
         const head = modified ? await gitHead(repository) : undefined
         return { diff, original, modified, blame: {

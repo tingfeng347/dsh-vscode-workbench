@@ -7,14 +7,21 @@ export interface SearchMatch { path: string; line: number; column: number; previ
 /** Search request flags. */
 export interface SearchRequest { query: string; caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; include?: string; exclude?: string }
 /** One working tree change. */
-export interface GitChange { path: string; originalPath?: string; index: string; worktree: string; staged: boolean; untracked: boolean }
+export interface GitChange { path: string; originalPath?: string; index: string; worktree: string; staged: boolean; untracked: boolean; conflicted?: boolean }
 /** One local branch and the linked worktree that has it checked out. */
 export interface GitBranch { name: string; worktree?: string }
 /** Local repository state. */
-export interface GitStatus { repository: string; branch: string; ahead: number; behind: number; changes: GitChange[] }
+export interface GitStatus { repository: string; branch: string; ahead: number; behind: number; changes: GitChange[]; operation?: 'merge' | 'rebase' | 'cherry-pick' | 'revert' }
+export interface GitConflictVersions { path: string; revision: string; base?: string; ours?: string; theirs?: string; document?: FileDocument }
+export interface GitStash { ref: string; hash: string; subject: string }
 /** One commit displayed by the source-control graph. */
 export interface GitCommit { hash: string; parents: string[]; author: string; date: string; subject: string; refs: string[] }
 /** One path changed by a local commit. */
 export interface GitCommitFile { path: string; previousPath?: string; status: string }
 /** Unified patch and full texts used by the Monaco diff editor. */
-export interface GitDiff { diff: string; original: string; modified: string }
+export interface GitDiff {
+  diff: string
+  original: string
+  modified: string
+  staging?: { mode: 'staged' | 'worktree'; revision: string; hunks: { label: string; line: number }[] }
+}

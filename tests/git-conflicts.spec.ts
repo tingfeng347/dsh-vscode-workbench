@@ -2,7 +2,8 @@ import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, expect, it } from 'vitest'
-import { gitStatus, run } from '../src/host.ts'
+import type { GitConflictVersions, GitDiff, GitStash } from '../src/types.ts'
+import { gitAction, gitStatus, run } from '../src/host.ts'
 const roots: string[] = []
 afterEach(async () => { await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true }))) })
 async function repository() {
@@ -17,7 +18,11 @@ it('shows unresolved merge conflicts', async () => {
   await git('switch', '-c', 'other'); await writeFile(join(root, 'file with spaces.txt'), 'other\n'); await git('commit', '-am', 'other')
   await git('switch', 'main'); await writeFile(join(root, 'file with spaces.txt'), 'main\n'); await git('commit', '-am', 'main')
   expect((await run('git', ['merge', 'other'], root)).code).toBe(1)
-  expect((await gitStatus(root)).changes).toMatchObject([{ path: 'file with spaces.txt', index: 'U', worktree: 'U' }])
+  expect(await gitStatus(root)).toMatchObject({ operation: 'merge', changes: [{ path: 'file with spaces.txt', index: 'U', worktree: 'U', conflicted: true }] })
+  expect(await gitAction(root, 'conflict.diff', 'file with spaces.txt')).toMatchObject({ original: 'main\n', modified: 'other\n' })
+  expect(await gitAction(root, 'conflict.theirs', 'file with spaces.txt')).toMatchObject({ changes: [{ index: 'M', worktree: '.' }] })
+  expect(await gitAction(root, 'operation.continue', undefined, 'merge')).toMatchObject({ changes: [] })
+  expect((await git('rev-list', '--parents', '-n1', 'HEAD')).trim().split(' ')).toHaveLength(3)
 })
 it('consumes the original path of a rename record without parsing it as another change', async () => {
   const { root, git } = await repository()
@@ -27,4 +32,94 @@ it('consumes the original path of a rename record without parsing it as another 
   await git('commit', '-m', 'prepare rename fixture')
   await git('mv', '1 original file.txt', 'renamed with spaces.txt')
   expect((await gitStatus(root)).changes).toMatchObject([{ path: 'renamed with spaces.txt', originalPath: '1 original file.txt', index: 'R' }])
+})
+
+it('compares renamed files between two refs and supplies both versions', async () => {
+  const { root, git } = await repository()
+  await git('branch', 'before')
+  await git('mv', 'file with spaces.txt', 'renamed.txt')
+  await git('commit', '-m', 'rename')
+  const pair = JSON.stringify(['before', 'HEAD'])
+  expect(await gitAction(root, 'compare.files', undefined, pair)).toEqual([
+    { path: 'renamed.txt', previousPath: 'file with spaces.txt', status: 'R' },
+  ])
+  expect(await gitAction(root, 'compare.diff', 'renamed.txt', pair)).toMatchObject({ original: 'base\n', modified: 'base\n' })
+  expect(await gitAction(root, 'file.history', 'renamed.txt')).toMatchObject([{ subject: 'rename' }, { subject: 'base' }])
+  expect(await gitAction(root, 'file.blame', 'renamed.txt')).toContain('base')
+})
+
+it('stages and unstages one text hunk and rejects a stale revision', async () => {
+  const { root, git } = await repository()
+  const target = 'file with spaces.txt'
+  const original = Array.from({ length: 30 }, (_, index) => `line ${index}`)
+  await writeFile(join(root, target), original.join('\n')+'\n')
+  await git('commit', '-am', 'prepare two independent hunks')
+  const changed = [...original]
+  changed[1] = 'first edit'
+  changed[25] = 'second edit'
+  await writeFile(join(root, target), changed.join('\n')+'\n')
+  const worktree = await gitAction(root, 'diff', target, 'worktree') as GitDiff
+  expect(worktree.staging?.hunks).toHaveLength(2)
+  const choice = JSON.stringify([worktree.staging?.revision, '0'])
+  await gitAction(root, 'hunk.stage', target, choice)
+  const cached = await git('diff', '--cached')
+  expect(cached).toContain('+first edit')
+  expect(cached).not.toContain('+second edit')
+  await expect(gitAction(root, 'hunk.stage', target, choice)).rejects.toMatchObject({ code: 'revision-conflict' })
+  const staged = await gitAction(root, 'diff', target, 'staged') as GitDiff
+  await gitAction(root, 'hunk.unstage', target, JSON.stringify([staged.staging?.revision, '0']))
+  expect(await git('diff', '--cached')).toBe('')
+  expect(await git('diff')).toContain('+second edit')
+})
+
+it('applies a stash with staged and untracked changes and keeps the stash', async () => {
+  const { root, git } = await repository()
+  await writeFile(join(root, 'file with spaces.txt'), 'staged new content\n')
+  await git('add', '.')
+  await writeFile(join(root, 'untracked.txt'), 'untracked\n')
+  await gitAction(root, 'stash.push', undefined, 'draft')
+  expect((await gitStatus(root)).changes).toEqual([])
+  const [stash] = await gitAction(root, 'stash.list') as GitStash[]
+  expect(stash?.subject).toContain('draft')
+  await gitAction(root, 'stash.apply', undefined, JSON.stringify([stash?.ref, stash?.hash]))
+  expect((await gitStatus(root)).changes).toMatchObject([{ index: 'M' }, { path: 'untracked.txt', untracked: true }])
+  expect(await gitAction(root, 'stash.list')).toHaveLength(1)
+})
+
+it('loads all three conflict versions and stages a manually edited result', async () => {
+  const { root, git } = await repository()
+  const path = 'file with spaces.txt'
+  await git('switch', '-c', 'other')
+  await writeFile(join(root, path), 'other\n')
+  await git('commit', '-am', 'other')
+  await git('switch', 'main')
+  await writeFile(join(root, path), 'main\n')
+  await git('commit', '-am', 'main')
+  expect((await run('git', ['merge', 'other'], root)).code).toBe(1)
+  const versions = await gitAction(root, 'conflict.versions', path) as GitConflictVersions
+  expect(versions).toMatchObject({ base: 'base\n', ours: 'main\n', theirs: 'other\n' })
+  const save = (content: string)=>gitAction(root, 'conflict.save', path, JSON.stringify([versions.revision, versions.document?.revision, content]))
+  await expect(save(versions.document!.content)).rejects.toMatchObject({ code: 'unresolved-markers' })
+  await save('main and other\n')
+  expect(await git('show', `:${path}`)).toBe('main and other\n')
+})
+
+it('compares a tracked working-tree file against a ref', async () => {
+  const { root } = await repository()
+  const path = 'file with spaces.txt'
+  await writeFile(join(root, path), 'working copy\n')
+  const pair = JSON.stringify(['HEAD', ':worktree:'])
+  expect(await gitAction(root, 'compare.files', undefined, pair)).toEqual([{ path, status: 'M' }])
+  expect(await gitAction(root, 'compare.diff', path, pair)).toMatchObject({ original: 'base\n', modified: 'working copy\n' })
+})
+
+it('creates a tag from a selected ref and renames a local branch', async () => {
+  const { root, git } = await repository()
+  await git('branch', 'before')
+  await gitAction(root, 'tag.create', 'refs/heads/before', 'release-test')
+  await gitAction(root, 'branch.rename', undefined, JSON.stringify(['before', 'after']))
+  expect(await gitAction(root, 'refs')).toEqual(['refs/heads/after', 'refs/heads/main', 'refs/tags/release-test'])
+  await gitAction(root, 'branch.delete', undefined, 'after')
+  await gitAction(root, 'tag.delete', undefined, 'release-test')
+  expect(await gitAction(root, 'refs')).toEqual(['refs/heads/main'])
 })

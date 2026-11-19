@@ -6,7 +6,7 @@ import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, st
 import { constants } from 'node:fs'
 import type { HostContext } from './context.ts'
 import { prioritizeCommitPatch, type CommitContext } from './commit-message.ts'
-import type { FileDocument, FileEntry, GitBlameRange, GitBlameSource, GitBranch, GitChange, GitCommit, GitCommitFile, GitConflictVersions, GitDiff, GitLineBlame, GitStatus, SearchMatch, SearchRequest } from './types.ts'
+import type { FileDocument, FileEntry, GitBlameRange, GitBlameSource, GitBranch, GitChange, GitCommit, GitCommitFile, GitCommitSummary, GitConflictVersions, GitDiff, GitLineBlame, GitStatus, SearchMatch, SearchRequest } from './types.ts'
 import { WorkbenchError } from './wire.ts'
 
 const require = createRequire(import.meta.url)
@@ -375,6 +375,26 @@ async function checkedGit(repository: string, args: string[]): Promise<string> {
 
 async function resolveCommit(repository: string, ref: string): Promise<string> {
   return (await checkedGit(repository, ['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`])).trim()
+}
+
+async function githubCommitUrl(repository: string, hash: string): Promise<string | undefined> {
+  const prefix = 'refs/remotes/'
+  const refs = await run('git', ['for-each-ref', `--contains=${hash}`, '--format=%(refname)', prefix], repository)
+  if (refs.code !== 0 || !refs.stdout.trim()) return undefined
+
+  const remotes = await run('git', ['remote'], repository)
+  if (remotes.code !== 0 || !remotes.stdout.trim()) return undefined
+  const names = remotes.stdout.trim().split('\n').sort((a, b) => b.length - a.length)
+  const containing = new Set(refs.stdout.trim().split('\n').map(ref =>
+    names.find(name => ref.startsWith(`${prefix}${name}/`)),
+  ))
+  const candidates = ['origin', ...names.filter(name => name !== 'origin')].filter(name => containing.has(name))
+  for (const name of candidates) {
+    const remote = await run('git', ['remote', 'get-url', '--', name], repository)
+    const repo = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?$/i.exec(remote.stdout.trim())?.[1]
+    if (remote.code === 0 && repo) return `https://github.com/${repo}/commit/${hash}`
+  }
+  return undefined
 }
 
 async function gitHead(repository: string): Promise<string | undefined> {
@@ -830,9 +850,9 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
     }
     case 'commit.summary': {
       const hash = validateCommitHash(value)
-      const [diff, remote] = await Promise.all([
+      const [diff, url] = await Promise.all([
         checkedGit(repository, ['show', '--format=', '--numstat', '--diff-merges=first-parent', '--no-ext-diff', '--no-textconv', hash]),
-        run('git', ['remote', 'get-url', 'origin'], repository),
+        githubCommitUrl(repository, hash),
       ])
       const rows = diff.split('\n').filter(line => /^(?:\d+|-)\t(?:\d+|-)\t/.test(line))
       let added = 0, removed = 0
@@ -841,8 +861,7 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
         added += Number(a) || 0
         removed += Number(d) || 0
       }
-      const repo = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?$/i.exec(remote.stdout.trim())?.[1]
-      return { files: rows.length, added, removed, url: repo ? `https://github.com/${repo}/commit/${hash}` : undefined }
+      return { files: rows.length, added, removed, ...(url ? { url } : {}) } satisfies GitCommitSummary
     }
     case 'output': return checkedGit(repository, ['status', '--branch'])
     case 'clone': {

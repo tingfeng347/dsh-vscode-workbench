@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, rm, symlink, writeFile, readFile } from 'node:fs/promis
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { afterEach, describe, expect, it } from 'vitest'
-import { codiconAsset, createEntry, fileIconAsset, gitAction, gitStatus, listFiles, monacoAsset, pdfWorkerAsset, xlsxAsset, projectSources, readDocument, renameEntry, saveDocument, searchWorkspace, uploadFile, workspaceImage, workspaceDownloadFile, workspacePath, workspacePreviewFile } from '../src/host.ts'
+import { codiconAsset, createEntry, fileIconAsset, gitAction, gitStatus, listFiles, monacoAsset, pdfWorkerAsset, xlsxAsset, projectSources, readDocument, renameEntry, run, saveDocument, searchWorkspace, uploadFile, workspaceImage, workspaceDownloadFile, workspacePath, workspacePreviewFile } from '../src/host.ts'
 
 const roots:string[]=[]
 async function temp(){const value=await mkdtemp(join(tmpdir(),'dvw-'));roots.push(value);return value}
@@ -22,6 +22,45 @@ describe('workspace filesystem',()=>{
 })
 
 describe('local Git',()=>{
+  it('links commits only after a GitHub remote-tracking branch contains them', async () => {
+    const root = await temp()
+    const bare = await temp()
+    const git = async (...args: string[]) => {
+      const result = await run('git', args, root)
+      expect(result.code, result.stderr).toBe(0)
+      return result.stdout.trim()
+    }
+    await git('init', '-b', 'main')
+    await git('init', '--bare', bare)
+    await git('config', 'user.name', 'Test')
+    await git('config', 'user.email', 'test@example.com')
+    await git('remote', 'add', 'origin', 'https://github.com/team/project.git')
+    await git('remote', 'set-url', '--push', 'origin', bare)
+    await writeFile(join(root, 'a.txt'), 'first\n')
+    await gitAction(root, 'stage.all')
+    expect(await gitAction(root, 'commit', undefined, 'first')).toMatchObject({ branch: 'main' })
+    const first = await git('rev-parse', 'HEAD')
+    const summary = (hash: string) => gitAction(root, 'commit.summary', undefined, hash)
+    expect(await summary(first)).toEqual({ files: 1, added: 1, removed: 0 })
+
+    await git('push', '--set-upstream', 'origin', 'main')
+    expect(await summary(first)).toMatchObject({ url: `https://github.com/team/project/commit/${first}` })
+
+    await writeFile(join(root, 'a.txt'), 'second\n')
+    await gitAction(root, 'stage.all')
+    expect(await gitAction(root, 'commit', undefined, 'second')).toMatchObject({ ahead: 1, behind: 0 })
+    const second = await git('rev-parse', 'HEAD')
+    await git('remote', 'add', 'fork', 'git@github.com:contributor/project.git')
+    await git('remote', 'set-url', '--push', 'fork', bare)
+    expect(await summary(second)).toEqual({ files: 1, added: 1, removed: 1 })
+
+    await git('push', 'fork', 'main:feature/topic')
+    expect(await summary(second)).toMatchObject({ url: `https://github.com/contributor/project/commit/${second}` })
+    await gitAction(root, 'push')
+    expect(await summary(second)).toMatchObject({ url: `https://github.com/team/project/commit/${second}` })
+    expect(await summary(first)).toMatchObject({ url: `https://github.com/team/project/commit/${first}` })
+  })
+
   it('rejects a commit before Git prints an empty-commit report',async()=>{const root=await temp();const {execFile}=await import('node:child_process');const run=(args:string[])=>new Promise<void>((resolve,reject)=>execFile('git',args,{cwd:root},error=>error?reject(error):resolve()));await run(['init']);await writeFile(join(root,'untracked.txt'),'not staged\n');await expect(gitAction(root,'commit',undefined,'initial')).rejects.toMatchObject({code:'no-staged-changes',message:'没有已暂存的更改。请先暂存要提交的文件。'})})
   it('shows diffs for untracked and tracked files',async()=>{const root=await temp();const {execFile}=await import('node:child_process');const run=(args:string[])=>new Promise<void>((resolve,reject)=>execFile('git',args,{cwd:root},error=>error?reject(error):resolve()));await run(['init']);await run(['config','user.email','test@example.com']);await run(['config','user.name','Test']);await mkdir(join(root,'src'));await writeFile(join(root,'src','a.txt'),'first\n');let status=await gitStatus(root);expect(status.changes).toMatchObject([{path:'src/a.txt',untracked:true}]);const added=await gitAction(root,'diff','src/a.txt','untracked') as {diff:string};expect(added.diff).toContain('+first');await gitAction(root,'stage','src/a.txt');await gitAction(root,'commit',undefined,'initial');await writeFile(join(root,'src','a.txt'),'second\n');status=await gitStatus(root);expect(status.changes[0]?.path).toBe('src/a.txt');const changed=await gitAction(root,'diff','src/a.txt','worktree') as {diff:string};expect(changed.diff).toContain('-first');expect(changed.diff).toContain('+second')})
   it('returns graph commits and commit patches',async()=>{const root=await temp();const {execFile}=await import('node:child_process');const run=(args:string[])=>new Promise<void>((resolve,reject)=>execFile('git',args,{cwd:root},error=>error?reject(error):resolve()));await run(['init']);await run(['config','user.email','test@example.com']);await run(['config','user.name','Test']);await writeFile(join(root,'a.txt'),'first\n');await gitAction(root,'stage.all');await gitAction(root,'commit',undefined,'initial commit');const commits=await gitAction(root,'log') as Array<{hash:string;subject:string}>;expect(commits[0]?.subject).toBe('initial commit');const detail=await gitAction(root,'commit.show',undefined,commits[0]?.hash) as {diff:string};expect(detail.diff).toContain('initial commit');expect(detail.diff).toContain('+first')})

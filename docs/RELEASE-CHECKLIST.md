@@ -9,8 +9,9 @@
 - [ ] 确认版本号需要递增；已发布版本不能重复发布。
 - [ ] 若修复了安装或运行时问题，确认旧版本 tarball 确实不含这些修复，避免“已修复但用户装不到”。
 
-当前已知状态（2026-11-18）：
+当前已知状态（2026-11-19）：
 
+- `0.2.16` 重整源代码管理面板和提交悬浮卡片，统一 IDEA / PyCharm 差异配色，记住差异布局偏好，并修复停止生成图标变形。
 - `0.2.15` 修复 Git 提交图表的弧线与颜色，增加可拖动的图表分隔线、统一标题悬浮背景，并支持取消提交信息生成。另包含提交历史图片与文档预览修复。
 - `0.2.14` 补齐 Monaco `0.52.2` 中文包缺失的 31 个翻译条目和 5 个硬编码内联编辑命令名，并把设置入口、工作树标记、编辑器/上传/模型相关提示改成中文；实现见 `src/client/monacoLocale.ts`，说明见 `docs/features/localization.md`。Harness 基线仍是 `0.2.2-rc.3`，`engines.dsh` 不变。翻译索引绑定 Monaco 版本，升级 Monaco 后需要重新核对。
 - `0.2.12` 提交信息跟随 DSH 聊天里的任意 provider/模型，聊天目录为空时退回 LLM 运行时列举，修复自定义 provider 下模型下拉为空的问题（#13）。打不开的文件改为官方预览同款的居中「打开」控件，可用默认应用、指定应用或显示文件位置；资源管理器右键同步新增这两项。Harness 基线仍是 `0.2.2-rc.3`。
@@ -143,16 +144,10 @@ HOME="$CLEAN_HOME" "/Applications/DeepSeek Harness.app/Contents/Resources/runtim
 
 ## 7. 发布
 
-```sh
-corepack pnpm publish --dry-run
-corepack pnpm publish
-```
-
-- [ ] 发布前确认 registry 是 `https://registry.npmjs.org`。
-- [ ] `--dry-run` 的文件列表与第 4 步一致。
-- [ ] 发布后执行 `npm view dsh-vscode-workbench version`，确认新版本成为 `latest`。
-- [ ] 打 tag 并推送：`git tag v<version>`、`git push origin main --tags`。
-- [ ] 在 GitHub Releases 写清修复内容和安装注意事项。
+- [ ] 确认 `main` 上待发布提交的 Linux、macOS 和 Windows 检查都已通过。
+- [ ] 为该提交创建与 `package.json` 版本一致的 `v*` 标签，只推送本次发布的标签。
+- [ ] 等待 GitHub Actions 的发布流程完成。三平台检查和打包校验通过后，CI 创建 GitHub Release 并发布到 npm。
+- [ ] 在 GitHub Release 核对改动说明和安装包，并用 `npm view dsh-vscode-workbench version` 确认新版本成为 `latest`。
 
 ## 8. 发布后验证
 

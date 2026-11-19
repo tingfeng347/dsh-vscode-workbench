@@ -10,6 +10,12 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  verify:
+    name: Verify on Linux, macOS and Windows
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
   build:
     name: Build and verify package
     runs-on: ubuntu-latest
@@ -94,7 +100,7 @@ jobs:
 
   release:
     name: Create GitHub release
-    needs: [build]
+    needs: [verify, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write

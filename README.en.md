@@ -1,10 +1,10 @@
-<h1 align="center">DSH VS Code Workbench</h1>
-
 <p align="center">
   <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/branding/dsh-official-style-v3/dsh-workbench.gif" width="220" alt="DSH VS Code Workbench Logo">
 </p>
 
-<p align="center">A VS Code-style local workbench inside DeepSeek Harness: editor, search, Git, terminal, document and web preview in one place.</p>
+<p align="center"><a href="README.md">中文</a> · English</p>
+
+<p align="center"><strong>DSH VS Code Workbench</strong> brings editing, search, Git, a terminal, and document and web previews into one VS Code-style workspace inside DeepSeek Harness.</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/v/dsh-vscode-workbench/latest?logo=npm&label=npm" alt="npm version"></a>
@@ -22,8 +22,6 @@
   <a href="https://duink.com/plugins/1343926987/"><img src="https://img.shields.io/badge/DSH%20Universe-Listed-14b8a6?style=flat" alt="Listed on DSH Universe"></a>
   <a href="https://deepseekplugin.org/en/plugins/tingfeng347-dsh-vscode-workbench"><img src="https://img.shields.io/badge/DeepseekPlugin-Listed-2563eb?style=flat" alt="Listed on DeepseekPlugin"></a>
 </p>
-
-<p align="center"><a href="README.md">中文</a> · <b>English</b></p>
 
 ## Highlights
 

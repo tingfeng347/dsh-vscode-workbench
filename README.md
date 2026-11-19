@@ -1,10 +1,10 @@
-<h1 align="center">DSH VS Code Workbench</h1>
-
 <p align="center">
   <img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/branding/dsh-official-style-v3/dsh-workbench.gif" width="220" alt="DSH VS Code Workbench Logo">
 </p>
 
-<p align="center">在 DeepSeek Harness 里开一个 VS Code 风格的本地工作台：编辑、搜索、Git、终端、文档与网页预览都在同一界面。</p>
+<p align="center">中文 · <a href="README.en.md">English</a></p>
+
+<p align="center"><strong>DSH VS Code Workbench</strong> 是 DeepSeek Harness 里的 VS Code 风格本地工作台，集成编辑、搜索、Git、终端、文档与网页预览。</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/v/dsh-vscode-workbench/latest?logo=npm&label=npm" alt="npm 版本"></a>
@@ -22,8 +22,6 @@
   <a href="https://duink.com/plugins/1343926987/"><img src="https://img.shields.io/badge/DSH%20Universe-已收录-14b8a6?style=flat" alt="DSH Universe 已收录"></a>
   <a href="https://deepseekplugin.org/plugins/tingfeng347-dsh-vscode-workbench"><img src="https://img.shields.io/badge/DeepseekPlugin-已收录-2563eb?style=flat" alt="DeepseekPlugin 已收录"></a>
 </p>
-
-<p align="center"><b>中文</b> · <a href="README.en.md">English</a></p>
 
 ## 亮点
 

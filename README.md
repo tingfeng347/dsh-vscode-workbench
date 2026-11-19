@@ -24,21 +24,50 @@
   <a href="https://deepseekplugin.org/plugins/tingfeng347-dsh-vscode-workbench"><img src="https://img.shields.io/badge/DeepseekPlugin-已收录-2563eb?style=flat" alt="DeepseekPlugin 已收录"></a>
 </p>
 
-## 亮点
+## 安装
 
-- **一体化本地工作台**：资源管理器、Monaco 编辑器、搜索、Git、终端和 DSH 对话集中在一个 VS Code 风格界面。
-- **完整文件体验**：文本、Markdown、图片、PDF、Word、Excel 和 PowerPoint 文档均可直接打开；目录支持拖放上传和常用文件操作。
-- **可靠且实时**：原子保存与版本校验避免静默覆盖，WebSocket 会及时标记工作区的外部变更。
-- **可视化 Git 工作流**：覆盖状态、暂存、提交、分支、差异、提交文件与泳道式提交图，并可用 AI 根据当前更改生成提交信息。
-- **可持续的工作上下文**：按工作区恢复标签、目录、视图、面板与栏宽；终端支持多会话、分屏与重命名。
-- **两种打开方式**：工作台可以铺满窗口，也可以作为浮动窗口覆盖在 DSH 之上，支持拖动、八向缩放和真正的系统全屏。
-- **贴合 DSH**：右侧直接复用 DSH 对话能力，主题与布局集中在 DSH 设置的 Workbench 页。
+插件的安装版本要求是 DeepSeek Harness `>=0.2.1-rc.1`，当前验证基线为 `0.2.2-rc.5`（Cordis `4.1.0`）。
+
+```bash
+npm i -g @deepseek-ai/dsh@0.2.2-rc.5
+dsh plugin --profile web add dsh-vscode-workbench
+```
+
+通过 DSH 插件页或插件市场安装会自动启用。用 CLI 安装后还需在 `~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles` 中加入 `dsh-vscode-workbench`，再重启 `dsh web`。启动后，从 DSH 侧栏打开「VS Code 工作台」。官方终端和内置浏览器随插件启用。升级旧版或遇到 Harness 版本不兼容，见[安装与升级](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.md)。
+
+## 功能概览
+
+| 功能 | 可以做什么 |
+| --- | --- |
+| 资源管理器 | 新建、重命名、移动和删除文件或目录。支持拖放上传、文件拖出下载、多选批量删除、复制相对或绝对路径，也能用系统应用打开文件或显示文件位置。 |
+| 编辑与分屏 | Monaco 编辑器支持语法高亮和中文菜单。拖标签到编辑区边缘创建分屏，拖到另一窗格移动或交换文件。工作台按工作区恢复标签和布局。编辑器会提示文件的外部修改，保存时校验版本并原子写入。 |
+| 语言智能 | 在「DSH 设置 → 工作台 → 语言智能」启用内置的 TypeScript / JavaScript 工作区索引，或配置 Python、Go、Rust、C / C++ 等语言的 LSP。补全、定义跳转、引用、签名帮助和诊断取决于所启用的语言服务。设置页分别显示工具链和语言服务器的状态。 |
+| 文档与网页 | Markdown 支持源码、预览和大纲。图片、PDF 和 Excel 等表格可在标签页预览。Word 和 PowerPoint 可通过 LibreOffice 转成 PDF 预览，未安装时 `.docx` 仍可在浏览器内预览。网页链接和本地 HTML 用设置里选定的内置或系统浏览器打开。 |
+| 终端与 DSH 对话 | 使用 Harness 官方终端，支持多会话、重命名和分屏。可从资源管理器把选中的单个文件或目录添加到 DSH 对话，也可在编辑器中添加选中的代码。点击当前会话中的生成文件链接可在工作台打开对应文件。 |
+| 工作区与布局 | 从活动栏进入工作区切换器，可打开或新建工作区、创建或切换会话。活动栏可拖动排序，侧栏、对话栏和终端区域可调整尺寸。设置支持跟随 DSH、深色、浅色、纯白和护眼主题，可调整编辑器字号。 |
+
+在「DSH 设置 → 工作台 → 窗口」中选择「浮动窗口」，可拖动标题栏移动、拖边缘缩放，或用标题栏按钮进入全屏。位置和尺寸会被记住，可在设置中重置。
+
+## 工作区搜索与替换
+
+打开侧栏「搜索」，点击搜索框左侧箭头展开替换，或按 `Ctrl+Shift+H`（macOS 也可用 `⌘⇧H`）。结果按文件分组，点击匹配项可跳到编辑器内的对应位置。
+
+- 搜索支持区分大小写、全字匹配和正则表达式。点击「…」可填写包含和排除路径，例如 `src/**` 和 `**/*.test.ts`。
+- 输入替换文字后，可预览删除和新增内容。替换支持正则捕获组（如 `$1`）及「保留大小写」。可替换单处、单个文件或全部结果，文件级和全部替换会先确认。
+- 替换框为空时只显示普通搜索高亮，主动点击替换会删除对应匹配。目标文件有未保存的修改时，请先保存。超过 2,000 处匹配时，请缩小搜索范围再批量替换。
 
 ## Git 工作流
 
-- 在「源代码管理 → Git 工具」中查看提交或文件历史、比较分支、标签、提交与工作区，管理 Stash、同步分支或处理合并冲突。
-- 在「设置 → 工作台 → Git」中选择对比样式。VS Code 默认内联，IDEA / PyCharm 默认并排并联动滚动。两种样式都可以切换布局、跳转改动和折叠未改动行。
-- 在普通编辑器或差异视图中点击代码行，行尾会显示提交作者、时间、短哈希和摘要。「逐行提交信息」默认开启，可在同一设置区关闭。
+- **源代码管理**支持暂存、取消暂存、放弃修改、提交、修改上次提交、提交后推送或同步。AI 可根据工作区改动生成提交信息，默认使用当前 DSH 对话模型，也可在设置中指定模型、语言和详细程度。点击停止可取消生成并保留草稿。
+- **提交图**可展开每次提交的改动文件，点击文件可打开差异，支持从历史预览图片和文档。悬停在提交上可查看作者、时间、改动统计并复制哈希。已知的 GitHub 远程跟踪分支包含该提交时，卡片也会提供 GitHub 链接。「更改」和「图表」之间的分隔线可拖动，双击恢复默认高度。
+- 在「DSH 设置 → 工作台 → Git」可选择 **VS Code 或 IDEA / PyCharm 差异样式**。差异视图支持改动导航、折叠未改动行，并记住内联或并排选择。飘带式并排视图中，滚动左栏时右栏同帧跟随。蓝色表示修改、绿色表示新增、红色表示删除，定位线延伸到两侧。点击编辑器或差异视图里的代码行，可在行尾查看提交归属。
+- 从「源代码管理 → Git 工具」可筛选提交和文件历史，比较分支、标签、提交或工作区的已跟踪文件，拣选或撤销提交，管理 Stash 和本地分支、标签。同步页支持抓取、仅快进拉取、推送、合并和变基。冲突页可查看三方内容、采纳一侧或编辑、保存并暂存合并结果。
+
+## AI 改动审阅
+
+在「DSH 设置 → 工作台 → AI 改动审阅」选择「审阅全部改动」或「审阅最新改动」。审阅默认关闭，开启后可在 Monaco 中逐块处理、在编辑器顶部按文件处理，或在 DSH 输入框上方一次处理全部待审阅文件。可启用「自动跟随 AI 修改」，在操作停下后定位到新改动。
+
+接受会保留 AI 已写入的内容。拒绝会尝试还原对应改动，遇到内容冲突时会提示。审阅针对 DSH 文件工具的改动，详见 [AI 改动审阅](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/ai-review.md)。
 
 ## 演示
 
@@ -77,17 +106,6 @@
   <br><em>打开工作区、切换会话与新建工作区</em>
 </p>
 
-## 安装
-
-插件 0.2.17 支持 DeepSeek Harness `0.2.1-rc.1` 及以上（默认验证基线 `0.2.2-rc.5`，Cordis `4.1.0`）。Harness 低于 `0.2.1-rc.1` 时会被安装闸门拒绝：
-
-```bash
-npm i -g @deepseek-ai/dsh@0.2.2-rc.5
-dsh plugin --profile web add dsh-vscode-workbench
-```
-
-通过 DSH 插件页或插件市场安装会自动启用。用 CLI 安装后还需在 `~/.dsh/profiles/web/package.json` 的 `dsh.profile.bundles` 中加入 `dsh-vscode-workbench`，再重启 `dsh web`。终端直接使用 Harness 官方服务，普通浏览器也随工作台启用，无需另装终端或侧栏插件。升级旧版或遇到 Harness 版本不兼容，见[安装与升级](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.md)。
-
 ## 快捷键
 
 | 快捷键 | 操作 |
@@ -103,15 +121,14 @@ dsh plugin --profile web add dsh-vscode-workbench
 | `Ctrl/⌘+C` | 复制选中项目的相对路径，每行一个 |
 | `Delete` / `Backspace` | 删除资源管理器中的选中项目 |
 | `Esc` | 清空资源管理器多选或关闭删除确认 |
-| `Ctrl+S` | 保存当前文件 |
+| `Ctrl+S` / `⌘S` | 保存当前文件 |
 | `Ctrl+Alt+B` | 显示或隐藏 DSH 对话栏 |
-| `Ctrl+\`` | 显示或隐藏终端 |
-| `Ctrl+Shift+\`` | 新建终端 |
+| `` Ctrl+` `` | 显示或隐藏终端 |
+| `` Ctrl+Shift+` `` | 新建终端 |
+| `Ctrl+T` / `⌘T` | 新建内置浏览器标签 |
+| `Ctrl/⌘+Alt+K` | 将当前文件或选中的代码添加到 DSH 对话（编辑器内） |
+| `Ctrl/⌘+Enter` | 从提交消息框提交 |
 | `F11` / `Ctrl+Command+F` | 浮动窗口进入或退出全屏（后者用于 macOS） |
-
-左侧活动栏的终端按钮可切换底部面板。打开网页链接或 HTML 文件时会按设置里的「默认浏览器」在官方浏览器标签或系统浏览器中打开；`Cmd+T`（macOS）或 `Ctrl+T` 新建浏览器。终端保留右侧列表、重命名和分屏。升级前运行的旧终端不能迁移，更新后请新建终端。
-
-在 DSH 设置 → Workbench → 窗口里把「打开方式」改成「浮动窗口」后，工作台会以内嵌浮层出现在 DSH 页面上，对话和侧栏仍然露在外面：拖标题栏移动、拖边缘缩放。点标题栏的全屏按钮或双击标题栏会调用浏览器 Fullscreen API，让工作台独占整个屏幕并隐藏 DSH 标题栏、侧栏和对话；按 `Esc`、全屏按钮或 `F11`（macOS 也可用 `Ctrl+Command+F`）退出。位置和大小会被记住，设置里的「重置位置与大小」可以随时恢复默认。它复用 DSH 现有的原生窗口，不是新的系统窗口。
 
 ## 安全
 
@@ -132,6 +149,7 @@ pnpm build
 
 - [架构适配](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/ARCHITECTURE.md)：挂载方式、DSH 服务接入与版本兼容范围。
 - [安装与升级](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.md)：CLI 与插件市场安装、终端依赖、旧版升级和排错。
+- [资源管理器多选](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/explorer-multiselect.md) · [Monaco 中文补全](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/localization.md)
 - [版本记录](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/CHANGELOG.md)：0.1.11 起的版本变化。
 - [发布检查](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/RELEASE-CHECKLIST.md)：发布前的验证与打包步骤。
 

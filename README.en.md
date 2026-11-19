@@ -4,7 +4,8 @@
 
 <p align="center"><a href="README.md">中文</a> · English</p>
 
-<p align="center"><strong>DSH VS Code Workbench</strong> brings editing, search, Git, a terminal, and document and web previews into one VS Code-style workspace inside DeepSeek Harness.</p>
+<p align="center"><strong>DSH VS Code Workbench</strong><br>
+  A VS Code-style workspace for DeepSeek Harness with editing, search, Git, a terminal, and document and web previews.</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/v/dsh-vscode-workbench/latest?logo=npm&label=npm" alt="npm version"></a>

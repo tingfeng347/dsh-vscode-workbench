@@ -4,7 +4,8 @@
 
 <p align="center">中文 · <a href="README.en.md">English</a></p>
 
-<p align="center"><strong>DSH VS Code Workbench</strong> 是 DeepSeek Harness 里的 VS Code 风格本地工作台，集成编辑、搜索、Git、终端、文档与网页预览。</p>
+<p align="center"><strong>DSH VS Code Workbench</strong><br>
+  DeepSeek Harness 里的 VS Code 风格工作台，集成编辑、搜索、Git、终端、文档与网页预览。</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/v/dsh-vscode-workbench/latest?logo=npm&label=npm" alt="npm 版本"></a>

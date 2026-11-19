@@ -112,6 +112,7 @@ export function connectGitSplit(
   let height = 0
   let max = 0
   let width = 0
+  let originalWidth = 0
   let points: Point[] = []
   let plots: Plot[] = []
   let blocks: Block[] = []
@@ -121,6 +122,7 @@ export function connectGitSplit(
   let frame = 0
   let geometryDirty = true
   let wheelDelta = 0
+  let originalDrivesScroll = false
   const appliedTop: Pair<number> = [0,0]
 
   const length = (side: number) => models[side]!.getLineCount()
@@ -149,7 +151,8 @@ export function connectGitSplit(
       if (Math.max(b,d) < 0 || Math.min(a,c) > height) continue
       const bottomLeft = Math.max(a+1,b)
       const bottomRight = Math.max(c+1,d)
-      const shape = `M0,${a} C${mid},${a} ${mid},${c} ${width},${c} L${width},${bottomRight} C${mid},${bottomRight} ${mid},${bottomLeft} 0,${bottomLeft} Z`
+      const insertionLine = kind === 'added' ? ` M0,${a} h-${originalWidth} v1 H0 Z` : ''
+      const shape = `M0,${a} C${mid},${a} ${mid},${c} ${width},${c} L${width},${bottomRight} C${mid},${bottomRight} ${mid},${bottomLeft} 0,${bottomLeft} Z${insertionLine}`
       let path = paths[used]
       if (path === undefined) {
         const element = document.createElementNS(NS, 'path')
@@ -176,7 +179,7 @@ export function connectGitSplit(
       if (geometryDirty) rebuildGeometry()
       const delta = wheelDelta
       wheelDelta = 0
-      applyScroll(position + delta)
+      applyScroll(originalDrivesScroll ? positionForTop(sides[0].getScrollTop(), 0) : position + delta)
       draw()
     })
   }
@@ -186,12 +189,31 @@ export function connectGitSplit(
     schedule()
   }
 
+  function positionForTop(top: number, side: number) {
+    if (top === 0) return 0
+    // Near the top, a long insertion can map several positions to the same
+    // original row. Keep the nearby position while the panes can scroll together.
+    const nearby = Math.max(0, Math.min(max, position + top - appliedTop[side]!))
+    if (Math.round(linkedScrollOffset(points, nearby, height, side)) === top) return nearby
+    let low = 0, high = max
+    for (let count = 0; count < 20; count++) {
+      const mid = (low + high) / 2
+      if (linkedScrollOffset(points, mid, height, side) < top) low = mid
+      else high = mid
+    }
+    return high
+  }
+
   function applyScroll(target: number) {
     position = Math.max(0, Math.min(max, target))
     writing = true
     const previous = [...appliedTop]
     sides.forEach((side, index)=>{
       const current = side.getScrollTop()
+      if (originalDrivesScroll && index === 0) {
+        appliedTop[0] = current
+        return
+      }
       const limit = Math.max(0,side.getScrollHeight() - side.getLayoutInfo().height)
       const top = Math.min(limit,Math.round(linkedScrollOffset(points,position,height,index)))
       if (current !== top) side.setScrollTop(top)
@@ -208,6 +230,8 @@ export function connectGitSplit(
   }
 
   function move(target: number) {
+    originalDrivesScroll = false
+    wheelDelta = 0
     position = Math.max(0, Math.min(max, target))
     schedule()
   }
@@ -215,6 +239,7 @@ export function connectGitSplit(
   function rebuildGeometry() {
     geometryDirty = false
     height = Math.min(...sides.map(side=>side.getLayoutInfo().height))
+    originalWidth = sides[0].getLayoutInfo().width
     points = [{at:0,offsets:[0,0]}]
     plots = []
     function append(offsets: Pair<number>) {
@@ -314,6 +339,12 @@ export function connectGitSplit(
 
   function wheel(event: WheelEvent) {
     if (event.defaultPrevented || event.ctrlKey || event.shiftKey || Math.abs(event.deltaY) < Math.abs(event.deltaX) || event.deltaY === 0) return
+    // Let Monaco scroll the original directly. Its scroll event drives only the follower.
+    if (sides[0].getDomNode()?.contains(event.target as Node)) {
+      wheelDelta = 0
+      return
+    }
+    originalDrivesScroll = false
     event.preventDefault()
     event.stopPropagation()
     const unit = event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? height : 1
@@ -332,15 +363,13 @@ export function connectGitSplit(
         writing = false
       }
       if (!event.scrollTopChanged || !points.length || event.scrollTop === appliedTop[index]) return
-      const top = event.scrollTop
-      let low=0, high=max
-      for (let count=0; count<20; count++) {
-        const mid=(low+high)/2
-        const predicted=linkedScrollOffset(points,mid,height,index)
-        if (predicted < top) low=mid
-        else high=mid
+      if (index === 0) {
+        originalDrivesScroll = true
+        wheelDelta = 0
+        schedule()
+        return
       }
-      move(top===0?0:high)
+      move(positionForTop(event.scrollTop, index))
     }),
   ])
   const slide = () => move(Number(overview.value))

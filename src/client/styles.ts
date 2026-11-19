@@ -88,7 +88,7 @@ body[data-ds-dark-theme] .dvw-overlay,.dvw-overlay[data-dvw-theme=dark]{color-sc
 .dvw-monaco-diff[data-compute-only=true]{inset:0 auto auto 0;width:1px;height:1px;visibility:hidden;pointer-events:none}
 .dvw-diff-parallax{position:absolute;inset:0;display:grid;grid-template-columns:minmax(0,1fr) var(--dvw-diff-gap) minmax(0,1fr) 14px;background:var(--dvw-diff-surface)}
 .dvw-diff-parallax-pane{position:relative;min-width:0;min-height:0;overflow:hidden}
-.dvw-diff-ribbons{position:relative;z-index:1;width:calc(100% + 2px);height:100%;margin-inline:-1px;pointer-events:none;overflow:hidden}
+.dvw-diff-ribbons{position:relative;z-index:1;width:calc(100% + 2px);height:100%;margin-inline:-1px;pointer-events:none;overflow:visible}
 .dvw-diff-ribbons path{fill:var(--dvw-diff-modified);}
 .dvw-diff-ribbons path[data-change=added]{fill:var(--dvw-diff-inserted)}
 .dvw-diff-ribbons path[data-change=deleted]{fill:var(--dvw-diff-deleted)}

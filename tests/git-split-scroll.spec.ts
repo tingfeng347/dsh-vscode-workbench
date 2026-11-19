@@ -5,7 +5,7 @@ import { connectGitSplit } from '../src/client/GitSplitDiff.ts'
 
 afterEach(() => vi.unstubAllGlobals())
 
-it('coalesces wheel events and reuses visible ribbons in the scroll frame', () => {
+function setup(addedLines = 0) {
   const frames = new Map<number, FrameRequestCallback>()
   let id = 0
   const flushFrame = () => {
@@ -22,13 +22,17 @@ it('coalesces wheel events and reuses visible ribbons in the scroll frame', () =
     disconnect() {}
   })
 
-  const fakePane = () => {
+  const fakePane = (lines: number) => {
+    const node = document.createElement('div')
+    root.append(node)
+    let notifyScroll = (_top: number) => {}
     let top = 0
     const subscribe = () => ({ dispose() {} })
     return {
-      getModel: () => ({ getLineCount: () => 200 }),
-      getLayoutInfo: () => ({ height: 160 }),
-      getScrollHeight: () => 4000,
+      getModel: () => ({ getLineCount: () => lines }),
+      getDomNode: () => node,
+      getLayoutInfo: () => ({ height: 160, width: 400 }),
+      getScrollHeight: () => lines * 20,
       getScrollTop: () => top,
       setScrollTop: vi.fn((next: number) => { top = next }),
       render: vi.fn(),
@@ -36,7 +40,11 @@ it('coalesces wheel events and reuses visible ribbons in the scroll frame', () =
       getBottomForLineNumber: (line: number) => line * 20,
       onDidLayoutChange: subscribe,
       onDidContentSizeChange: subscribe,
-      onDidScrollChange: subscribe,
+      onDidScrollChange(handler: (event: { scrollTopChanged: boolean; scrollTop: number }) => void) {
+        notifyScroll = scrollTop => handler({ scrollTopChanged: true, scrollTop })
+        return subscribe()
+      },
+      nativeScroll(next: number) { top = next; notifyScroll(top) },
       setHiddenAreas() {},
       changeViewZones() {},
       createDecorationsCollection: () => ({ set() {} }),
@@ -47,10 +55,15 @@ it('coalesces wheel events and reuses visible ribbons in the scroll frame', () =
   const overview = document.createElement('input')
   overview.type = 'range'
   const marks = document.createElement('div')
-  const left = fakePane(), right = fakePane()
+  const left = fakePane(200), right = fakePane(200 + addedLines)
   const split = connectGitSplit(root, [left, right] as unknown as [editor.IStandaloneCodeEditor, editor.IStandaloneCodeEditor],
     ribbons, overview, marks, document.createElement('div'))
   const wheel = (deltaY: number) => root.dispatchEvent(new WheelEvent('wheel', { deltaY, cancelable: true }))
+  return { split, left, right, ribbons, marks, frames, wheel, flushFrame }
+}
+
+it('coalesces wheel events and reuses visible ribbons in the scroll frame', () => {
+  const { split, left, right, ribbons, marks, frames, wheel, flushFrame } = setup()
   try {
     split.update([4, 80].map(line => ({
       originalStartLineNumber: line, originalEndLineNumber: line,
@@ -82,6 +95,36 @@ it('coalesces wheel events and reuses visible ribbons in the scroll frame', () =
     flushFrame()
     expect(ribbons.children).toHaveLength(1)
     expect(first).toHaveProperty('style.display', '')
+  } finally {
+    split.dispose()
+  }
+})
+
+it('keeps the original pane in control across a long insertion and resumes parallax on the right', () => {
+  const { split, left, right, ribbons, wheel, flushFrame } = setup(30)
+  try {
+    split.update([{ originalStartLineNumber: 6, originalEndLineNumber: 0,
+      modifiedStartLineNumber: 7, modifiedEndLineNumber: 36, charChanges: undefined }], false)
+    flushFrame()
+    expect(ribbons.querySelector('[data-change=added]')?.getAttribute('d')).toContain('M0,120 h-400 v1 H0 Z')
+    const nativeWheel = new WheelEvent('wheel', { deltaY: 20, bubbles: true, cancelable: true })
+    left.getDomNode().dispatchEvent(nativeWheel)
+    expect(nativeWheel.defaultPrevented).toBe(false)
+    for (const top of [20, 40, 60, 80, 100, 80, 60, 40, 20, 0]) {
+      left.nativeScroll(top)
+      flushFrame()
+      expect(left.setScrollTop).not.toHaveBeenCalled()
+      expect(left.getScrollTop()).toBe(top)
+      if (top >= 80) expect(right.getScrollTop()).toBe(top + 600)
+    }
+    wheel(200)
+    flushFrame()
+    expect(left.getScrollTop()).toBe(40)
+    expect(right.getScrollTop()).toBe(200)
+    wheel(100)
+    flushFrame()
+    expect(left.getScrollTop()).toBe(40)
+    expect(right.getScrollTop()).toBe(300)
   } finally {
     split.dispose()
   }

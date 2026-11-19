@@ -6,6 +6,8 @@ This page explains how `dsh-vscode-workbench` integrates with DeepSeek Harness a
 
 The workbench mounts through the official `sidebar.footer.action` and `shell.overlay` extension points. It does not replace or disable `ui-layout`. The entry sits in the DSH sidebar panel list next to Plugins and Scheduled Tasks, and the whale icon in the activity bar toggles the DSH conversation panel.
 
+In floating mode, the native DSH conversation docks to the right of the workbench, and the activity bar provides a Plugins shortcut. DSH pages dock to the focused editor. Both surfaces follow the window when it moves or resizes.
+
 ## Client integration
 
 - UI contributions use `ui-renderer` slots and select the current session through `ui-session`'s `mainView` retain count, replacing the removed `dsh-client-runtime`.

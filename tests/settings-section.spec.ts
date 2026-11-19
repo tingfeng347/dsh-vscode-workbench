@@ -22,7 +22,7 @@ describe('workbench settings section', () => {
 
   it('keeps the workbench layout untouched while settings are open', () => {
     const workbench = read('src/client/Workbench.tsx')
-    expect(workbench).toContain('const chatShown=chatVisible&&!showingDshPanel&&!floating')
+    expect(workbench).toContain('const chatShown=chatVisible&&!showingDshPanel')
     expect(workbench).toContain('const showingDshPanel=dshTabId!==undefined&&dshTabActive')
     expect(workbench).toContain('active={browserId===tab.id&&!dshTabActive&&!switcherOpen&&snapshot.visible}')
   })

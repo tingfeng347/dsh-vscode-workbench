@@ -24,7 +24,7 @@ describe('Harness plugin installation compatibility', () => {
     expect(evaluatePluginCompatibility(manifest)).toBeUndefined()
     // Check peer ranges too: engines.dsh takes precedence in the official gate.
     const { engines, ...peerManifest } = manifest
-    for (const runtime of ['0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.5', '0.2.2-rc.1', '0.2.2-rc.2']) {
+    for (const runtime of ['0.2.1-rc.1', '0.2.1-rc.2', '0.2.1-rc.5', '0.2.2-rc.1', '0.2.2-rc.2', '0.2.2-rc.3', '0.2.2-rc.5']) {
       expect(evaluatePluginCompatibility(manifest, {}, runtime), runtime).toBeUndefined()
       expect(evaluatePluginCompatibility(peerManifest, {}, runtime), runtime).toBeUndefined()
     }

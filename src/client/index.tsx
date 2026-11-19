@@ -109,8 +109,14 @@ export function apply(ctx: ClientContext): void {
     const onKey = (event: KeyboardEvent) => {
       if (handleTerminalShortcut(event, service)) return
       if (handleBrowserShortcut(event, service)) return
+      if (!event.isComposing && (event.ctrlKey || event.metaKey) && event.shiftKey && !event.altKey && (event.code === 'KeyF' || event.code === 'KeyH')) {
+        event.preventDefault()
+        service.show('search')
+        window.dispatchEvent(new CustomEvent('dvw-focus-search', { detail: event.code === 'KeyH' }))
+        return
+      }
       if (event.isComposing || !event.ctrlKey || event.altKey) return
-      const view = event.shiftKey && event.code === 'KeyE' ? 'explorer' : event.shiftKey && event.code === 'KeyF' ? 'search' : event.shiftKey && event.code === 'KeyG' ? 'git' : undefined
+      const view = event.shiftKey && event.code === 'KeyE' ? 'explorer' : event.shiftKey && event.code === 'KeyG' ? 'git' : undefined
       if (view !== undefined) { event.preventDefault(); service.show(view) }
     }
     window.addEventListener('keydown', onKey, true); return () => window.removeEventListener('keydown', onKey, true)

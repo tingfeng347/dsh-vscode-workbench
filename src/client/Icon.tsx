@@ -1,4 +1,5 @@
 export type CodiconName =
+  | 'case-sensitive' | 'whole-word' | 'regex' | 'preserve-case' | 'replace' | 'replace-all' | 'ellipsis' | 'clear-all' | 'collapse-all' | 'expand-all'
   | 'add' | 'arrow-right' | 'comment-discussion' | 'copy' | 'check' | 'check-all' | 'chevron-down' | 'chevron-up' | 'chevron-right' | 'close' | 'close-all' | 'cloud-upload' | 'code' | 'color-mode' | 'edit'
   | 'diff' | 'diff-sidebyside' | 'diff-single' | 'discard' | 'file' | 'file-code' | 'file-media' | 'file-pdf' | 'file-zip'
   | 'files' | 'folder' | 'folder-opened' | 'git-branch' | 'git-commit' | 'globe' | 'graph' | 'home' | 'link-external' | 'list-tree' | 'new-file'

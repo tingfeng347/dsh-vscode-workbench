@@ -11,11 +11,11 @@ import { WebSocket, WebSocketServer } from 'ws'
 import type { HostContext } from './context.ts'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import { commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, type CommitModelCatalog, type CommitModelSelection, type DshChatModelCatalog } from './commit-message.ts'
-import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitPreviewFile, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host.ts'
+import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitPreviewFile, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, replaceSearchResults, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host.ts'
 import { installLsp, lspStatuses, resolveLsp, uninstallLsp, pipeLanguageServer } from './lsp.ts'
 import { officePdf, officePdfBuffer, officeStatus } from './office.ts'
 import { WorkspaceSite } from './site.ts'
-import type { SearchRequest } from './types.ts'
+import type { SearchFileEdits, SearchRequest } from './types.ts'
 import { watchIgnore, workspaceWatchIgnores } from './watch-ignore.ts'
 import { readBinaryBody, readBody, send, sendError, stringField, authorize, WorkbenchError } from './wire.ts'
 
@@ -183,6 +183,9 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     case 'lsp.install': await installLsp(stringField(body, 'id')); return lspStatuses()
     case 'lsp.uninstall': await uninstallLsp(stringField(body, 'id')); return lspStatuses()
     case 'search': return searchWorkspace(cwd, body as unknown as SearchRequest, signal)
+    case 'search.replace':
+      if (cwd !== stringField(body, 'cwd')) throw new WorkbenchError('workspace-changed', '工作区已切换，请重新搜索', 409)
+      return replaceSearchResults(cwd, body.files as SearchFileEdits[])
     case 'git.status': return gitStatus(cwd)
     case 'git.blameRange': return gitBlameRange(cwd, body.source, body.startLine, body.endLine, signal)
     case 'git.blameLine': return gitBlameLine(cwd, body.source, body.line, signal)

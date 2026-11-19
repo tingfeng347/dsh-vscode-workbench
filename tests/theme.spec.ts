@@ -121,7 +121,7 @@ describe('workbench dark theme', () => {
 
   it('opens search results at the matched line with a highlight', () => {
     const workbench = read('src/client/Workbench.tsx')
-    expect(workbench).toContain('props.onOpen(path,row.line,row.column,row.match||query)')
+    expect(read('src/client/SearchView.tsx')).toContain('onOpen(path, row.line, row.column, row.match)')
     expect(workbench).toContain('highlight={activeTab.highlight}')
     expect(read('src/client/MonacoEditor.tsx')).toContain("inlineClassName: 'dvw-search-hit'")
     expect(read('src/client/styles.ts')).toContain('.dvw-search-hit{')

@@ -4,11 +4,12 @@ import { GitTools, type GitToolsSelection } from './GitTools.tsx'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import type { FileDocument, FileEntry, GitBranch, GitChange, GitCommit, GitCommitFile, GitDiff, GitStatus, SearchMatch } from '../types.ts'
+import type { FileDocument, FileEntry, GitBranch, GitChange, GitCommit, GitCommitFile, GitDiff, GitStatus } from '../types.ts'
 import { ApiError, api, readApiResponse } from './api.ts'
 import { AiReviewController, latestReviewFollowChange, locateReviewChange, type AiReviewSnapshot, type ReviewChange, type ReviewMode } from './aiReview.ts'
 import type { VscodeWorkbench, WorkbenchView } from './service.ts'
 import { Icon } from './Icon.tsx'
+import { SearchView } from './SearchView.tsx'
 import { FileIcon } from './FileIcon.tsx'
 import { branchErrorMessage, gitActionErrorNotice, noStagedCommitNotice, type GitActionNotice } from './gitError.ts'
 import { MarkdownPreview, markdownHeadings } from './MarkdownPreview.tsx'
@@ -697,19 +698,6 @@ function MarkdownOutline({headings,onClose,onHeading}:{headings:MarkdownHeading[
   return <aside className="dvw-outline dvw-editor-outline"><div className="dvw-outline-head"><span><Icon name="list-tree"/> 大纲</span><button className="dvw-icon" title="关闭大纲" onClick={onClose}><Icon name="close"/></button></div><div className="dvw-outline-list">{headings.map(heading=><button className="dvw-outline-item" key={heading.index} style={{paddingLeft:8+(heading.depth-1)*13}} onClick={()=>onHeading(heading.index)}>{heading.text}</button>)}</div></aside>
 }
 
-function Search(props: { sessionId: string; onOpen(path: string, line: number, column: number, match: string): void }) {
-  const [query, setQuery] = useState(''); const [include, setInclude] = useState(''); const [exclude, setExclude] = useState(''); const [flags, setFlags] = useState({ caseSensitive: false, wholeWord: false, regex: false }); const [matches, setMatches] = useState<SearchMatch[]>([]); const [limited, setLimited] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState<string>()
-  const pending = useRef<AbortController>()
-  useEffect(() => () => pending.current?.abort(), [])
-  const search = async () => { pending.current?.abort(); const controller = new AbortController(); pending.current = controller; setBusy(true); setError(undefined); try { const result = await api<{ matches: SearchMatch[]; limited: boolean }>('search', { sessionId: props.sessionId, query, include, exclude, ...flags }, controller.signal); setMatches(result.matches); setLimited(result.limited) } catch (error) { if (!controller.signal.aborted) setError(String(error)) } finally { if (pending.current === controller) setBusy(false) } }
-  const groups = useMemo(() => {
-    const grouped = new Map<string, SearchMatch[]>()
-    for (const match of matches) grouped.set(match.path, [...(grouped.get(match.path) ?? []), match])
-    return grouped
-  }, [matches])
-  return <><div className="dvw-side-head">搜索</div><form className="dvw-search-form" onSubmit={event => { event.preventDefault(); void search() }}><input className="dvw-input" value={query} onChange={e => setQuery(e.target.value)} placeholder="搜索" autoFocus/><div className="dvw-options">{([['caseSensitive','Aa'],['wholeWord','Ab'],['regex','.*']] as const).map(([key,label]) => <label key={key}><input type="checkbox" checked={flags[key]} onChange={e => setFlags({ ...flags, [key]: e.target.checked })}/>{label}</label>)}<button className="dvw-icon" title="搜索" disabled={busy}><Icon name="search"/></button></div><input className="dvw-input" value={include} onChange={e=>setInclude(e.target.value)} placeholder="包含文件，例如 src/**"/><input className="dvw-input" value={exclude} onChange={e=>setExclude(e.target.value)} placeholder="排除文件，例如 **/*.test.ts"/></form>{error&&<div className="dvw-error">{error}</div>}{limited&&<div className="dvw-message">结果已截断到 2000 条</div>}<div className="dvw-results">{[...groups].map(([path, rows]) => <div key={path}><div className="dvw-result-file"><Icon name="chevron-down"/> {path} <span className="dvw-badge">{rows.length}</span></div>{rows.map((row,index)=><div className="dvw-result" key={`${row.line}:${row.column}:${index}`} onClick={()=>props.onOpen(path,row.line,row.column,row.match||query)}><span className="dvw-line">{row.line}</span><span className="dvw-preview">{row.preview}</span></div>)}</div>)}</div></>
-}
-
 // Two lane widths per row let each branch turn meet the next row vertically.
 const GRAPH_LANE = 11
 const GRAPH_HEIGHT = 2 * GRAPH_LANE
@@ -1028,7 +1016,6 @@ function Git(props: { visible: boolean; statusSlot: HTMLElement | null; sessionI
 }
 
 const ExplorerView = memo(Explorer)
-const SearchView = memo(Search)
 const GitView = memo(Git)
 
 export function Workbench({ service, browser, sessionId, cwd, navigation, dshPanelId: hostDshPanelId, onOpenDshPanel, onRestoreConversation, onCloseDshPanel, openSettings }: { service: VscodeWorkbench; browser?: NativeBrowser; sessionId?: string; cwd?: string; navigation?: DshNavigation; dshPanelId?: string; onOpenDshPanel?(panelId: string): void; onRestoreConversation?(): void; onCloseDshPanel?(): void; openSettings?(): void }) {
@@ -1178,6 +1165,19 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   },[defaultBrowser,browser,sessionId])
   useEffect(()=>{if(hostDshPanelId!==undefined)setBrowserId(undefined)},[hostDshPanelId])
   const groupsRef=useRef(groups);groupsRef.current=groups
+  const hasUnsavedSearchFile = useCallback((path: string) => groupsRef.current.some(group => group.tabs.some(tab => tab.path === path && tab.dirty)), [])
+  const [searchFocus, setSearchFocus] = useState<{ replace: boolean }>()
+  const searchNavigationPending = useRef(false)
+  useEffect(() => {
+    const focus = (event: Event) => {
+      searchNavigationPending.current = workspace === undefined
+      setPrimarySideVisible(true)
+      setSearchFocus({ replace: (event as CustomEvent<boolean>).detail })
+    }
+    window.addEventListener('dvw-focus-search', focus)
+    return () => window.removeEventListener('dvw-focus-search', focus)
+  }, [workspace])
+
   const tabsRef=useRef(tabs);tabsRef.current=tabs
   // DSH unmounts its conversation while a global panel (Plugins…) is selected,
   // so the tab outlives the panel: opening a file hands the centre back to the
@@ -1390,7 +1390,8 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
           let selected: string | undefined
           try {
             const parsed = JSON.parse(localStorage.getItem(`dvw:${value.cwd}`) ?? '{}') as { view?: WorkbenchView; paths?: string[]; active?: string; panelHeight?: number; sideWidth?: number }
-            if (parsed.view && service.getSnapshot().visible) service.show(parsed.view)
+            if (parsed.view && service.getSnapshot().visible && !searchNavigationPending.current) service.show(parsed.view)
+            searchNavigationPending.current = false
             if (typeof parsed.panelHeight === 'number') setPanelHeight(parsed.panelHeight)
             if (typeof parsed.sideWidth === 'number') setSideWidth(Math.max(210, Math.min(640, Math.round(parsed.sideWidth))))
             restored = restoreTabPaths(parsed.paths ?? []); selected = parsed.active
@@ -1487,6 +1488,13 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     }).catch(error => { if (current()) setError(String(error)) })
       .finally(() => { if (current()) loadingTabs.current.delete(key) })
   }, [sessionId])
+  const refreshChangedTabs = useCallback((paths?: string[]) => {
+    window.dispatchEvent(new CustomEvent('dvw-files-changed', { detail: paths }))
+    for (const group of groupsRef.current) for (const tab of group.tabs) {
+      if (tab.path.startsWith('diff:') || tab.loaded === false) continue
+      if (paths === undefined || paths.some(path => tab.path === path || tab.path.startsWith(`${path}/`))) loadTab(tab.path, group.id)
+    }
+  }, [loadTab])
   useEffect(() => {
     if (!snapshot.visible || sessionId === undefined || workspace === undefined) return
     const query = new URLSearchParams({ sessionId })
@@ -1496,18 +1504,14 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     let closed = false
     const refresh = (paths?: string[]) => {
       if (closed) return
-      window.dispatchEvent(new CustomEvent('dvw-files-changed', { detail: paths }))
-      for (const group of groupsRef.current) for (const tab of group.tabs) {
-        if (tab.path.startsWith('diff:') || tab.loaded === false) continue
-        if (paths === undefined || paths.some(path => tab.path === path || tab.path.startsWith(`${path}/`))) loadTab(tab.path, group.id)
-      }
+      refreshChangedTabs(paths)
     }
     ws.onopen = () => refresh()
     ws.onmessage = event => {
       try { const value = JSON.parse(String(event.data)) as { paths?: string[] }; if (Array.isArray(value.paths) && value.paths.every(path => typeof path === 'string')) refresh(value.paths) } catch { /* Ignore invalid notifications. */ }
     }
     return () => { closed = true; ws.close() }
-  }, [snapshot.visible, sessionId, workspace, loadTab])
+  }, [snapshot.visible, sessionId, workspace, refreshChangedTabs])
   useEffect(() => {
     if (!snapshot.visible || sessionId === undefined || workspace === undefined) return
     for (const group of groups) {
@@ -2038,7 +2042,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
         ]}
         order={activityOrder} hidden={activityHidden}
         onOrderChange={setActivityOrder} onHiddenChange={setActivityHidden}/>
-    <aside className="dvw-side" data-side-width={sideWidth}>{snapshot.view==='explorer'&&workspace!==undefined&&<ExplorerView sessionId={sessionId} cwd={workspace.cwd} selected={active} onOpen={openFromView} onAddToDsh={addEntryToDsh}/>} {snapshot.view==='search'&&<SearchView sessionId={sessionId} onOpen={openFromView}/>} {(snapshot.view==='git'||(workspace&&statusVisible))&&<GitView visible={snapshot.view==='git'} statusSlot={statusVisible?gitStatusSlot:null} sessionId={sessionId} preferences={commitPreferences} model={commitModel} key={sessionId} onOpenFile={openFromView} modelConfigured={commitModelConfigured} modelAvailable={commitModelAvailable} modelHint={commitModelHint} onDiff={(path,diff,title,source,preview)=>{leaveDshPanel();openDiff(path,diff,title,source,preview)}}/>}</aside>
+    <aside className="dvw-side" data-side-width={sideWidth}>{snapshot.view==='explorer'&&workspace!==undefined&&<ExplorerView sessionId={sessionId} cwd={workspace.cwd} selected={active} onOpen={openFromView} onAddToDsh={addEntryToDsh}/>} {workspace && <SearchView key={JSON.stringify([sessionId, workspace.cwd])} sessionId={sessionId} cwd={workspace.cwd} visible={snapshot.view==='search' && primarySideVisible} focus={searchFocus} isDirty={hasUnsavedSearchFile} onChanged={refreshChangedTabs} onOpen={openFromView}/>} {(snapshot.view==='git'||(workspace&&statusVisible))&&<GitView visible={snapshot.view==='git'} statusSlot={statusVisible?gitStatusSlot:null} sessionId={sessionId} preferences={commitPreferences} model={commitModel} key={sessionId} onOpenFile={openFromView} modelConfigured={commitModelConfigured} modelAvailable={commitModelAvailable} modelHint={commitModelHint} onDiff={(path,diff,title,source,preview)=>{leaveDshPanel();openDiff(path,diff,title,source,preview)}}/>}</aside>
     <PanelResizer className="dvw-side-resizer" label="拖动调整源码管理侧边栏宽度" size={sideWidth} min={210} max={640} defaultSize={210} direction={1} hideBelow={105} onHide={()=>setPrimarySideVisible(false)} onResize={setSideWidth}/>
     <main className="dvw-main" onDragOverCapture={paneDragOver} onDragLeaveCapture={paneDragLeave} onDropCapture={paneDropHandler}><div className="dvw-panes">{renderNode(layout)}</div>{snapshot.bottomPanel===undefined&&<div className="dvw-bottom-reveal" title="向上拖动打开终端" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();service.toggleBottomPanel('terminal');const statusHeight=statusVisible?24:0;const heightAt=(clientY:number)=>Math.max(120,Math.min(window.innerHeight-160,window.innerHeight-clientY-statusHeight));const move=(e:PointerEvent)=>setPanelHeight(heightAt(e.clientY));const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>}</main>
     {tabMenu&&menuTab&&<div className="dvw-context-menu dvw-tab-menu" role="menu" style={{left:Math.min(tabMenu.x,window.innerWidth-240),top:Math.min(tabMenu.y,window.innerHeight-180)}} onPointerDown={event=>event.stopPropagation()}>

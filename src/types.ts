@@ -3,9 +3,12 @@ export interface FileEntry { name: string; path: string; kind: 'file' | 'directo
 /** A text file together with its optimistic-concurrency revision. */
 export interface FileDocument { path: string; content: string; revision: string; size: number; binary: boolean; tooLarge: boolean }
 /** One ripgrep match. */
-export interface SearchMatch { path: string; line: number; column: number; preview: string; match: string }
+export interface SearchMatch { path: string; line: number; column: number; preview: string; match: string; lineHash: string; captures?: string[] }
+export interface SearchEdit { line: number; column: number; length: number; lineHash: string; text: string }
+export interface SearchFileEdits { path: string; edits: SearchEdit[] }
+export interface SearchReplaceResult { changed: string[]; failures: { path: string; message: string }[] }
 /** Search request flags. */
-export interface SearchRequest { query: string; caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; include?: string; exclude?: string }
+export interface SearchRequest { query: string; caseSensitive?: boolean; wholeWord?: boolean; regex?: boolean; captureGroups?: number[]; include?: string; exclude?: string }
 /** One working tree change. */
 export interface GitChange { path: string; originalPath?: string; index: string; worktree: string; staged: boolean; untracked: boolean; conflicted?: boolean }
 /** One local branch and the linked worktree that has it checked out. */

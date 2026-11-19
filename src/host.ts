@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { isUtf8 } from 'node:buffer'
 import { spawn } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { basename, dirname, extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path'
@@ -6,7 +7,7 @@ import { access, lstat, mkdir, open, readFile, readdir, realpath, rename, rm, st
 import { constants } from 'node:fs'
 import type { HostContext } from './context.ts'
 import { prioritizeCommitPatch, type CommitContext } from './commit-message.ts'
-import type { FileDocument, FileEntry, GitBlameRange, GitBlameSource, GitBranch, GitChange, GitCommit, GitCommitFile, GitCommitSummary, GitConflictVersions, GitDiff, GitLineBlame, GitStatus, SearchMatch, SearchRequest } from './types.ts'
+import type { FileDocument, FileEntry, GitBlameRange, GitBlameSource, GitBranch, GitChange, GitCommit, GitCommitFile, GitCommitSummary, GitConflictVersions, GitDiff, GitLineBlame, GitStatus, SearchEdit, SearchFileEdits, SearchReplaceResult, SearchMatch, SearchRequest } from './types.ts'
 import { WorkbenchError } from './wire.ts'
 
 const require = createRequire(import.meta.url)
@@ -119,7 +120,7 @@ export async function listFiles(cwd: string, path: string): Promise<FileEntry[]>
   return rows.filter(row => row !== undefined).sort((a, b) => a.kind === b.kind ? a.name.localeCompare(b.name) : a.kind === 'directory' ? -1 : 1)
 }
 
-export async function readDocument(cwd: string, path: string): Promise<FileDocument> {
+export async function readDocument(cwd: string, path: string, requireUtf8 = false): Promise<FileDocument> {
   const { root, absolute } = await workspacePath(cwd, path)
   const info = await stat(absolute)
   if (!info.isFile()) throw new WorkbenchError('not-file', 'path is not a file')
@@ -129,6 +130,7 @@ export async function readDocument(cwd: string, path: string): Promise<FileDocum
     const head = Buffer.alloc(Math.min(info.size, tooLarge ? 4096 : TEXT_LIMIT))
     const { bytesRead } = await handle.read(head, 0, head.length, 0)
     const bytes = head.subarray(0, bytesRead)
+    if (requireUtf8 && !tooLarge && !isUtf8(bytes)) throw new WorkbenchError('encoding', '文件不是 UTF-8 编码，无法替换')
     const binary = bytes.includes(0)
     return {
       path: relativePath(root, absolute), content: binary || tooLarge ? '' : bytes.toString('utf8'),
@@ -261,30 +263,167 @@ function runBuffer(command: string, args: string[], cwd: string, timeout = PROCE
   })
 }
 
+/** Split file filters at top-level commas, preserving brace alternatives and character classes. */
+function searchGlobs(value = ''): string[] {
+  const patterns: string[] = []
+  let start = 0
+  let depth = 0
+  for (let i = 0; i < value.length; i++) {
+    const ch = value[i]
+    if (ch === '\\') i++
+    else if (ch === '{' || ch === '[') depth++
+    else if (ch === '}' || ch === ']') depth = Math.max(0, depth - 1)
+    else if (ch === ',' && !depth) { patterns.push(value.slice(start, i)); start = i + 1 }
+  }
+  return [...patterns, value.slice(start)].map(pattern => pattern.trim()).filter(Boolean)
+}
+
+/** rg's JSON stream gives us exact ranges but not capture groups. Ask the same engine
+ * to annotate the matching lines in memory, preserving the surrounding text and offsets. */
+async function attachSearchCaptures(rg: string, root: string, args: string[], query: string, indices: number[], matches: SearchMatch[], signal?: AbortSignal) {
+  const lines = [...new Set(matches.map(row => row.preview))]
+  const capturesByLine = new Map<string, Map<number, string[]>>()
+  const separator = randomUUID()
+  const fields = [0, ...indices].map(index => '${' + index + '}').join(separator)
+  const annotated = await run(rg, [...args, '--line-number', '--replace', separator + fields + separator, '--', query, '-'], root, PROCESS_TIMEOUT, signal, lines.join('\n') + '\n')
+  if (annotated.code > 1) throw new WorkbenchError('search-failed', annotated.stderr)
+  for (const record of annotated.stdout.split('\n')) {
+    const colon = record.indexOf(':')
+    if (colon < 0) continue
+    const source = lines[Number(record.slice(0, colon)) - 1]
+    if (source === undefined) continue
+    const parts = record.slice(colon + 1).replace(/\r$/, '').split(separator)
+    const captures = new Map<number, string[]>()
+    let column = 1 + parts[0]!.length
+    for (let i = 1; i + indices.length + 1 < parts.length; i += indices.length + 2) {
+      const groups = [parts[i]!]
+      indices.forEach((index, offset) => { groups[index] = parts[i + offset + 1]! })
+      captures.set(column, groups)
+      column += groups[0]!.length + parts[i + indices.length + 1]!.length
+    }
+    capturesByLine.set(source, captures)
+  }
+  for (const row of matches) {
+    const groups = capturesByLine.get(row.preview)?.get(row.column)
+    if (!groups || groups[0] !== row.match) throw new WorkbenchError('capture-mismatch', '无法读取匹配项的捕获组，请缩小搜索范围')
+    row.captures = groups
+  }
+}
+
 export async function searchWorkspace(cwd: string, request: SearchRequest, signal?: AbortSignal): Promise<{ matches: SearchMatch[]; limited: boolean }> {
   if (request.query === '') return { matches: [], limited: false }
   const root = await canonicalRoot(cwd)
   const rg = require('@vscode/ripgrep').rgPath as string
-  const args = ['--json', '--line-number', '--column', '--hidden', '--glob', '!.git/**', '--max-count', '2000']
-  if (!request.regex) args.push('--fixed-strings')
-  if (!request.caseSensitive) args.push('--ignore-case')
-  if (request.wholeWord) args.push('--word-regexp')
-  if (request.include) args.push('--glob', request.include)
-  if (request.exclude) args.push('--glob', `!${request.exclude}`)
-  args.push('--', request.query, '.')
+  const flags = ['--crlf']
+  if (!request.regex) flags.push('--fixed-strings')
+  if (!request.caseSensitive) flags.push('--ignore-case')
+  if (request.wholeWord) flags.push('--word-regexp')
+  const args = [...flags, '--json', '--hidden', '--max-count', '2001']
+  for (const glob of searchGlobs(request.include)) args.push('--glob', glob)
+  for (const glob of searchGlobs(request.exclude)) args.push('--glob', `!${glob}`)
+  args.push('--glob', '!**/.git', '--glob', '!**/.git/**', '--', request.query, '.')
+  const indices = request.captureGroups ?? []
+  if (!Array.isArray(indices) || indices.length > 99 || indices.some(n => !Number.isInteger(n) || n < 1 || n > 99)) throw new WorkbenchError('bad-request', '捕获组编号无效')
   const result = await run(rg, args, root, PROCESS_TIMEOUT, signal)
   if (result.code > 1) throw new WorkbenchError('search-failed', result.stderr || 'ripgrep failed', 500)
   const matches: SearchMatch[] = []
-  for (const line of result.stdout.split('\n')) {
+  let limited = false
+  parseMatches: for (const line of result.stdout.split('\n')) {
     if (line === '') continue
     const event = JSON.parse(line) as { type: string; data?: { path?: { text?: string }; lines?: { text?: string }; line_number?: number; submatches?: Array<{ start: number; end: number; match?: { text?: string } }> } }
     if (event.type !== 'match' || event.data?.path?.text === undefined || event.data.lines?.text === undefined) continue
+    const preview = event.data.lines.text.replace(/\r?\n$/, '')
+    const lineHash = hashSearchLine(preview)
+    const bytes = Buffer.from(preview)
+    // ripgrep reports UTF-8 bytes. Monaco and JS string offsets use UTF-16 units.
+    let byteOffset = 0
+    let column = 1
     for (const hit of event.data.submatches ?? []) {
-      matches.push({ path: event.data.path.text.replace(/\\/g, '/').replace(/^\.\//, ''), line: event.data.line_number ?? 1, column: hit.start + 1, preview: event.data.lines.text.trimEnd(), match: hit.match?.text ?? '' })
-      if (matches.length >= 2000) return { matches, limited: true }
+      // Empty regexes can also match between the bytes of one UTF-8 code point.
+      if (hit.start < bytes.length && (bytes[hit.start]! & 0xc0) === 0x80) continue
+      if (matches.length === 2000) { limited = true; break parseMatches }
+      column += bytes.toString('utf8', byteOffset, hit.start).length
+      const match = hit.match?.text ?? ''
+      const reportedPath = event.data.path.text
+      matches.push({ path: (sep === '\\' ? reportedPath.replace(/\\/g, '/') : reportedPath).replace(/^\.\//, ''),
+        line: event.data.line_number ?? 1, column, preview, match, lineHash })
+      byteOffset = hit.end
+      column += match.length
     }
   }
-  return { matches, limited: false }
+  if (matches.length && request.regex && indices.length) await attachSearchCaptures(rg, root, flags, request.query, indices, matches, signal)
+  return { matches, limited }
+}
+
+function hashSearchLine(text: string): string {
+  return createHash('sha256').update(text).digest('hex')
+}
+
+function validSearchEdit(edit: SearchEdit): boolean {
+  return edit != null && Number.isSafeInteger(edit.line) && edit.line > 0
+    && Number.isSafeInteger(edit.column) && edit.column > 0 && Number.isSafeInteger(edit.length) && edit.length >= 0
+    && typeof edit.text === 'string' && typeof edit.lineHash === 'string'
+}
+
+async function replaceInFile(cwd: string, { path, edits }: SearchFileEdits): Promise<void> {
+  const target = await workspacePath(cwd, path)
+  if (relative(target.root, await realpath(target.absolute)).split(sep).some(segment => segment.toLowerCase() === '.git')) {
+    throw new Error('不能替换 Git 元数据')
+  }
+  const doc = await readDocument(cwd, path, true)
+  if (doc.binary || doc.tooLarge) throw new Error('只能替换 5 MiB 以内的文本文件')
+  // ripgrep and the editor both hide a leading UTF-8 BOM.
+  const bom = doc.content.startsWith('\uFEFF') ? '\uFEFF' : ''
+  const lines = doc.content.slice(bom.length).split('\n')
+  const defaultEol = doc.content.match(/\r?\n/)?.[0] ?? '\n'
+  const ordered = [...edits].sort((a, b) => a.line - b.line || a.column - b.column)
+  let currentLine = 0
+  let hash = ''
+  let original = ''
+  let cursor = 0
+  let pieces: string[] = []
+  function finishLine() {
+    if (currentLine) lines[currentLine - 1] = pieces.join('') + original.slice(cursor)
+  }
+  for (const edit of ordered) {
+    if (edit.line !== currentLine) {
+      finishLine()
+      currentLine = edit.line
+      const line = lines[currentLine - 1]
+      if (line === undefined) throw new Error('匹配行已更改，请重新搜索')
+      original = line
+      hash = hashSearchLine(currentLine < lines.length ? line.replace(/\r$/, '') : line)
+      cursor = 0
+      pieces = []
+    }
+    const start = edit.column - 1
+    if (hash !== edit.lineHash || start < cursor || start + edit.length > original.length) {
+      throw new Error('匹配行已更改，请重新搜索')
+    }
+    const eol = currentLine === lines.length ? defaultEol : original.endsWith('\r') ? '\r\n' : '\n'
+    pieces.push(original.slice(cursor, start), edit.text.replace(/\r?\n/g, eol))
+    cursor = start + edit.length
+  }
+  finishLine()
+  const content = bom + lines.join('\n')
+  if (Buffer.byteLength(content) > TEXT_LIMIT) throw new Error('替换后的文件超过 5 MiB')
+  if (content !== doc.content) await saveDocument(cwd, path, content, doc.revision)
+}
+
+/** Each file is saved atomically. Return partial completion so retries can use a fresh search. */
+export async function replaceSearchResults(cwd: string, files: SearchFileEdits[]): Promise<SearchReplaceResult> {
+  if (!Array.isArray(files) || files.length > 2000 || !files.every(file => file && typeof file.path === 'string'
+    && Array.isArray(file.edits) && file.edits.length > 0 && file.edits.every(validSearchEdit))
+    || files.reduce((total, file) => total + file.edits.length, 0) > 2000
+    || new Set(files.map(file => file.path)).size !== files.length) {
+    throw new WorkbenchError('bad-request', '替换范围无效')
+  }
+  const result: SearchReplaceResult = { changed: [], failures: [] }
+  for (const file of files) {
+    try { await replaceInFile(cwd, file); result.changed.push(file.path) }
+    catch (error) { result.failures.push({ path: file.path, message: error instanceof Error ? error.message : String(error) }) }
+  }
+  return result
 }
 
 async function gitRoot(cwd: string): Promise<string> {

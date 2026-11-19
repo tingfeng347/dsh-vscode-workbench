@@ -93,7 +93,8 @@ Installing from the DSH Plugins page or a marketplace enables the plugin automat
 | Shortcut | Action |
 | --- | --- |
 | `Ctrl+Shift+E` | Open Explorer |
-| `Ctrl+Shift+F` | Open Search |
+| `Ctrl+Shift+F` / `⌘⇧F` | Search the workspace |
+| `Ctrl+Shift+H` / `⌘⇧H` | Replace a match, a file’s matches, or all workspace results |
 | `Ctrl+Shift+G` | Open Source Control |
 | `Ctrl/Cmd+Click` | Toggle one Explorer item |
 | `Shift+Click` | Select the visible range from the anchor |

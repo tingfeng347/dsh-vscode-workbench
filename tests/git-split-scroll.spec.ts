@@ -106,7 +106,7 @@ it('keeps the original pane in control across a long insertion and resumes paral
     split.update([{ originalStartLineNumber: 6, originalEndLineNumber: 0,
       modifiedStartLineNumber: 7, modifiedEndLineNumber: 36, charChanges: undefined }], false)
     flushFrame()
-    expect(ribbons.querySelector('[data-change=added]')?.getAttribute('d')).toContain('M0,120 h-400 v1 H0 Z')
+    expect(ribbons.querySelector('[data-change=added]')?.getAttribute('d')).toContain('M0,120 h-400 v-1 H0 Z M48,120 h400 v-1 H48 Z')
     const nativeWheel = new WheelEvent('wheel', { deltaY: 20, bubbles: true, cancelable: true })
     left.getDomNode().dispatchEvent(nativeWheel)
     expect(nativeWheel.defaultPrevented).toBe(false)
@@ -115,8 +115,17 @@ it('keeps the original pane in control across a long insertion and resumes paral
       flushFrame()
       expect(left.setScrollTop).not.toHaveBeenCalled()
       expect(left.getScrollTop()).toBe(top)
-      if (top >= 80) expect(right.getScrollTop()).toBe(top + 600)
+      expect(right.getScrollTop()).toBe(top)
     }
+    left.nativeScroll(160)
+    flushFrame()
+    wheel(10)
+    flushFrame()
+    expect(left.getScrollTop()).toBe(160)
+    expect(right.getScrollTop()).toBe(170)
+    // Return to the top, then use the right pane to traverse the insertion.
+    wheel(-170)
+    flushFrame()
     wheel(200)
     flushFrame()
     expect(left.getScrollTop()).toBe(40)
@@ -125,6 +134,24 @@ it('keeps the original pane in control across a long insertion and resumes paral
     flushFrame()
     expect(left.getScrollTop()).toBe(40)
     expect(right.getScrollTop()).toBe(300)
+  } finally {
+    split.dispose()
+  }
+})
+
+it('extends the two ends of added, deleted and modified ribbons to their pane edges', () => {
+  const { split, ribbons, flushFrame } = setup()
+  try {
+    split.update([
+      { originalStartLineNumber: 1, originalEndLineNumber: 0, modifiedStartLineNumber: 2, modifiedEndLineNumber: 2 },
+      { originalStartLineNumber: 4, originalEndLineNumber: 4, modifiedStartLineNumber: 4, modifiedEndLineNumber: 0 },
+      { originalStartLineNumber: 6, originalEndLineNumber: 6, modifiedStartLineNumber: 6, modifiedEndLineNumber: 6 },
+    ].map(change => ({ ...change, charChanges: undefined })), false)
+    flushFrame()
+    for (const [kind, left, right] of [['added', 20, 20], ['deleted', 60, 80], ['modified', 100, 100]]) {
+      const shape = ribbons.querySelector(`[data-change=${kind}]`)?.getAttribute('d')
+      expect(shape).toContain(`M0,${left} h-400 v-1 H0 Z M48,${right} h400 v-1 H48 Z`)
+    }
   } finally {
     split.dispose()
   }

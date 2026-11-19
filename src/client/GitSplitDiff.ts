@@ -112,7 +112,7 @@ export function connectGitSplit(
   let height = 0
   let max = 0
   let width = 0
-  let originalWidth = 0
+  let paneWidths: Pair<number> = [0, 0]
   let points: Point[] = []
   let plots: Plot[] = []
   let blocks: Block[] = []
@@ -123,6 +123,7 @@ export function connectGitSplit(
   let geometryDirty = true
   let wheelDelta = 0
   let originalDrivesScroll = false
+  let resumingParallax = false
   const appliedTop: Pair<number> = [0,0]
 
   const length = (side: number) => models[side]!.getLineCount()
@@ -151,8 +152,9 @@ export function connectGitSplit(
       if (Math.max(b,d) < 0 || Math.min(a,c) > height) continue
       const bottomLeft = Math.max(a+1,b)
       const bottomRight = Math.max(c+1,d)
-      const insertionLine = kind === 'added' ? ` M0,${a} h-${originalWidth} v1 H0 Z` : ''
-      const shape = `M0,${a} C${mid},${a} ${mid},${c} ${width},${c} L${width},${bottomRight} C${mid},${bottomRight} ${mid},${bottomLeft} 0,${bottomLeft} Z${insertionLine}`
+      // Draw just outside the colored rows so even a one-line change has a visible edge.
+      const guides = kind === 'fold' ? '' : ` M0,${a} h-${paneWidths[0]} v-1 H0 Z M${width},${c} h${paneWidths[1]} v-1 H${width} Z`
+      const shape = `M0,${a} C${mid},${a} ${mid},${c} ${width},${c} L${width},${bottomRight} C${mid},${bottomRight} ${mid},${bottomLeft} 0,${bottomLeft} Z${guides}`
       let path = paths[used]
       if (path === undefined) {
         const element = document.createElementNS(NS, 'path')
@@ -179,7 +181,7 @@ export function connectGitSplit(
       if (geometryDirty) rebuildGeometry()
       const delta = wheelDelta
       wheelDelta = 0
-      applyScroll(originalDrivesScroll ? positionForTop(sides[0].getScrollTop(), 0) : position + delta)
+      applyScroll(delta)
       draw()
     })
   }
@@ -189,25 +191,24 @@ export function connectGitSplit(
     schedule()
   }
 
-  function positionForTop(top: number, side: number) {
+  function positionForRightTop(top: number) {
     if (top === 0) return 0
-    // Near the top, a long insertion can map several positions to the same
-    // original row. Keep the nearby position while the panes can scroll together.
-    const nearby = Math.max(0, Math.min(max, position + top - appliedTop[side]!))
-    if (Math.round(linkedScrollOffset(points, nearby, height, side)) === top) return nearby
+    const nearby = Math.max(0, Math.min(max, position + top - appliedTop[1]))
+    if (Math.round(linkedScrollOffset(points, nearby, height, 1)) === top) return nearby
     let low = 0, high = max
     for (let count = 0; count < 20; count++) {
       const mid = (low + high) / 2
-      if (linkedScrollOffset(points, mid, height, side) < top) low = mid
+      if (linkedScrollOffset(points, mid, height, 1) < top) low = mid
       else high = mid
     }
     return high
   }
 
-  function applyScroll(target: number) {
-    position = Math.max(0, Math.min(max, target))
+  function applyScroll(delta: number) {
+    position = Math.max(0, Math.min(max, position + delta))
     writing = true
-    const previous = [...appliedTop]
+    const previous: Pair<number> = [...appliedTop]
+    let aligned = true
     sides.forEach((side, index)=>{
       const current = side.getScrollTop()
       if (originalDrivesScroll && index === 0) {
@@ -215,10 +216,24 @@ export function connectGitSplit(
         return
       }
       const limit = Math.max(0,side.getScrollHeight() - side.getLayoutInfo().height)
-      const top = Math.min(limit,Math.round(linkedScrollOffset(points,position,height,index)))
+      let top: number
+      if (originalDrivesScroll) {
+        // A single original row can correspond to hundreds of inserted rows. Follow
+        // the user's actual motion, including reversals, without inverting that mapping.
+        top = Math.max(0, Math.min(limit, previous[1] + appliedTop[0] - previous[0]))
+        position = positionForRightTop(top)
+      } else {
+        const mapped = Math.min(limit, Math.round(linkedScrollOffset(points, position, height, index)))
+        // On handoff the two panes may be far from the parallax curve. Rejoin
+        // it in the direction of the gesture without snapping either pane back.
+        const from = current + Math.min(0, delta), to = current + Math.max(0, delta)
+        top = resumingParallax ? Math.max(from, Math.min(to, mapped)) : mapped
+        if (top !== mapped) aligned = false
+      }
       if (current !== top) side.setScrollTop(top)
       appliedTop[index] = current === top ? current : side.getScrollTop()
     })
+    if (aligned) resumingParallax = false
     // Monaco usually queues its view render for the next frame. Flush the dirty
     // views here so the ribbon and both code panes are painted at the same offsets.
     sides.forEach((side,index)=>{
@@ -231,6 +246,7 @@ export function connectGitSplit(
 
   function move(target: number) {
     originalDrivesScroll = false
+    resumingParallax = false
     wheelDelta = 0
     position = Math.max(0, Math.min(max, target))
     schedule()
@@ -239,7 +255,7 @@ export function connectGitSplit(
   function rebuildGeometry() {
     geometryDirty = false
     height = Math.min(...sides.map(side=>side.getLayoutInfo().height))
-    originalWidth = sides[0].getLayoutInfo().width
+    paneWidths = [sides[0].getLayoutInfo().width, sides[1].getLayoutInfo().width]
     points = [{at:0,offsets:[0,0]}]
     plots = []
     function append(offsets: Pair<number>) {
@@ -344,6 +360,7 @@ export function connectGitSplit(
       wheelDelta = 0
       return
     }
+    if (originalDrivesScroll) resumingParallax = true
     originalDrivesScroll = false
     event.preventDefault()
     event.stopPropagation()
@@ -366,10 +383,13 @@ export function connectGitSplit(
       if (index === 0) {
         originalDrivesScroll = true
         wheelDelta = 0
-        schedule()
+        if (!geometryDirty) {
+          applyScroll(0)
+          draw()
+        } else schedule()
         return
       }
-      move(positionForTop(event.scrollTop, index))
+      move(positionForRightTop(event.scrollTop))
     }),
   ])
   const slide = () => move(Number(overview.value))

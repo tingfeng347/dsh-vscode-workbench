@@ -357,6 +357,36 @@ it('resizes the graph split by pointer and keyboard and restores it after collap
   }
 })
 
+it('puts branch controls in the status bar and commit metadata in the hover card', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({visible:true, view:'git'}))
+  await setup(false, {}, [], [{path:'src/a.txt', index:'?', worktree:'?', staged:false, untracked:true}])
+  const originalFetch = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    const {action} = JSON.parse(String(options?.body)) as {action?:string}
+    if (action === 'log') return Response.json({ok:true,value:[{
+      hash:'abcdef123456', author:'Author', date:'2026-01-01T00:00:00Z', subject:'Commit title', parents:[], refs:['HEAD -> main','origin/main','tag: v1'],
+    }]})
+    if (action === 'commit.summary') return Response.json({ok:true,value:{files:1,added:2,removed:3}})
+    return originalFetch(url, options)
+  })
+  await act(async () => document.querySelector<HTMLButtonElement>('[title="刷新提交图表"]')!.click())
+  const row = await vi.waitFor(() => {
+    const row = document.querySelector<HTMLButtonElement>('.dvw-graph-row')
+    expect(row?.textContent).toBe('Commit title')
+    return row!
+  })
+  expect(document.querySelector('.dvw-status [title="切换分支"]')).not.toBeNull()
+  expect(document.querySelector('.dvw-graph .dvw-count')).toBeNull()
+  expect(document.querySelector('.dvw-git .dvw-group-head')?.lastElementChild?.textContent).toBe('1')
+  await act(async () => { row.focus(); await new Promise(resolve => setTimeout(resolve,350)) })
+  const hover = document.querySelector('.dvw-commit-hover')
+  expect(hover?.textContent).toContain('Author')
+  expect(Array.from(hover!.querySelectorAll('.dvw-ref'), item => item.textContent)).toEqual(['HEAD -> main','origin/main','tag: v1'])
+  expect(hover?.textContent).toContain('已更改 1 个文件')
+  await act(async () => { row.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true})) })
+  expect(document.querySelector('.dvw-commit-hover')).toBeNull()
+})
+
 it('stops generation and ignores a late response without changing the draft', async () => {
   localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({visible:true, view:'git'}))
   await setup(false, {}, [], [{path:'a.txt', index:'?', worktree:'?', staged:false, untracked:true}])

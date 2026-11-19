@@ -18,12 +18,8 @@ describe('commit message settings', () => {
     expect(panel).toContain('提交信息')
   })
 
-  it('sends the selected DSH model and preferences with the generation request', () => {
-    const workbench = read('src/client/Workbench.tsx')
+  it('resolves the selected DSH model and preferences in the host', () => {
     const index = read('src/index.ts')
-    expect(workbench).toContain('provider:props.model.provider,model:props.model.model')
-    expect(workbench).toContain('detail:props.preferences.detail,language:props.preferences.language')
-    expect(workbench).toContain('<GitView sessionId={sessionId} preferences={commitPreferences} model={commitModel}')
     expect(index).toContain("if (method === 'commit.models')")
     expect(index).toContain('commitCatalogFromDsh')
     expect(index).toContain('defaultModel')

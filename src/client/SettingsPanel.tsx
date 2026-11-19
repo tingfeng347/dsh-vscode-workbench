@@ -34,12 +34,6 @@ export interface WorkbenchSettingsProps {
   setChatVisible(value: boolean): void
   statusVisible: boolean
   setStatusVisible(value: boolean): void
-  sideWidth: number
-  setSideWidth(value: number): void
-  chatWidth: number
-  setChatWidth(value: number): void
-  chatMinWidth: number
-  chatMaxWidth: number
   markdownView: MarkdownView
   setMarkdownView(value: MarkdownView): void
   defaultBrowser: DefaultBrowser
@@ -291,12 +285,6 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
       </Row>
       <Row title="显示底部状态栏">
         <Switch label="显示底部状态栏" checked={props.statusVisible} onChange={props.setStatusVisible}/>
-      </Row>
-      <Row title="左侧视图宽度">
-        <Range label="左侧视图宽度" min={210} max={640} unit="px" value={props.sideWidth} onChange={props.setSideWidth}/>
-      </Row>
-      <Row title="DSH 对话栏宽度">
-        <Range label="DSH 对话栏宽度" min={props.chatMinWidth} max={props.chatMaxWidth} unit="px" value={props.chatWidth} onChange={props.setChatWidth}/>
       </Row>
       <Row title="Markdown 默认视图" description="打开 .md 文件时默认进入预览还是源码。">
         <Selector label="Markdown 默认视图" value={props.markdownView} options={MARKDOWN_VIEWS} onChange={props.setMarkdownView}/>

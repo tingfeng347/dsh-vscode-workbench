@@ -17,6 +17,7 @@ export interface GitStash { ref: string; hash: string; subject: string }
 /** One commit displayed by the source-control graph. */
 export interface GitCommit { hash: string; parents: string[]; author: string; date: string; subject: string; refs: string[] }
 /** One path changed by a local commit. */
+export interface GitCommitSummary { files: number; added: number; removed: number; url?: string }
 export interface GitCommitFile { path: string; previousPath?: string; status: string }
 export type GitBlameSource =
   | { kind: 'commit'; path: string; revision: string }

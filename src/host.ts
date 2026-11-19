@@ -828,6 +828,31 @@ export async function gitAction(cwd: string, action: string, path?: string, valu
       if (result.code !== 0) throw new WorkbenchError('git-failed', result.stderr || result.stdout, 409)
       return { diff: result.stdout, original: '', modified: result.stdout } satisfies GitDiff
     }
+    case 'commit.summary': {
+      const hash = validateCommitHash(value)
+      const [diff, remote] = await Promise.all([
+        checkedGit(repository, ['show', '--format=', '--numstat', '--diff-merges=first-parent', '--no-ext-diff', '--no-textconv', hash]),
+        run('git', ['remote', 'get-url', 'origin'], repository),
+      ])
+      const rows = diff.split('\n').filter(line => /^(?:\d+|-)\t(?:\d+|-)\t/.test(line))
+      let added = 0, removed = 0
+      for (const row of rows) {
+        const [a, d] = row.split('\t', 2)
+        added += Number(a) || 0
+        removed += Number(d) || 0
+      }
+      const repo = /^(?:https:\/\/github\.com\/|git@github\.com:|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?$/i.exec(remote.stdout.trim())?.[1]
+      return { files: rows.length, added, removed, url: repo ? `https://github.com/${repo}/commit/${hash}` : undefined }
+    }
+    case 'output': return checkedGit(repository, ['status', '--branch'])
+    case 'clone': {
+      const url = URL.canParse(value ?? '') ? new URL(value!) : undefined
+      if (url?.protocol !== 'https:' || !path || !/^[\w-][\w.-]*$/.test(path)) throw new WorkbenchError('bad-request', '请输入 HTTPS 仓库地址和新文件夹名称')
+      const destination = await workspacePath(cwd, path, true)
+      if (await lstat(destination.absolute).then(() => true, error => { if (isMissingPath(error)) return false; throw error })) throw new WorkbenchError('already-exists', '目标文件夹已存在')
+      await checkedGit(cwd, ['-c', 'protocol.allow=never', '-c', 'protocol.https.allow=always', 'clone', '--', url.href, destination.absolute])
+      return gitStatus(cwd)
+    }
     case 'commit.files': { const hash=validateCommitHash(value); return commitFiles(repository, hash, await commitParent(repository, hash)) }
     case 'commit.file.diff': {
       const hash=await resolveCommit(repository,validateCommitHash(value));const target=validateGitPath(repository,path);const parent=await commitParent(repository,hash);const files=await commitFiles(repository,hash,parent);const file=files.find(item=>item.path===target)

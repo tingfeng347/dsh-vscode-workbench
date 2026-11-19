@@ -74,7 +74,7 @@
   },
   "scripts": {
     "clean": "node scripts/clean.mjs lib dist",
-    "build": "node scripts/clean.mjs lib && tsc -p tsconfig.build.json && tsdown",
+    "build": "tsc -p tsconfig.build.json && tsdown",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "pack:plugin": "pnpm build && node scripts/clean.mjs dist && pnpm pack --pack-destination dist"

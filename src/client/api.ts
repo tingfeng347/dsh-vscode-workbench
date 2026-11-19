@@ -22,6 +22,25 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
   })
 }
 
+const STARTUP_READS = new Set(['workspace', 'git.status', 'commit.models', 'fs.list', 'fs.read', 'project.sources', 'lsp.status', 'review.feed'])
+
+export async function readApiResponse<T>(response: Response, method: string, retryable = false): Promise<T> {
+  let answer: { ok?: boolean; value?: T; error?: { code?: string; message?: string } } | null
+  try {
+    answer = await response.json()
+  } catch (cause) {
+    if (cause instanceof Error && cause.name === 'AbortError') throw cause
+    const unavailable = [404, 502, 503, 504].includes(response.status)
+    const reason = response.status === 405
+      ? '请确认工作台宿主组件已运行，或重新启动 DSH'
+      : unavailable ? 'DSH 宿主接口暂不可用' : '宿主未返回有效的 JSON 响应'
+    throw new ApiError(unavailable && retryable ? 'network' : 'invalid-response', `${reason}（${method}，HTTP ${response.status}）`)
+  }
+  if (typeof answer?.ok !== 'boolean') throw new ApiError('invalid-response', `宿主响应格式无效（${method}，HTTP ${response.status}）`)
+  if (!response.ok || !answer.ok) throw new ApiError(answer.error?.code ?? 'request-failed', answer.error?.message ?? `请求 ${method} 失败（HTTP ${response.status}）`)
+  return answer.value as T
+}
+
 async function request<T>(method: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
   let response: Response
   try {
@@ -33,9 +52,7 @@ async function request<T>(method: string, body: Record<string, unknown>, signal?
     const reason = error instanceof Error ? error.message : String(error)
     throw new ApiError('network', `无法连接 DSH 宿主（${method}）：${reason}`)
   }
-  const answer = await response.json() as { ok: boolean; value?: T; error?: { code?: string; message?: string } }
-  if (!response.ok || !answer.ok) throw new ApiError(answer.error?.code ?? 'request-failed', answer.error?.message ?? `请求 ${method} 失败（HTTP ${response.status}）`)
-  return answer.value as T
+  return readApiResponse<T>(response, method, STARTUP_READS.has(method) || (method === 'git.action' && body.action === 'log'))
 }
 
 export async function api<T>(method: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {

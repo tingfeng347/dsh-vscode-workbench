@@ -47,7 +47,8 @@ async function mount(): Promise<WorkbenchController> {
             { provider: 'deepseek-official', model: 'deepseek-flash', id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash', providerName: 'DeepSeek', badge: { text: '1017', tone: 'info' } },
             { provider: 'deepseek-official', model: 'deepseek-v4-pro', id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', providerName: 'DeepSeek' },
           ], unavailable: [], defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' } }
-        : ['fs.list', 'search', 'git.status', 'lsp.status', 'terminal.list'].includes(method ?? '') ? [] : {}
+        : method === 'git.status' ? {repository:'/tmp/audit', branch:'main', ahead:0, behind:0, changes:[]}
+        : ['fs.list', 'search', 'lsp.status', 'terminal.list'].includes(method ?? '') ? [] : {}
     return { ok: true, json: async () => ({ ok: true, value }) }
   }))
   const service = new WorkbenchController()

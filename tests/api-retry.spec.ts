@@ -25,6 +25,20 @@ describe('shared API session retry', () => {
     expect(calls).toBe(1)
   })
 
+  it('recovers when a read receives an empty response while the host starts', async () => {
+    const fetch = vi.fn().mockResolvedValueOnce(new Response(null, {status:503})).mockResolvedValueOnce(answer(true, {cwd:'/repo'}))
+    vi.stubGlobal('fetch', fetch)
+    await expect(api('workspace', {})).resolves.toEqual({cwd:'/repo'})
+    expect(fetch).toHaveBeenCalledTimes(2)
+  })
+
+  it('identifies a missing host route without repeating a commit', async () => {
+    const fetch = vi.fn().mockResolvedValue(new Response(null, {status:405}))
+    vi.stubGlobal('fetch', fetch)
+    await expect(api('git.action', {action:'commit'})).rejects.toMatchObject({message:expect.stringContaining('git.action，HTTP 405')})
+    expect(fetch).toHaveBeenCalledTimes(1)
+  })
+
   it('backs off a bounded number of times', () => {
     expect(sessionRetryDelay(new ApiError('session-not-found', 'session not found'), 0)).toBe(250)
     expect(sessionRetryDelay(new ApiError('session-not-found', 'session not found'), 10)).toBeUndefined()

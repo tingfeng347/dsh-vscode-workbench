@@ -207,7 +207,7 @@ body[data-dvw-workbench-active] [data-sidebar-toggle]{display:none!important}
 .dvw-tab[data-active=true]::after{right:-10px;clip-path:path("M0 0C0 5.5 4.5 10 10 10L0 10Z")}
 .dvw-commit-box{position:relative;display:flex;align-items:stretch}
 .dvw-commit-input{width:100%;min-height:30px;max-height:96px;field-sizing:content;resize:none;padding:5px 32px 5px 8px;line-height:18px}
-.dvw-commit-ai{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:24px;min-width:24px;height:24px;border:0;background:transparent;color:var(--dvw-text-3)}
+.dvw-commit-ai{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:24px;min-width:24px;height:24px;padding:0;border:0;background:transparent;color:var(--dvw-text-3)}
 .dvw-commit-ai:hover:not(:disabled){background:var(--dvw-hover);color:var(--dvw-text)}
 .dvw-scm-panes,.dvw-scm-changes,.dvw-scm-panes>.dvw-graph{display:flex;flex-direction:column;min-height:0}
 .dvw-scm-panes,.dvw-scm-panes>section[data-expanded=true]{flex:1 1 0}

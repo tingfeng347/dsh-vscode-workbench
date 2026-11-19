@@ -499,7 +499,7 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-result{padding:0 0 0 20px}
 .dvw-result .dvw-line{min-width:1.5em;text-align:right;color:var(--dvw-text-2);font-variant-numeric:tabular-nums}
 .dvw-preview{white-space:pre}
-.dvw-preview mark,.dvw-preview ins{background:color-mix(in srgb,var(--dvw-warn) 30%,transparent);color:inherit}
+.dvw-preview mark,.dvw-preview ins{background:color-mix(in srgb,var(--dvw-accent) 28%,transparent);color:inherit}
 .dvw-preview mark[data-replace=true]{text-decoration:line-through;background:color-mix(in srgb,var(--dvw-error) 25%,transparent)}
 .dvw-preview ins{text-decoration:none;background:color-mix(in srgb,var(--dvw-success) 30%,transparent)}
 .dvw-search .dvw-result-action{opacity:0;width:20px;height:20px}

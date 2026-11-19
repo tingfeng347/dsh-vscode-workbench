@@ -92,6 +92,7 @@ export const SearchView = memo(function SearchView({ sessionId, cwd, visible, fo
   const current = response?.request === request ? response : undefined
   const result = current?.result
   const files = useMemo(() => groupByFile(result?.matches ?? []), [result])
+  const showReplacePreview = replaceOpen && replacement.length > 0
   const preview = useMemo(() => {
     const values = new Map<SearchMatch, string>()
     if (!replaceOpen || !result) return values
@@ -169,7 +170,7 @@ export const SearchView = memo(function SearchView({ sessionId, cwd, visible, fo
       </div>
       {!collapsed.has(path) && rows.map(row => <div className="dvw-search-result-row" key={`${row.line}:${row.column}`}>
         <button className="dvw-result" title={`${path}:${row.line}:${row.column}　${row.preview}`} onClick={() => onOpen(path, row.line, row.column, row.match)}>
-          <span className="dvw-line">{row.line}</span><span className="dvw-preview">{matchPrefix(row)}<mark data-replace={replaceOpen}>{row.match}</mark>{replaceOpen && <ins>{preview.get(row)}</ins>}{row.preview.slice(row.column - 1 + row.match.length)}</span>
+          <span className="dvw-line">{row.line}</span><span className="dvw-preview">{matchPrefix(row)}<mark data-replace={showReplacePreview}>{row.match}</mark>{showReplacePreview && <ins>{preview.get(row)}</ins>}{row.preview.slice(row.column - 1 + row.match.length)}</span>
         </button>{replaceOpen && <Action className="dvw-result-action" icon="replace" label={`替换此匹配：${path}:${row.line}:${row.column}`} disabled={disabled} onClick={() => void replace([row])}/>}
       </div>)}
     </div>)}</div>

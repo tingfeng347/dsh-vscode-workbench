@@ -1,4 +1,4 @@
-import { connectGitSplit } from './GitSplitDiff.ts'
+import { colorInlineGitDiff, connectGitSplit } from './GitSplitDiff.ts'
 import type { GitDiff } from '../types.ts'
 import { clickedCodeLine, clickedDeletedLine, createGitLineBlame, lastBlameLine } from './GitLineBlame.ts'
 import { Icon } from './Icon.tsx'
@@ -236,6 +236,9 @@ export function MonacoDiffEditor(props: {
         panes.forEach(localizeMonacoActions)
         linked.current = connectGitSplit(board.current,panes,ribbon.current,overview.current,marks.current,preview.current)
       }
+      const inlineColors = ribbonStyle && !parallax
+        ? colorInlineGitDiff(instance.getModifiedEditor(), monaco.editor.OverviewRulerLane.Full)
+        : undefined
       const subscriptions = [
         instance.onDidUpdateDiff(() => {
           const changes = instance.getLineChanges()
@@ -247,6 +250,7 @@ export function MonacoDiffEditor(props: {
             }
             setSummary({ count: changes.length, added, removed })
             linked.current?.update(changes,latest.current.fold)
+            inlineColors?.update(changes)
           }
         }),
       ]
@@ -286,6 +290,7 @@ export function MonacoDiffEditor(props: {
         lineBlame.current = undefined
         linked.current?.dispose()
         linked.current = undefined
+        inlineColors?.dispose()
         splitPanes.current.forEach(pane=>pane.dispose())
         splitPanes.current = []
         instance.dispose()
@@ -301,7 +306,7 @@ export function MonacoDiffEditor(props: {
       if (!disposed) setError(cause instanceof Error ? cause.message : String(cause))
     })
     return () => { disposed = true; cleanup?.() }
-  }, [props.uri, parallax])
+  }, [props.uri, parallax, ribbonStyle])
 
   useEffect(() => lineBlame.current?.reset(), [props.blameSessionId, props.blame])
   useEffect(() => lineBlame.current?.clear(), [props.mode, fold])
@@ -321,7 +326,7 @@ export function MonacoDiffEditor(props: {
     return ()=>cancelAnimationFrame(frame)
   }, [props.mode, props.style])
   useEffect(() => {
-    editor.current?.updateOptions(diffStyleOptions(ribbonStyle, fold && !parallax))
+    editor.current?.updateOptions(diffStyleOptions(ribbonStyle && !parallax, fold && !parallax))
     const changes = editor.current?.getLineChanges()
     if (changes) linked.current?.update(changes,fold)
   }, [ribbonStyle, fold, parallax])
@@ -332,7 +337,7 @@ export function MonacoDiffEditor(props: {
   }, [props.fontSize])
   useEffect(() => { window.monaco?.editor.setTheme(monacoThemeFor(props.theme)) }, [props.theme])
 
-  return <div className="dvw-git-diff-view" data-jetbrains={ribbonStyle || undefined}>
+  return <div className="dvw-git-diff-view" data-jetbrains={ribbonStyle || undefined} data-theme={props.theme}>
     <div className="dvw-git-diff-bar">
       <div className="dvw-git-diff-revisions">
         <span className="dvw-git-diff-from"><Icon name="lock"/>{before}</span>
@@ -354,7 +359,7 @@ export function MonacoDiffEditor(props: {
     </div>
     <div className="dvw-git-diff-body">
       <div className="dvw-diff dvw-monaco-diff" data-mode={props.mode} data-render-side-by-side={props.mode==='split'} data-compute-only={parallax||undefined} aria-hidden={parallax||undefined} ref={root}/>
-      {parallax&&<div className="dvw-diff-parallax" data-theme={props.theme} ref={board}>
+      {parallax&&<div className="dvw-diff-parallax" ref={board}>
         <div className="dvw-diff-parallax-pane" ref={leftPane}/>
         <svg className="dvw-diff-ribbons" aria-hidden="true" ref={ribbon}/>
         <div className="dvw-diff-parallax-pane" ref={rightPane}/>
@@ -371,9 +376,10 @@ export function MonacoDiffEditor(props: {
 
 let diffModelSequence = 0
 
-function diffStyleOptions(ribbon: boolean, fold: boolean): import('monaco-editor').editor.IDiffEditorOptions {
+function diffStyleOptions(ribbonInline: boolean, fold: boolean): import('monaco-editor').editor.IDiffEditorOptions & import('monaco-editor').editor.IEditorOptions {
   return {
-    renderOverviewRuler: ribbon,
+    renderOverviewRuler: false,
+    overviewRulerLanes: ribbonInline ? 1 : 0,
     hideUnchangedRegions: { enabled: fold, contextLineCount: 3 },
   }
 }

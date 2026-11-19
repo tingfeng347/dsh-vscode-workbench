@@ -2,7 +2,9 @@ import type { IRange, editor } from 'monaco-editor'
 
 type Pair<T> = [T, T]
 type Span = Pair<number>
-type Block = { lines: Pair<Span>; kind: 'added' | 'deleted' | 'modified' | 'fold' }
+export const GIT_DIFF_ACCENTS = { modified: '#647fc9', added: '#45a58e', deleted: '#cb4053' } as const
+type ChangeKind = keyof typeof GIT_DIFF_ACCENTS
+type Block = { lines: Pair<Span>; kind: ChangeKind | 'fold' }
 type Plot = { edges: Pair<Span>; endThrough: Pair<number>; startFrom: Pair<number>; kind: Block['kind']; start: number }
 type Point = { at: number; offsets: Pair<number> }
 type CodeEditor = editor.IStandaloneCodeEditor & { setHiddenAreas(ranges: IRange[], source?: object): void }
@@ -33,12 +35,61 @@ function centerAt(position: number, height: number): number {
   return position < height ? position / 2 : position - half
 }
 
-function changedBlocks(changes: editor.ILineChange[]): Block[] {
+function changedBlocks(changes: editor.ILineChange[]): Array<Block & { kind: ChangeKind }> {
   const lines = (start: number, end: number): Span => end === 0 ? [start + 1, start + 1] : [start, end + 1]
   return changes.map(change=>({
     lines: [lines(change.originalStartLineNumber, change.originalEndLineNumber), lines(change.modifiedStartLineNumber, change.modifiedEndLineNumber)],
     kind: change.originalEndLineNumber===0 ? 'added' : change.modifiedEndLineNumber===0 ? 'deleted' : 'modified',
   }))
+}
+
+export function colorInlineGitDiff(pane: editor.ICodeEditor, overviewLane: editor.OverviewRulerLane) {
+  const modifiedLines = pane.createDecorationsCollection()
+  let originalBlocks: Block[] = []
+
+  function colorOriginalZones() {
+    const host = pane.getDomNode()
+    if (!host) return
+    const zones = host.querySelectorAll<HTMLElement>('.view-zones > .view-lines.line-delete')
+    const margins = host.querySelectorAll<HTMLElement>('.margin-view-zones > .inline-deleted-margin-view-zone')
+    // Monaco inserts its deleted-code view zones and their margins in diff order.
+    for (const elements of [zones, margins]) {
+      elements.forEach((element, index) => {
+        element.classList.toggle('dvw-diff-line-modified',
+          elements.length === originalBlocks.length && originalBlocks[index]?.kind === 'modified')
+      })
+    }
+  }
+
+  const observer = new MutationObserver(colorOriginalZones)
+  return {
+    update(changes: editor.ILineChange[]) {
+      pane.getDomNode()?.querySelectorAll('.view-zones,.margin-view-zones').forEach(node => observer.observe(node, { childList: true }))
+      const blocks = changedBlocks(changes)
+      originalBlocks = blocks.filter(block => block.kind !== 'added')
+      const lastLine = pane.getModel()?.getLineCount() ?? 1
+      modifiedLines.set(blocks.map(({ kind, lines: [, [start, end]] }) => {
+        // A deletion has no modified line. Anchor its overview mark to the adjacent line.
+        const first = Math.min(start, lastLine)
+        const last = Math.max(first, end - 1)
+        const overviewRuler = { color: GIT_DIFF_ACCENTS[kind], position: overviewLane }
+        const className = `dvw-diff-line-${kind}`
+        return {
+          range: { startLineNumber: first, endLineNumber: last, startColumn: 1, endColumn: 1 },
+          options: kind === 'deleted' ? { overviewRuler } : {
+            isWholeLine: true, className, marginClassName: className, overviewRuler,
+          },
+        }
+      }))
+      colorOriginalZones()
+    },
+    dispose() {
+      observer.disconnect()
+      modifiedLines.clear()
+      originalBlocks = []
+      colorOriginalZones()
+    },
+  }
 }
 
 export function connectGitSplit(

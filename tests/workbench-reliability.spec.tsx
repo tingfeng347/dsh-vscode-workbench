@@ -45,7 +45,7 @@ const state = vi.hoisted(() => {
 // the workbench's real state and HTTP client with a controlled network boundary.
 vi.mock('../src/client/MonacoEditor.tsx', () => ({
   MonacoEditor: (props: EditorProps) => { state.editor = props; return null },
-  MonacoDiffEditor: (props: DiffProps) => { state.diff = props; return null }, preloadMonaco: () => {}, retainEditorModels: () => {},
+  MonacoDiffEditor: (props: DiffProps) => { state.diff = props; return props.viewControls }, preloadMonaco: () => {}, retainEditorModels: () => {},
   isMacPlatform: () => false,
   loadMonaco: () => Promise.resolve(state.monaco),
 }))
@@ -240,6 +240,38 @@ it('applies and persists the Git comparison style through Workbench settings', a
   await act(async () => jetBrainsStyle.click())
   expect(state.diff).toMatchObject({ mode: 'split', style: 'ribbon' })
   expect(localStorage.getItem('dvw:git-diff-style')).toBe('ribbon')
+})
+
+it('shares the diff layout across new and existing files and restores it after reopening', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  localStorage.setItem('dvw:git-diff-style', 'ribbon')
+  const service = await setup(false, { paths: [], view: 'git' }, [], ['a.txt', 'b.txt'].map(path => ({
+    path, index: '.', worktree: 'M', staged: false, untracked: false,
+  })))
+  const openDiff = async (path: string) => {
+    const change = Array.from(document.querySelectorAll<HTMLElement>('.dvw-change'))
+      .find(row => row.textContent?.includes(path))!
+    await act(async () => change.click())
+    expect(state.diff?.sourcePath).toBe(path)
+  }
+  const choose = async (mode: 'inline' | 'split') => {
+    await act(async () => document.querySelector<HTMLButtonElement>(`.dvw-diff-mode-button[data-mode="${mode}"]`)!.click())
+    expect(state.diff?.mode).toBe(mode)
+  }
+
+  await openDiff('a.txt')
+  expect(state.diff?.mode).toBe('split')
+  await choose('inline')
+  await openDiff('b.txt')
+  expect(state.diff?.mode).toBe('inline')
+  await choose('split')
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-tab-path="diff:a.txt"]')!.click())
+  expect(state.diff).toMatchObject({ sourcePath: 'a.txt', mode: 'split' })
+  await choose('inline')
+  await act(async () => root!.unmount())
+  await mount(service)
+  await openDiff('b.txt')
+  expect(state.diff?.mode).toBe('inline')
 })
 
 it('uses one persisted switch for line blame in both the file editor and Git diffs', async () => {

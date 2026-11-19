@@ -1,4 +1,5 @@
 import { DSH_MARK_PATH, DSH_MARK_VIEWBOX } from './DshMark.tsx'
+import { GIT_DIFF_ACCENTS } from './GitSplitDiff.ts'
 import { WORKBENCH_MARK_SVG } from './WorkbenchMark.ts'
 
 /** The plugin's own brand mark, inlined so the empty editor state needs no extra asset request. */
@@ -78,7 +79,7 @@ body[data-ds-dark-theme] .dvw-overlay,.dvw-overlay[data-dvw-theme=dark]{color-sc
   .dvw-git-diff-actions .dvw-diff-preview-switch .dvw-mode-button{font-size:0;padding-inline:4px}
 }
 .dvw-git-diff-body{position:relative;flex:1;min-width:0;min-height:0;overflow:hidden}
-.dvw-monaco-diff .monaco-editor .char-insert{background-color:transparent}
+.dvw-monaco-diff .monaco-editor :is(.char-insert,.char-delete){background-color:transparent}
 .dvw-git-diff-view[data-jetbrains=true] .monaco-editor .diagonal-fill{background:color-mix(in srgb,var(--dvw-side) 60%,transparent)}
 .dvw-git-diff-view[data-jetbrains=true] .diff-hidden-lines-widget .center{font-size:11px;box-shadow:none}
 .dvw-git-diff-view[data-jetbrains=true] .diff-hidden-lines-widget .breadcrumb-item,
@@ -91,9 +92,17 @@ body[data-ds-dark-theme] .dvw-overlay,.dvw-overlay[data-dvw-theme=dark]{color-sc
 .dvw-diff-ribbons path[data-change=added]{fill:var(--dvw-diff-inserted)}
 .dvw-diff-ribbons path[data-change=deleted]{fill:var(--dvw-diff-deleted)}
 .dvw-diff-ribbons path[data-change=fold]{fill:var(--dvw-diff-fold)}
-.dvw-diff-parallax{--dvw-diff-surface:#fff;--dvw-diff-modified:color-mix(in srgb,#647fc9 21%,var(--dvw-diff-surface));--dvw-diff-inserted:color-mix(in srgb,#45a58e 21%,var(--dvw-diff-surface));--dvw-diff-delete-accent:#cb4053;--dvw-diff-deleted:color-mix(in srgb,var(--dvw-diff-delete-accent) 24%,var(--dvw-diff-surface));--dvw-diff-fold:color-mix(in srgb,var(--dvw-text) 7%,var(--dvw-diff-surface))}
-.dvw-diff-parallax[data-theme=dark]{--dvw-diff-surface:#121314;--dvw-diff-delete-accent:#e96777;--dvw-diff-deleted:color-mix(in srgb,var(--dvw-diff-delete-accent) 28%,var(--dvw-diff-surface))}
-.dvw-diff-parallax[data-theme=eyecare]{--dvw-diff-surface:#f7ebc8}
+.dvw-git-diff-view[data-jetbrains=true]{--dvw-diff-surface:#fff;--dvw-diff-modified:color-mix(in srgb,${GIT_DIFF_ACCENTS.modified} 21%,var(--dvw-diff-surface));--dvw-diff-inserted:color-mix(in srgb,${GIT_DIFF_ACCENTS.added} 21%,var(--dvw-diff-surface));--dvw-diff-delete-accent:${GIT_DIFF_ACCENTS.deleted};--dvw-diff-deleted:color-mix(in srgb,var(--dvw-diff-delete-accent) 24%,var(--dvw-diff-surface));--dvw-diff-fold:color-mix(in srgb,var(--dvw-text) 7%,var(--dvw-diff-surface))}
+.dvw-git-diff-view[data-jetbrains=true][data-theme=dark]{--dvw-diff-surface:#121314;--dvw-diff-delete-accent:#e96777;--dvw-diff-deleted:color-mix(in srgb,var(--dvw-diff-delete-accent) 28%,var(--dvw-diff-surface))}
+.dvw-git-diff-view[data-jetbrains=true][data-theme=eyecare]{--dvw-diff-surface:#f7ebc8}
+.dvw-git-diff-view[data-jetbrains=true] .dvw-monaco-diff[data-mode=inline] .monaco-editor{
+  --vscode-diffEditor-insertedLineBackground:transparent;
+  --vscode-diffEditor-removedLineBackground:var(--dvw-diff-deleted);
+  --vscode-diffEditorGutter-insertedLineBackground:transparent;
+  --vscode-diffEditorGutter-removedLineBackground:transparent
+}
+.dvw-git-diff-view[data-jetbrains=true] .dvw-monaco-diff[data-mode=inline] .monaco-editor .inline-deleted-margin-view-zone{background-color:var(--dvw-diff-deleted)}
+.dvw-git-diff-view[data-jetbrains=true] .dvw-monaco-diff[data-mode=inline] .monaco-editor .dvw-diff-line-modified{background-color:var(--dvw-diff-modified)}
 .dvw-diff-line-modified{background:var(--dvw-diff-modified)}
 .dvw-diff-line-added{background:var(--dvw-diff-inserted)}
 .dvw-diff-line-deleted{background:var(--dvw-diff-deleted)}
@@ -107,8 +116,8 @@ body[data-ds-dark-theme] .dvw-overlay,.dvw-overlay[data-dvw-theme=dark]{color-sc
 .dvw-diff-overview input::-moz-range-thumb{width:6px;height:28px;border:0;border-radius:3px;background:color-mix(in srgb,var(--dvw-text-3) 52%,transparent)}
 .dvw-diff-overview input:disabled{opacity:0}
 .dvw-diff-overview-marks{position:absolute;inset:0 2px;pointer-events:none}
-.dvw-diff-overview-marks i{position:absolute;inset-inline:0;height:3px;background:#647fc9}
-.dvw-diff-overview-marks i[data-change=added]{background:#45a58e}
+.dvw-diff-overview-marks i{position:absolute;inset-inline:0;height:3px;background:${GIT_DIFF_ACCENTS.modified}}
+.dvw-diff-overview-marks i[data-change=added]{background:${GIT_DIFF_ACCENTS.added}}
 .dvw-diff-overview-marks i[data-change=deleted]{background:var(--dvw-diff-delete-accent)}
 .dvw-diff-scroll-preview{position:absolute;z-index:4;right:18px;max-width:min(400px,70cqw);width:max-content;padding:8px 10px;border:1px solid var(--dvw-border);border-radius:5px;background:var(--dvw-base);color:var(--dvw-text);white-space:pre-wrap;overflow-wrap:anywhere;pointer-events:none;font:11px/1.5 monospace;box-shadow:0 2px 10px #0002}
 .dvw-tab-list{display:flex;min-width:0;flex:1;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:none}.dvw-tab-list::-webkit-scrollbar{display:none}.dvw-monaco-diff{position:absolute;inset:0}.dvw-diff-toolbar{justify-content:flex-end}.dvw-group-head{gap:2px;padding-left:2px}.dvw-group-toggle{min-width:0;height:30px;flex:1;border:0;border-radius:5px;background:transparent;color:var(--dvw-text);font:inherit;font-weight:600;display:flex;align-items:center;gap:5px;padding:0 7px;cursor:pointer;text-align:left}.dvw-group-toggle:hover{background:var(--dvw-hover)}.dvw-graph-entry[data-expanded=true]{background:color-mix(in srgb,var(--dvw-accent) 5%,transparent)}.dvw-commit-files{padding:1px 0 5px 26px}.dvw-commit-file{width:100%;height:22px;border:0;background:transparent;color:var(--dvw-text);display:flex;align-items:center;gap:6px;padding:0 7px;text-align:left;cursor:pointer}.dvw-commit-file:hover{background:var(--dvw-hover)}.dvw-commit-file-name{white-space:nowrap}.dvw-commit-file-dir{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dvw-text-3);font-size:11px}

@@ -39,7 +39,9 @@ import { applyFloatGesture, clampFloatRect, defaultFloatRect, FLOAT_BAR_HEIGHT, 
 import type { CommitDetail, CommitLanguage, CommitMessagePreferences, CommitModelCatalog, CommitModelOption, CommitModelSelection } from '../commit-message.ts'
 import { outermostTreeEntries, remapTreeSelectionPaths, selectAllTreePaths, selectTreePath, type TreeSelection } from './treeSelection.ts'
 
-interface Tab extends FileDocument { instance?: symbol; dirty: boolean; draft: string; loaded?: boolean; line?: number; column?: number; highlight?: string; focusOnReveal?: boolean; external?: boolean; preview?: boolean; title?: string; diff?: GitDiff; diffMode?: 'inline' | 'split'; diffSourcePath?:string; imageUrl?:string; documentPreview?:DocumentPreviewKind; documentUrl?:string }
+interface Tab extends FileDocument { instance?: symbol; dirty: boolean; draft: string; loaded?: boolean; line?: number; column?: number; highlight?: string; focusOnReveal?: boolean; external?: boolean; preview?: boolean; title?: string; diff?: GitDiff; diffSourcePath?:string; imageUrl?:string; documentPreview?:DocumentPreviewKind; documentUrl?:string }
+type GitDiffMode = 'inline' | 'split'
+const GIT_DIFF_MODE_KEY = 'dvw:git-diff-mode'
 type WorkbenchTheme = 'dsh' | 'dark' | 'light' | 'white' | 'eyecare'
 export type MarkdownDefaultView = 'preview' | 'source'
 export const MARKDOWN_DEFAULT_VIEW_KEY = 'dvw:markdown-default-view'
@@ -1057,8 +1059,17 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     return () => { window.removeEventListener('dragend', clear); window.removeEventListener('drop', clear) }
   }, []);
   const [gitDiffStyle, setGitDiffStyle] = useState<GitDiffStyle>(() => localStorage.getItem('dvw:git-diff-style') === 'ribbon' ? 'ribbon' : 'classic')
+  const [preferredDiffMode, setPreferredDiffMode] = useState<GitDiffMode | undefined>(() => {
+    const saved = storedValue(GIT_DIFF_MODE_KEY)
+    return saved === 'inline' || saved === 'split' ? saved : undefined
+  })
   const [gitLineBlame, setGitLineBlame] = useState(() => localStorage.getItem('dvw:git-line-blame') !== 'false')
   const defaultDiffMode = gitDiffStyle === 'ribbon' ? 'split' : 'inline'
+  const diffMode = preferredDiffMode ?? defaultDiffMode
+  const selectDiffMode = (mode: GitDiffMode) => {
+    setPreferredDiffMode(mode)
+    try { localStorage.setItem(GIT_DIFF_MODE_KEY, mode) } catch { /* Browser privacy settings may deny storage. */ }
+  }
   const [dshTabActive,setDshTabActive]=useState(hostDshPanelId!==undefined); const [dshTabId,setDshTabId]=useState<string|undefined>(hostDshPanelId); const dshPanelId=dshTabId; const [error,setError]=useState<string>(); const [panelHeight,setPanelHeight]=useState(260); const [sideWidth,setSideWidth]=useState(210); const [primarySideVisible,setPrimarySideVisible]=useState(()=>localStorage.getItem('dvw:primary-side-visible')!=='closed');const [statusVisible,setStatusVisible]=useState(()=>localStorage.getItem('dvw:status-bar-visible')!=='closed');const settingsNode=useSyncExternalStore(settingsHost.subscribe,settingsHost.getSnapshot);const settingsOpen=settingsNode!==undefined;const [chatWidth,setChatWidth]=useState(()=>clampChatWidth(Number(localStorage.getItem('dvw:dsh-chat-width'))||DSH_CHAT_DEFAULT_WIDTH));const [chatVisible,setChatVisible]=useState(()=>localStorage.getItem('dvw:dsh-chat-visible')!=='closed');const [outlineVisible,setOutlineVisible]=useState(()=>localStorage.getItem('dvw:outline')!=='closed');const [tsIntellisense,setTsIntellisense]=useState(tsIntellisenseEnabled);const [tsIndex,setTsIndex]=useState<{state:'idle'|'loading'|'ready'|'error';files?:number;truncated?:boolean;error?:string}>({state:'idle'});const [lspServers,setLspServers]=useState<LspServerStatus[]>([]);const [lspBusy,setLspBusy]=useState<string>();const [lspError,setLspError]=useState('');const lspManager=useRef<LspManager>();const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localStorage.getItem('dvw:font-size')));return Number.isFinite(saved)&&saved>=11&&saved<=20?saved:14});const [tabMenu,setTabMenu]=useState<{x:number;y:number;path:string}>()
   const [browserSnapshot,setBrowserSnapshot]=useState<BrowserSnapshot>(()=>browser?.getSnapshot()??{available:false,tabs:[]})
   const [browserId,setBrowserId]=useState<string>()
@@ -1784,9 +1795,8 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const openPath = (path: string, line?: number, column?: number, highlight?: string) => openInGroup(group.id, path, line, column, highlight)
     const markdown = paneMarkdown
     const diffMarkdown = paneDiffMarkdown
-    const diffMode = activeTab?.diffMode ?? defaultDiffMode
     const showTextDiff = activeTab?.diff !== undefined && !(diffMarkdown && activeTab.preview)
-    const diffControls = activeTab?.diff&&<>{diffMarkdown&&<div className="dvw-diff-preview-switch"><button className="dvw-mode-button" data-diff-view="diff" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="diff"/> 差异</button><button className="dvw-mode-button" data-diff-view="preview" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{!activeTab.preview&&<><button className="dvw-mode-button dvw-diff-mode-button" data-mode="inline" data-active={diffMode==='inline'} title="内联视图" aria-label="内联视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'inline'}:tab))}><Icon name="diff-single"/> 内联</button><button className="dvw-mode-button dvw-diff-mode-button" data-mode="split" data-active={diffMode==='split'} title="并排视图" aria-label="并排视图" onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,diffMode:'split'}:tab))}><Icon name="diff-sidebyside"/> 并排</button></>}</>
+    const diffControls = activeTab?.diff&&<>{diffMarkdown&&<div className="dvw-diff-preview-switch"><button className="dvw-mode-button" data-diff-view="diff" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="diff"/> 差异</button><button className="dvw-mode-button" data-diff-view="preview" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{!activeTab.preview&&<><button className="dvw-mode-button dvw-diff-mode-button" data-mode="inline" data-active={diffMode==='inline'} title="内联视图" aria-label="内联视图" aria-pressed={diffMode==='inline'} onClick={()=>selectDiffMode('inline')}><Icon name="diff-single"/> 内联</button><button className="dvw-mode-button dvw-diff-mode-button" data-mode="split" data-active={diffMode==='split'} title="并排视图" aria-label="并排视图" aria-pressed={diffMode==='split'} onClick={()=>selectDiffMode('split')}><Icon name="diff-sidebyside"/> 并排</button></>}</>
     const diffVersions = activeTab?.path.startsWith('diff:staged:') ? ['HEAD', '暂存区'] as const
       : activeTab?.path.startsWith('diff:commit:') ? ['原版本', '对比版本'] as const
       : ['暂存区', '工作区'] as const

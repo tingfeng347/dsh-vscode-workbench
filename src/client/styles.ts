@@ -428,7 +428,7 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-overlay[data-dvw-float=true][data-dvw-chat=true]:not([data-dvw-primary-side=true]){grid-template-columns:48px 0 minmax(0,1fr) var(--dvw-float-chat-width)}
 .dvw-overlay[data-dvw-float=true][data-dvw-chat=true] .dvw-status{padding-right:calc(var(--dvw-float-chat-width) + 6px)}
 .dvw-overlay[data-dvw-float=true] .dvw-chat-resizer{position:absolute;top:0;bottom:0;left:-6px;right:auto}
-.dvw-overlay[data-dvw-float=true] .dvw-chat-body{margin:0 3px}
+.dvw-overlay[data-dvw-float=true] .dvw-chat-body{height:100%;margin:0 3px}
 .dvw-overlay[data-dvw-float=true] .dvw-titlebar{display:none}
 .dvw-overlay[data-dvw-float-max=true]{border-radius:0;border-width:0 0 1px;box-shadow:none}
 /* The document goes fullscreen so DSH-owned pages and the overlay share a root. */

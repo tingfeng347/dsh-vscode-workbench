@@ -78,6 +78,7 @@ it('renders the workbench as a floating layer with its own drag bar', async () =
   expect(document.querySelector('.dvw-floatbar')).not.toBeNull()
   expect(document.querySelectorAll('.dvw-float-handle')).toHaveLength(8)
   expect(document.querySelector('.dvw-chat')).not.toBeNull()
+  expect(document.querySelector('.dvw-chat-head')).toBeNull()
   expect(document.querySelector('[data-act-id="plugins"]')).toBeNull()
   expect(document.querySelector('.dvw-activity [data-act-id="chat"][title^="关闭 DSH 对话栏"]')).not.toBeNull()
 })

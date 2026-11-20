@@ -1430,12 +1430,13 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
               setLayout(normalizeLayout(savedLayout, rebuilt.map(row => row.id), rebuilt[0]!.id))
               setGroups(rebuilt)
               // Restored tabs carry no content; without this they stay on 正在加载文件 forever.
-              for (const group of rebuilt) for (const tab of group.tabs) if (!tab.loaded) loadTab(tab.path, group.id)
+              // A hidden workbench must not touch the disk, so defer until it is visible.
+              if (service.getSnapshot().visible) for (const group of rebuilt) for (const tab of group.tabs) if (!tab.loaded) loadTab(tab.path, group.id)
             } else {
               for (const tab of draftTabs) restored = [...restored.filter(row => row.path !== tab.path), tab]
               setTabs(restored)
               setActive(restored.some(tab => tab.path === selected) ? selected : restored.at(-1)?.path)
-              for (const tab of restored) if (!tab.loaded) loadTab(tab.path)
+              if (service.getSnapshot().visible) for (const tab of restored) if (!tab.loaded) loadTab(tab.path)
             }
           } catch { /* Invalid saved state must not prevent opening the workspace. */ }
           return

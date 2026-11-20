@@ -36,7 +36,7 @@ afterEach(async () => {
   document.body.replaceChildren()
 })
 
-async function mount(dshPanelId?: string): Promise<WorkbenchController> {
+async function mount(dshPanelId?: string, onOpenDshPanel?: (id: string) => void): Promise<WorkbenchController> {
   vi.stubGlobal('WebSocket', FakeSocket)
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     const method = url.split('/').at(-1)
@@ -56,7 +56,7 @@ async function mount(dshPanelId?: string): Promise<WorkbenchController> {
   const node = document.createElement('div')
   document.body.append(node)
   root = createRoot(node)
-  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" dshPanelId={dshPanelId}/>) })
+  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" dshPanelId={dshPanelId} onOpenDshPanel={onOpenDshPanel}/>) })
   return service
 }
 
@@ -66,7 +66,8 @@ function pointer(type: string, x: number, y: number): MouseEvent {
 
 it('renders the workbench as a floating layer with its own drag bar', async () => {
   localStorage.setItem('dvw:open-mode', 'floating')
-  await mount()
+  localStorage.setItem('dvw:activity-order-v2', JSON.stringify(['plugins', 'chat']))
+  await mount(undefined, vi.fn())
   const overlay = document.querySelector<HTMLElement>('.dvw-overlay')!
   expect(overlay.getAttribute('data-dvw-float')).toBe('true')
   expect(overlay.style.left).not.toBe('')
@@ -77,6 +78,7 @@ it('renders the workbench as a floating layer with its own drag bar', async () =
   expect(document.querySelector('.dvw-floatbar')).not.toBeNull()
   expect(document.querySelectorAll('.dvw-float-handle')).toHaveLength(8)
   expect(document.querySelector('.dvw-chat')).not.toBeNull()
+  expect(document.querySelector('[data-act-id="plugins"]')).toBeNull()
   expect(document.querySelector('.dvw-activity [data-act-id="chat"][title^="关闭 DSH 对话栏"]')).not.toBeNull()
 })
 

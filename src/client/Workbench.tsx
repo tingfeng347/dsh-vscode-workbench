@@ -253,7 +253,7 @@ export function tabLabel(tab:Pick<Tab,'path'|'title'|'diffSourcePath'>):string{c
 
 const ACTIVITY_VIEW_IDS = ['explorer','search','git','terminal','chat'] as const
 const ACTIVITY_FIXED_IDS = ['workspaces'] as const
-const ACTIVITY_BOTTOM_IDS = ['home','settings','plugins'] as const
+const ACTIVITY_BOTTOM_IDS = ['home','settings'] as const
 const ACTIVITY_IDS = [...ACTIVITY_FIXED_IDS, ...ACTIVITY_VIEW_IDS, ...ACTIVITY_BOTTOM_IDS] as const
 function readActivityJSON(key: string): unknown { try { return JSON.parse(localStorage.getItem(key) ?? '[]') } catch { return [] } }
 function readActivityOrder(): string[] {
@@ -2048,7 +2048,6 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
         bottom={[
           {id:'home',label:'返回 DSH',icon:<Icon name="home"/>,active:false,onActivate:()=>service.hide()},
           {id:'settings',label:'打开 DSH 设置',icon:<Icon name="settings"/>,active:settingsOpen,onActivate:()=>openSettings?.()},
-          ...(floating&&onOpenDshPanel?[{id:'plugins',label:'插件',icon:<Icon name="extensions"/>,active:showingDshPanel&&dshTabId==='plugins',onActivate:()=>onOpenDshPanel('plugins')}]:[]),
         ]}
         order={activityOrder} hidden={activityHidden}
         onOrderChange={setActivityOrder} onHiddenChange={setActivityHidden}/>

@@ -6,9 +6,11 @@ import { join } from 'node:path'
 import { expect, it } from 'vitest'
 import { createDebugSession, debugpyAdapter, type DebugIncoming, type DebugOutgoing } from '../src/debug.ts'
 
+// Real adapters are not installed on CI runners; opt in with DSH_DEBUG_TESTS=1.
+const adaptersEnabled = process.env.DSH_DEBUG_TESTS === '1'
 const adaptersRoot = process.env.DSH_WORKBENCH_ADAPTERS ?? join(homedir(), '.dsh', 'workbench-adapters')
 
-it('runs a Python program through the generic DAP bridge and stops on a breakpoint', async () => {
+it.skipIf(!adaptersEnabled)('runs a Python program through the generic DAP bridge and stops on a breakpoint', async () => {
   if (debugpyAdapter(adaptersRoot) === undefined) {
     // The adapter is optional: a machine without it must not fail the suite.
     return
@@ -52,7 +54,11 @@ it('runs a Python file without a debugger and streams its output', async () => {
   expect(ended).toBe(true)
   expect(events.some(event => event.type === 'output' && event.text.includes('hello from run'))).toBe(true)
 }, 30000)
-it('debugs a compiled C program through GDB DAP', async () => {
+// GDB's DAP mode needs version 13+ and a working toolchain; CI runners have neither reliably, so
+// this runs only when the developer opts in.
+const gdbEnabled = process.env.DSH_DEBUG_TESTS === '1'
+
+it.skipIf(!gdbEnabled)('debugs a compiled C program through GDB DAP', async () => {
   const gdb = process.platform === 'win32' ? 'gdb.exe' : 'gdb'
   const gxx = process.platform === 'win32' ? 'g++.exe' : 'g++'
   const onPath = (name: string) => (process.env.PATH ?? '').split(delimiter).some(dir => { try { return existsSync(join(dir, name)) } catch { return false } })

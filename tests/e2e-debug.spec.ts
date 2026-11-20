@@ -10,6 +10,8 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { DebugController } from '../src/client/debug.ts'
 import { createDebugSession, debugpyAdapter, type DebugIncoming, type DebugOutgoing } from '../src/debug.ts'
 
+// Real adapters are not installed on CI runners; opt in with DSH_DEBUG_TESTS=1.
+const adaptersEnabled = process.env.DSH_DEBUG_TESTS === '1'
 const adaptersRoot = process.env.DSH_WORKBENCH_ADAPTERS ?? join(homedir(), '.dsh', 'workbench-adapters')
 
 /** Minimal stand-in for the browser WebSocket, wired straight into the host session. */
@@ -45,7 +47,7 @@ class LoopbackSocket {
 
 afterEach(() => { vi.restoreAllMocks() })
 
-it('drives a Python breakpoint through the real client controller and the real host', async () => {
+it.skipIf(!adaptersEnabled)('drives a Python breakpoint through the real client controller and the real host', async () => {
   if (debugpyAdapter(adaptersRoot) === undefined) return
 
   const directory = mkdtempSync(join(tmpdir(), 'dvw-e2e-'))

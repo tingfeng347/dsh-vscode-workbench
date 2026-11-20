@@ -507,6 +507,11 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-debug{display:flex;flex-direction:column;height:100%;min-height:0;color:var(--dvw-text);font:12px/1.5 var(--dvw-font,system-ui)}
 .dvw-debug-toolbar{display:flex;align-items:center;gap:4px;padding:4px 8px;border-bottom:1px solid var(--dvw-border-soft)}
 .dvw-debug-toolbar .dvw-icon{width:24px;height:22px;font-size:12px}
+.dvw-status-action{margin-left:8px;height:18px;padding:0 6px;border:1px solid var(--dvw-border-soft);border-radius:3px;background:transparent;color:inherit;font-size:11px;cursor:pointer}
+.dvw-status-action:disabled{opacity:.4;cursor:default}
+.dvw-status-action:hover:not(:disabled){background:var(--dvw-hover)}
+.dvw-debug-primary{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 8px;margin-right:2px;border:1px solid var(--dvw-border-soft);border-radius:4px;background:var(--dvw-accent);color:#fff;font-size:11px;cursor:pointer}
+.dvw-debug-primary:disabled{opacity:.45;cursor:default}
 .dvw-debug-state{color:var(--dvw-text-2);margin-left:4px}
 .dvw-debug-select{margin-left:8px;background:transparent;color:inherit;border:1px solid var(--dvw-border-soft);border-radius:4px;font-size:11px;padding:1px 4px}
 .dvw-debug-spacer{flex:1}
@@ -543,8 +548,10 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-debug-prompt input{width:100%;background:transparent;border:1px solid var(--dvw-border-soft);border-radius:3px;color:inherit;padding:2px 6px;font-family:var(--dvw-mono,monospace);font-size:11px}
 .dvw-debug-foot{display:flex;gap:6px;align-items:center;padding:4px 8px;border-top:1px solid var(--dvw-border-soft)}
 .dvw-debug-foot input{flex:1;background:transparent;border:1px solid var(--dvw-border-soft);border-radius:3px;color:inherit;padding:2px 6px;font-size:11px}
-.dvw-debug-breakpoint::before{content:'';display:block;width:8px;height:8px;border-radius:50%;background:#cd4c46;margin-left:1px}
-.dvw-debug-paused-arrow::before{content:'▶';color:#e0a020;font-size:9px}
+.dvw-debug-breakpoint{position:relative}
+.dvw-debug-breakpoint::before{content:'';position:absolute;left:1px;top:50%;width:8px;height:8px;margin-top:-4px;border-radius:50%;background:#cd4c46}
+.dvw-debug-paused-arrow{position:relative}
+.dvw-debug-paused-arrow::before{content:'▶';position:absolute;left:0;top:50%;transform:translateY(-50%);color:#e0a020;font-size:9px;line-height:1}
 .dvw-debug-paused-line{background:color-mix(in srgb,var(--dvw-accent) 14%,transparent)}
 `
 

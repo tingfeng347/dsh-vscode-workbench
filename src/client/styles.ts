@@ -504,6 +504,48 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-preview ins{text-decoration:none;background:color-mix(in srgb,var(--dvw-success) 30%,transparent)}
 .dvw-search .dvw-result-action{opacity:0;width:20px;height:20px}
 .dvw-search-result-row:is(:hover,:focus-within) .dvw-result-action{opacity:1}
+.dvw-debug{display:flex;flex-direction:column;height:100%;min-height:0;color:var(--dvw-text);font:12px/1.5 var(--dvw-font,system-ui)}
+.dvw-debug-toolbar{display:flex;align-items:center;gap:4px;padding:4px 8px;border-bottom:1px solid var(--dvw-border-soft)}
+.dvw-debug-toolbar .dvw-icon{width:24px;height:22px;font-size:12px}
+.dvw-debug-state{color:var(--dvw-text-2);margin-left:4px}
+.dvw-debug-select{margin-left:8px;background:transparent;color:inherit;border:1px solid var(--dvw-border-soft);border-radius:4px;font-size:11px;padding:1px 4px}
+.dvw-debug-spacer{flex:1}
+.dvw-debug-hint{color:var(--dvw-text-3);font-size:11px}
+.dvw-debug-body{display:flex;flex:1;min-height:0}
+.dvw-debug-column{display:flex;flex-direction:column;min-width:0;flex:1;border-right:1px solid var(--dvw-border-soft)}
+.dvw-debug-column:last-child{border-right:0}
+.dvw-debug-vars{flex:1.1}
+.dvw-debug-console{flex:1.2}
+.dvw-debug-head{display:flex;align-items:center;justify-content:space-between;padding:3px 8px;color:var(--dvw-text-2);border-bottom:1px solid var(--dvw-border-soft);font-size:11px}
+.dvw-debug-list{flex:1;min-height:0;overflow:auto;padding:4px 0}
+.dvw-debug-empty{color:var(--dvw-text-3);padding:8px;font-size:11px}
+.dvw-debug-frame{display:flex;gap:8px;width:100%;background:transparent;border:0;color:inherit;text-align:left;padding:2px 8px;cursor:pointer}
+.dvw-debug-frame:hover{background:var(--dvw-hover)}
+.dvw-debug-frame[data-active]{background:var(--dvw-active)}
+.dvw-debug-frame-name{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dvw-debug-frame-where{color:var(--dvw-text-3);font-size:11px}
+.dvw-debug-scope-head{display:block;width:100%;text-align:left;background:transparent;border:0;color:var(--dvw-text-2);padding:2px 8px;cursor:pointer}
+.dvw-debug-scope-head[data-open]::before{content:'▾ '}
+.dvw-debug-scope-head:not([data-open])::before{content:'▸ '}
+.dvw-debug-var{display:flex;gap:6px;align-items:baseline;padding:1px 8px}
+.dvw-debug-var:hover{background:var(--dvw-hover)}
+.dvw-debug-expand{width:12px;background:transparent;border:0;color:var(--dvw-text-3);cursor:pointer;padding:0;font-size:10px}
+.dvw-debug-var-name{color:var(--dvw-text-2)}
+.dvw-debug-var-value{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--dvw-text)}
+.dvw-debug-var-type{color:var(--dvw-text-3);font-size:10px}
+.dvw-debug-watch{display:flex;gap:4px;padding:2px 8px}
+.dvw-debug-watch input{flex:1;min-width:0;background:transparent;border:1px solid var(--dvw-border-soft);border-radius:3px;color:inherit;padding:1px 4px;font-size:11px}
+.dvw-debug-log{font-family:var(--dvw-mono,monospace);font-size:11px}
+.dvw-debug-line{padding:1px 8px;white-space:pre-wrap;word-break:break-word}
+.dvw-debug-line[data-kind=input]{color:var(--dvw-text-2)}
+.dvw-debug-line[data-kind=error]{color:#cd4c46}
+.dvw-debug-prompt{padding:4px 8px;border-top:1px solid var(--dvw-border-soft)}
+.dvw-debug-prompt input{width:100%;background:transparent;border:1px solid var(--dvw-border-soft);border-radius:3px;color:inherit;padding:2px 6px;font-family:var(--dvw-mono,monospace);font-size:11px}
+.dvw-debug-foot{display:flex;gap:6px;align-items:center;padding:4px 8px;border-top:1px solid var(--dvw-border-soft)}
+.dvw-debug-foot input{flex:1;background:transparent;border:1px solid var(--dvw-border-soft);border-radius:3px;color:inherit;padding:2px 6px;font-size:11px}
+.dvw-debug-breakpoint::before{content:'';display:block;width:8px;height:8px;border-radius:50%;background:#cd4c46;margin-left:1px}
+.dvw-debug-paused-arrow::before{content:'▶';color:#e0a020;font-size:9px}
+.dvw-debug-paused-line{background:color-mix(in srgb,var(--dvw-accent) 14%,transparent)}
 `
 
 export function installStyles(): () => void {

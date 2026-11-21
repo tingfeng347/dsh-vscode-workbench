@@ -1,4 +1,5 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it, vi } from 'vitest'
@@ -51,7 +52,8 @@ function reply(message) {
   } finally {
     session.dispose()
     vi.unstubAllEnvs()
-    rmSync(directory, { recursive: true, force: true })
+    // On Windows the adapter's working directory remains locked until taskkill completes.
+    await rm(directory, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 })
   }
 }, 25_000)
 

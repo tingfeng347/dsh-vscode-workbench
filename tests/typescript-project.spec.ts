@@ -14,6 +14,8 @@ describe('TypeScript project models', () => {
     expect(workspacePathFromModel('D:\\code\\repo', 'file:///d%3A/code/repo/src/%E6%96%87.ts')).toBe('src/文.ts')
     expect(workspacePathFromModel('/Users/me/repo', 'file:///Users/me/other/a.ts')).toBeUndefined()
     expect(workspacePathFromModel('/Users/me/repo', 'file:///node_modules/@types/node/index.d.ts')).toBeUndefined()
+    expect(workspacePathFromModel('/Users/me/repo', projectModelPath('/Users/me/repo', '名#%?.ts'))).toBe('名#%?.ts')
+    expect(workspacePathFromModel('/Users/me/repo', 'file:///Users/me/Repo/a.ts')).toBeUndefined()
   })
 
   it('does not create models from a response that arrives after disposal', async () => {

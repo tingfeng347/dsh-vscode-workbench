@@ -4,6 +4,7 @@ import { GitTools, type GitToolsSelection } from './GitTools.tsx'
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import type { CSSProperties, DragEvent, KeyboardEvent as ReactKeyboardEvent, MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from 'react'
 import { createPortal } from 'react-dom'
+import type { CancellationToken, languages, Uri } from 'monaco-editor'
 import type { FileDocument, FileEntry, GitBranch, GitChange, GitCommit, GitCommitFile, GitDiff, GitStatus } from '../types.ts'
 import { ApiError, api, readApiResponse } from './api.ts'
 import { AiReviewController, latestReviewFollowChange, locateReviewChange, type AiReviewSnapshot, type ReviewChange, type ReviewMode } from './aiReview.ts'
@@ -30,8 +31,10 @@ import { ActivityBar, normalizeActivityLayout, normalizeActivityOrder, type Acti
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.tsx'
 import { CenteredOpenWith, openExternal } from './OpenWith.tsx'
 import type { DshNavigation, WorkspaceChoice } from './dshNavigation.ts'
-import { LspManager, type LspServerStatus } from './lsp.ts'
-import { TS_INTELLISENSE_KEY, disposeTypeScriptProject, indexTypeScriptProject, refreshIndexedFiles, tsIntellisenseEnabled, typeScriptProjectStatus, workspacePathFromModel } from './typescriptProject.ts'
+import { languageServerIdForPath, LspManager, type LspRuntimeStatus, type LspServerStatus, type RenamePreviewFile } from './lsp.ts'
+import { LspWorkspaceDocuments } from './lspWorkspace.ts'
+import { ProblemsPanel, type Problem } from './ProblemsPanel.tsx'
+import { TS_INTELLISENSE_KEY, disposeTypeScriptProject, indexTypeScriptProject, refreshIndexedFiles, tsIntellisenseEnabled, typeScriptProjectStatus, projectModelPath, workspacePathFromModel } from './typescriptProject.ts'
 import { ADD_TO_DSH_SHORTCUT, dshReference, insertIntoDshComposer, isAddToDshShortcut } from './dshComposer.ts'
 import { DocumentPreview, documentPreviewKind, type DocumentPreviewKind } from './documentPreview.tsx'
 import { toggleTerminal } from './shortcuts.ts'
@@ -43,7 +46,7 @@ import { applyFloatGesture, clampFloatRect, defaultFloatRect, FLOAT_BAR_HEIGHT, 
 import type { CommitDetail, CommitLanguage, CommitMessagePreferences, CommitModelCatalog, CommitModelOption, CommitModelSelection } from '../commit-message.ts'
 import { outermostTreeEntries, remapTreeSelectionPaths, selectAllTreePaths, selectTreePath, type TreeSelection } from './treeSelection.ts'
 
-interface Tab extends FileDocument { instance?: symbol; dirty: boolean; draft: string; loaded?: boolean; line?: number; column?: number; highlight?: string; focusOnReveal?: boolean; external?: boolean; preview?: boolean; title?: string; diff?: GitDiff; diffSourcePath?:string; imageUrl?:string; documentPreview?:DocumentPreviewKind; documentUrl?:string }
+interface Tab extends FileDocument { referenceUri?: string; instance?: symbol; dirty: boolean; draft: string; loaded?: boolean; line?: number; column?: number; highlight?: string; focusOnReveal?: boolean; external?: boolean; preview?: boolean; title?: string; diff?: GitDiff; diffSourcePath?:string; imageUrl?:string; documentPreview?:DocumentPreviewKind; documentUrl?:string }
 type GitDiffMode = 'inline' | 'split'
 const GIT_DIFF_MODE_KEY = 'dvw:git-diff-mode'
 type WorkbenchTheme = 'dsh' | 'dark' | 'light' | 'white' | 'eyecare'
@@ -70,6 +73,7 @@ interface TreeProps {
   onDelete(entries: readonly FileEntry[]): void
   onRenamed(oldPath: string, nextPath: string): void
   onOpen(path: string): void
+  onOpenSource(path: string): void
   onChange(): void
   onUpload(directory: string, files: FileList): void
   onAddToDsh(path: string, directory: boolean, selection?: readonly string[]): void
@@ -421,7 +425,7 @@ function visibleTreeEntries(tree: Element | null | undefined): FileEntry[] {
   })
 }
 
-function Tree({ sessionId, root, path, depth, expanded, selected, selectedPaths, selectedEntries, statuses, onToggle, onSelect, onContextSelect, onDelete, onRenamed, onOpen, onChange, onUpload, onAddToDsh, creating, onCreatingChange, onCreatingCancel, onCreatingSubmit }: TreeProps & { creating?: CreatingEntry; onCreatingChange(value: string): void; onCreatingCancel(): void; onCreatingSubmit(): void }) {
+function Tree({ sessionId, root, path, depth, expanded, selected, selectedPaths, selectedEntries, statuses, onToggle, onSelect, onContextSelect, onDelete, onRenamed, onOpen, onOpenSource, onChange, onUpload, onAddToDsh, creating, onCreatingChange, onCreatingCancel, onCreatingSubmit }: TreeProps & { creating?: CreatingEntry; onCreatingChange(value: string): void; onCreatingCancel(): void; onCreatingSubmit(): void }) {
   const [rows, setRows] = useState<FileEntry[]>([]); const [error, setError] = useState<string>(); const [dropTarget, setDropTarget] = useState(false); const [context, setContext] = useState<{ entry: FileEntry; x: number; y: number }>(); const [renaming, setRenaming] = useState<{ path: string; value: string }>()
   const listing = useRef<AbortController>()
   const load = useCallback(() => {
@@ -452,7 +456,7 @@ function Tree({ sessionId, root, path, depth, expanded, selected, selectedPaths,
     <div className="dvw-tree-row" role="treeitem" aria-selected={selectedPaths.size > 0 ? selectedPaths.has(row.path) : selected === row.path} data-tree-path={row.path} data-tree-kind={row.kind} data-tree-name={row.name} data-dvw-upload-directory={row.kind === 'directory' ? row.path : undefined} data-selected={(selectedPaths.size > 0 ? selectedPaths.has(row.path) : selected === row.path) || undefined} data-drop-target={dropTarget && row.kind === 'directory'} style={{ paddingLeft: 6 + depth * 13 }} onClick={event => onSelect(row, event)} onContextMenu={(event) => { event.preventDefault(); onContextSelect(row, event); setContext({ entry: row, x: event.clientX, y: event.clientY }) }} draggable={renaming?.path !== row.path} onDragStart={event => startEntryDrag(event, sessionId, row)} onDragEnd={endEntryDrag} onDragEnter={event => { if (entryDragOver(event, entryDirectory(row), entryTarget(event, row), row.kind === 'directory' && !expanded.has(row.path) ? () => onToggle(row.path) : undefined)) return; if (row.kind === 'directory' && event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); setDropTarget(true) } }} onDragOver={event => { if (entryDragOver(event, entryDirectory(row), entryTarget(event, row))) return; if (row.kind === 'directory' && event.dataTransfer.types.includes('Files')) { event.preventDefault(); event.stopPropagation(); setDropTarget(true) } }} onDragLeave={() => setDropTarget(false)} onDrop={event => { if (draggedEntry !== undefined) { void dropEntry(event, sessionId, entryDirectory(row)); return } if (row.kind === 'directory') drop(event, row.path) }}>
       <span className="dvw-chevron">{row.kind === 'directory' && <Icon name={expanded.has(row.path) ? 'chevron-down' : 'chevron-right'}/>}</span><FileIcon name={row.name} directory={row.kind === 'directory'} expanded={expanded.has(row.path)}/>{renaming?.path === row.path ? <input className="dvw-tree-rename" value={renaming.value} autoFocus onClick={event => event.stopPropagation()} onChange={event => setRenaming({ path: row.path, value: event.target.value })} onKeyDown={event => { if (event.key === 'Enter') void rename(row); if (event.key === 'Escape') setRenaming(undefined) }} onBlur={() => setRenaming(undefined)}/> : <span className="dvw-tree-name">{row.name}</span>}{row.kind === 'file' && statuses.has(row.path) && <span className="dvw-tree-status" data-status={statuses.get(row.path)}>{statuses.get(row.path)}</span>}
     </div>
-    {row.kind === 'directory' && expanded.has(row.path) && <Tree {...{ sessionId, root, path: row.path, depth: depth + 1, expanded, selected, selectedPaths, selectedEntries, statuses, onToggle, onSelect, onContextSelect, onDelete, onRenamed, onOpen, onChange, onUpload, onAddToDsh, creating, onCreatingChange, onCreatingCancel, onCreatingSubmit }} />}
+    {row.kind === 'directory' && expanded.has(row.path) && <Tree {...{ sessionId, root, path: row.path, depth: depth + 1, expanded, selected, selectedPaths, selectedEntries, statuses, onToggle, onSelect, onContextSelect, onDelete, onRenamed, onOpen, onOpenSource, onChange, onUpload, onAddToDsh, creating, onCreatingChange, onCreatingCancel, onCreatingSubmit }} />}
   </div>)}{context && (() => {
     const selectedForContext = selectedPaths.has(context.entry.path)
     const paths = selectedForContext && selectedPaths.size > 0 ? [...selectedPaths] : [context.entry.path]
@@ -461,6 +465,10 @@ function Tree({ sessionId, root, path, depth, expanded, selected, selectedPaths,
       {single && <button role="menuitem" onClick={() => { onAddToDsh(context.entry.path, context.entry.kind === 'directory'); setContext(undefined) }}><DshMark size={14}/>添加到 DSH 对话<kbd>{ADD_TO_DSH_SHORTCUT}</kbd></button>}
       <button role="menuitem" onClick={() => { void copyText(paths.join('\n')); setContext(undefined) }}><Icon name="copy"/>复制{single ? '相对路径' : ` ${paths.length} 个相对路径`}</button>
       <button role="menuitem" onClick={() => { void copyText(paths.map(path => absoluteEntryPath(root, path)).join('\n')); setContext(undefined) }}><Icon name="copy"/>复制{single ? '绝对路径' : ` ${paths.length} 个绝对路径`}</button>
+      {single && context.entry.kind === 'file' && /\.html?$/i.test(context.entry.path) && <button role="menuitem" onClick={() => {
+        onOpenSource(context.entry.path)
+        setContext(undefined)
+      }}><Icon name="code"/>打开 HTML 源码</button>}
       {single && <button role="menuitem" onClick={() => { void openExternal(sessionId, context.entry.path).catch(error => alert(error instanceof Error ? error.message : String(error))); setContext(undefined) }}><Icon name="link-external"/>用默认应用打开</button>}
       {single && <button role="menuitem" onClick={() => { void openExternal(sessionId, context.entry.path, { reveal: true }).catch(error => alert(error instanceof Error ? error.message : String(error))); setContext(undefined) }}><Icon name="folder-opened"/>显示文件位置</button>}
       {single && <button role="menuitem" onClick={() => { setRenaming({ path: context.entry.path, value: context.entry.name }); setContext(undefined) }}><Icon name="edit"/>重命名</button>}
@@ -469,7 +477,7 @@ function Tree({ sessionId, root, path, depth, expanded, selected, selectedPaths,
   })()}</>
 }
 
-function Explorer(props: { sessionId: string; cwd?: string; selected?: string; onOpen(path: string): void; onAddToDsh(path: string, directory: boolean): void }) {
+function Explorer(props: { sessionId: string; cwd?: string; selected?: string; onOpen(path: string): void; onOpenSource(path: string): void; onAddToDsh(path: string, directory: boolean): void }) {
   // The row the user last clicked, which the Explorer shortcut adds to the DSH chat.
   const lastEntry = useRef<{ path: string; directory: boolean }>()
   const [expanded, setExpanded] = useState<Set<string>>(new Set()); const [statuses, setStatuses] = useState<Map<string, string>>(new Map()); const [dropTarget, setDropTarget] = useState(false); const [selectedDirectory, setSelectedDirectory] = useState(''); const [creating, setCreating] = useState<CreatingEntry>(); const picker = useRef<HTMLInputElement>(null)
@@ -724,7 +732,7 @@ function Explorer(props: { sessionId: string; cwd?: string; selected?: string; o
   return <>
     <div className="dvw-side-head">资源管理器<div className="dvw-toolbar"><input ref={picker} className="dvw-file-picker" type="file" accept="*/*" multiple onChange={event => { if (event.currentTarget.files) void upload(destination, event.currentTarget.files); event.currentTarget.value = '' }}/><button className="dvw-icon" title={`上传文件到 ${destination || '工作区根目录'}`} onClick={() => picker.current?.click()}><Icon name="cloud-upload"/></button><button className="dvw-icon" title="新建文件" onClick={() => startCreating('file')}><Icon name="new-file"/></button><button className="dvw-icon" title="新建文件夹" onClick={() => startCreating('directory')}><Icon name="new-folder"/></button><button className="dvw-icon" title="刷新" onClick={() => { window.dispatchEvent(new Event('dvw-files-changed')) }}><Icon name="refresh"/></button></div></div>
     <div className="dvw-tree" role="tree" aria-multiselectable="true" tabIndex={0} title="Ctrl/⌘ 点击多选，Shift 点击连续选择" data-dvw-upload-directory="" data-drop-target={dropTarget} onKeyDown={treeKeyDown} onDragEnter={treeDrag} onDragOver={treeDrag} onDragLeave={event => { setDropTarget(false); if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) clearMoveTarget() }} onDrop={event => { if (draggedEntry !== undefined) { void dropEntry(event, props.sessionId, ''); return } drop(event) }}>
-      <Tree sessionId={props.sessionId} root={props.cwd ?? ''} path="" depth={0} expanded={expanded} selected={props.selected} selectedPaths={selection.selected} selectedEntries={selectedEntries} statuses={statuses} onToggle={path => { lastUserToggle.current = Date.now(); setExpanded(current => { const next = new Set(current); next.has(path) ? next.delete(path) : next.add(path); return next }) }} onSelect={selectRow} onContextSelect={contextSelectRow} onDelete={requestDelete} onRenamed={renamedSelection} onOpen={path => { lastEntry.current = { path, directory: false }; props.onOpen(path) }} onAddToDsh={props.onAddToDsh} onChange={() => window.dispatchEvent(new Event('dvw-files-changed'))} onUpload={(directory, files) => void upload(directory, files)} creating={creating} onCreatingChange={value => setCreating(current => current && ({ ...current, value, error: undefined }))} onCreatingCancel={() => setCreating(undefined)} onCreatingSubmit={() => void submitCreating()}/>
+      <Tree sessionId={props.sessionId} root={props.cwd ?? ''} path="" depth={0} expanded={expanded} selected={props.selected} selectedPaths={selection.selected} selectedEntries={selectedEntries} statuses={statuses} onToggle={path => { lastUserToggle.current = Date.now(); setExpanded(current => { const next = new Set(current); next.has(path) ? next.delete(path) : next.add(path); return next }) }} onOpenSource={props.onOpenSource} onSelect={selectRow} onContextSelect={contextSelectRow} onDelete={requestDelete} onRenamed={renamedSelection} onOpen={path => { lastEntry.current = { path, directory: false }; props.onOpen(path) }} onAddToDsh={props.onAddToDsh} onChange={() => window.dispatchEvent(new Event('dvw-files-changed'))} onUpload={(directory, files) => void upload(directory, files)} creating={creating} onCreatingChange={value => setCreating(current => current && ({ ...current, value, error: undefined }))} onCreatingCancel={() => setCreating(undefined)} onCreatingSubmit={() => void submitCreating()}/>
     </div>
     {pendingDelete !== undefined && <div className="dvw-confirm-backdrop" role="presentation"><section className="dvw-confirm" role="alertdialog" aria-modal="true" aria-labelledby="dvw-delete-title" aria-describedby="dvw-delete-message"><h2 id="dvw-delete-title">删除{pendingDelete.length > 1 ? ` ${pendingDelete.length} 个项目` : pendingDelete[0]?.kind === 'directory' ? '文件夹' : '文件'}</h2><p id="dvw-delete-message">{pendingDelete.length === 1 ? `是否删除“${pendingDelete[0]?.name}”？` : `是否删除已选择的 ${pendingDelete.length} 个项目？`}</p><p className="dvw-confirm-note">此操作无法撤销。</p><footer><button autoFocus onClick={() => setPendingDelete(undefined)}>取消</button><button className="dvw-danger-button" onClick={() => void remove()}>删除</button></footer></section></div>}
   </>
@@ -757,6 +765,20 @@ function gitStatusCode(change: GitChange): string {
 
 function MarkdownOutline({headings,onClose,onHeading}:{headings:MarkdownHeading[];onClose():void;onHeading(index:number):void}) {
   return <aside className="dvw-outline dvw-editor-outline"><div className="dvw-outline-head"><span><Icon name="list-tree"/> 大纲</span><button className="dvw-icon" title="关闭大纲" onClick={onClose}><Icon name="close"/></button></div><div className="dvw-outline-list">{headings.map(heading=><button className="dvw-outline-item" key={heading.index} style={{paddingLeft:8+(heading.depth-1)*13}} onClick={()=>onHeading(heading.index)}>{heading.text}</button>)}</div></aside>
+}
+
+function CodeOutline({symbols,onSelect,depth=0}:{
+  symbols:languages.DocumentSymbol[]
+  onSelect(symbol:languages.DocumentSymbol):void
+  depth?:number
+}) {
+  if(symbols.length===0&&depth===0)return <span className="dvw-outline-item">当前文件暂无符号</span>
+  return <>{symbols.map((symbol,index)=><div key={`${symbol.name}:${symbol.selectionRange.startLineNumber}:${index}`}>
+    <button type="button" className="dvw-outline-item" style={{paddingLeft:8+depth*13}} title={symbol.detail||symbol.name} onClick={()=>onSelect(symbol)}>
+      <Icon name="code"/> {symbol.name}
+    </button>
+    {symbol.children!==undefined&&<CodeOutline symbols={symbol.children} onSelect={onSelect} depth={depth+1}/>}
+  </div>)}</>
 }
 
 // Two lane widths per row let each branch turn meet the next row vertically.
@@ -1126,7 +1148,23 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     setPreferredDiffMode(mode)
     try { localStorage.setItem(GIT_DIFF_MODE_KEY, mode) } catch { /* Browser privacy settings may deny storage. */ }
   }
-  const [dshTabActive,setDshTabActive]=useState(hostDshPanelId!==undefined); const [dshTabId,setDshTabId]=useState<string|undefined>(hostDshPanelId); const dshPanelId=dshTabId; const [error,setError]=useState<string>(); const [panelHeight,setPanelHeight]=useState(260); const [sideWidth,setSideWidth]=useState(210); const [primarySideVisible,setPrimarySideVisible]=useState(()=>localStorage.getItem('dvw:primary-side-visible')!=='closed');const [statusVisible,setStatusVisible]=useState(()=>localStorage.getItem('dvw:status-bar-visible')!=='closed');const settingsNode=useSyncExternalStore(settingsHost.subscribe,settingsHost.getSnapshot);const settingsOpen=settingsNode!==undefined;const [chatWidth,setChatWidth]=useState(()=>clampChatWidth(Number(localStorage.getItem('dvw:dsh-chat-width'))||DSH_CHAT_DEFAULT_WIDTH));const [chatVisible,setChatVisible]=useState(()=>localStorage.getItem('dvw:dsh-chat-visible')!=='closed');const [outlineVisible,setOutlineVisible]=useState(()=>localStorage.getItem('dvw:outline')!=='closed');const [tsIntellisense,setTsIntellisense]=useState(tsIntellisenseEnabled);const [tsIndex,setTsIndex]=useState<{state:'idle'|'loading'|'ready'|'error';files?:number;truncated?:boolean;error?:string}>({state:'idle'});const [lspServers,setLspServers]=useState<LspServerStatus[]>([]);const [lspBusy,setLspBusy]=useState<string>();const [lspError,setLspError]=useState('');const lspManager=useRef<LspManager>();const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localStorage.getItem('dvw:font-size')));return Number.isFinite(saved)&&saved>=11&&saved<=20?saved:14});const [tabMenu,setTabMenu]=useState<{x:number;y:number;path:string}>()
+  const [dshTabActive,setDshTabActive]=useState(hostDshPanelId!==undefined); const [dshTabId,setDshTabId]=useState<string|undefined>(hostDshPanelId); const dshPanelId=dshTabId; const [error,setError]=useState<string>(); const [panelHeight,setPanelHeight]=useState(260); const [sideWidth,setSideWidth]=useState(210); const [primarySideVisible,setPrimarySideVisible]=useState(()=>localStorage.getItem('dvw:primary-side-visible')!=='closed');const [statusVisible,setStatusVisible]=useState(()=>localStorage.getItem('dvw:status-bar-visible')!=='closed');const settingsNode=useSyncExternalStore(settingsHost.subscribe,settingsHost.getSnapshot);const settingsOpen=settingsNode!==undefined;const [chatWidth,setChatWidth]=useState(()=>clampChatWidth(Number(localStorage.getItem('dvw:dsh-chat-width'))||DSH_CHAT_DEFAULT_WIDTH));const [chatVisible,setChatVisible]=useState(()=>localStorage.getItem('dvw:dsh-chat-visible')!=='closed');const [outlineVisible,setOutlineVisible]=useState(()=>localStorage.getItem('dvw:outline')!=='closed');const [tsIntellisense,setTsIntellisense]=useState(tsIntellisenseEnabled);const [tsIndex,setTsIndex]=useState<{state:'idle'|'loading'|'ready'|'error';files?:number;truncated?:boolean;error?:string}>({state:'idle'});const [lspServers,setLspServers]=useState<LspServerStatus[]>([]);const [lspBusy,setLspBusy]=useState<string>();const [lspError,setLspError]=useState('');const lspManager=useRef<LspManager>();const lspDocuments=useRef<LspWorkspaceDocuments>()
+  const [lspRuntime,setLspRuntime]=useState<Record<string,LspRuntimeStatus|undefined>>({})
+  const [lspDiagnostics,setLspDiagnostics]=useState<Record<string,Problem[]>>({})
+  const [builtinProblems,setBuiltinProblems]=useState<Problem[]>([])
+  const [codeOutlineOpen,setCodeOutlineOpen]=useState(false)
+  const [codeOutline,setCodeOutline]=useState<{path:string;symbols:languages.DocumentSymbol[]}>()
+  const [pythonPath,setPythonPath]=useState('')
+  const lspScope=useRef<{sessionId?:string;pythonPath:string}>({pythonPath:''})
+  const lspRefresh=useRef(0)
+  const lspMounted=useRef(true)
+  const installedTypeScript=lspServers.some(server=>server.id==='typescript'&&server.installed)
+  const [renamePreview,setRenamePreview]=useState<RenamePreviewFile[]>()
+  const renameDecision=useRef<(apply:boolean)=>void>()
+  const [pendingReference,setPendingReference]=useState<{resource:Uri;line?:number;column?:number}>()
+  const problems=useMemo(()=>[...Object.values(lspDiagnostics).flat(),...builtinProblems],[lspDiagnostics,builtinProblems])
+  lspScope.current={sessionId,pythonPath:pythonPath||lspServers.find(server=>server.id==='python')?.pythonPath||''}
+const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localStorage.getItem('dvw:font-size')));return Number.isFinite(saved)&&saved>=11&&saved<=20?saved:14});const [tabMenu,setTabMenu]=useState<{x:number;y:number;path:string}>()
   const [minimap,setMinimap]=useState(()=>storedValue('dvw:editor-minimap')!=='off')
   const [browserSnapshot,setBrowserSnapshot]=useState<BrowserSnapshot>(()=>browser?.getSnapshot()??{available:false,tabs:[]})
   const [browserId,setBrowserId]=useState<string>()
@@ -1449,7 +1487,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const addEntryToDsh=useCallback((path:string,directory:boolean)=>addToDsh(dshReference(path,{directory})),[addToDsh])
   const openForWorkspace=(path:string,line?:number,column?:number,highlight?:string,focusOnReveal=true)=>{
     // HTML is a page, not source: hand it to the configured browser so its assets resolve.
-    if(!path.startsWith('diff:')&&/\.html?$/i.test(path)){void openSiteFile(path);return}
+    if(line===undefined&&!path.startsWith('diff:')&&/\.html?$/i.test(path)){void openSiteFile(path);return}
     const existing=tabsRef.current.find(tab=>tab.path===path);if(existing)setTabs(rows=>rows.map(tab=>tab.path===path?{...tab,line,column,highlight,focusOnReveal,preview:line!==undefined?false:tab.preview}:tab));else setTabs(rows=>[...rows,{...unloadedTab(path),line,column,highlight,focusOnReveal,...(line!==undefined?{preview:false}:{})}]);leaveDshPanel();setActive(path)}
   useEffect(() => {
     if (sessionId === undefined) return
@@ -1522,14 +1560,26 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const persist = () => {
       persistWorkspace.current = undefined
       try {
-        localStorage.setItem(`dvw:${workspace.cwd}`, JSON.stringify({ view: snapshot.view, paths: tabs.filter(t => !t.path.startsWith('diff:')).map(t => t.path), active, panelHeight, sideWidth, layout, groups: groups.map(group => ({ id: group.id, paths: group.tabs.filter(t => !t.path.startsWith('diff:')).map(t => t.path), active: group.active })) }))
-        localStorage.setItem(`dvw:drafts:${sessionId}:${workspace.cwd}`, JSON.stringify(tabs.filter(tab => tab.dirty).map(({ path, content, draft, revision }) => ({ path, content, draft, revision }))))
+        const savedGroups = groups.map(group => {
+          const paths = group.tabs.filter(tab => tab.referenceUri === undefined && !tab.path.startsWith('diff:')).map(tab => tab.path)
+          const referenceActive = group.tabs.some(tab => tab.path === group.active && tab.referenceUri !== undefined)
+          return { id: group.id, paths, active: referenceActive ? paths.at(-1) : group.active }
+        })
+        const savedActive = savedGroups.find(group => group.id === focusedId)
+        localStorage.setItem(`dvw:${workspace.cwd}`, JSON.stringify({
+          view: snapshot.view, paths: savedActive?.paths ?? [], active: savedActive?.active,
+          panelHeight, sideWidth, layout, groups: savedGroups,
+        }))
+        const drafts = new Map(groups.flatMap(group => group.tabs).filter(tab => tab.dirty).map(tab => [tab.path, tab]))
+        localStorage.setItem(`dvw:drafts:${sessionId}:${workspace.cwd}`, JSON.stringify(
+          [...drafts.values()].map(({ path, content, draft, revision }) => ({ path, content, draft, revision })),
+        ))
       } catch { setError('无法保存工作区草稿，请在离开页面前保存文件。') }
     }
     persistWorkspace.current = persist
     const timer = setTimeout(persist, 300)
     return () => clearTimeout(timer)
-  }, [workspace, sessionId, snapshot.view, tabs, active, panelHeight, sideWidth, layout, groups])
+  }, [workspace, sessionId, snapshot.view, focusedId, panelHeight, sideWidth, layout, groups])
   useEffect(() => {
     const flush = () => persistWorkspace.current?.()
     window.addEventListener('pagehide', flush)
@@ -1541,11 +1591,11 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const handle = requestIdleCallback(preloadMonaco, { timeout: 2000 })
     return () => cancelIdleCallback(handle)
   }, [snapshot.visible])
-  const openTabPaths = groups.flatMap(group => group.tabs).filter(tab => !tab.path.startsWith('diff:')).map(tab => tab.path).join('\0')
+  const openTabPaths = workspace === undefined ? '' : groups.flatMap(group => group.tabs).filter(tab => !tab.path.startsWith('diff:')).map(tab => tab.referenceUri ?? projectModelPath(workspace.cwd,tab.path)).join('\0')
   // Watch the files the user opened, even when their directory is collapsed.
   useEffect(() => { window.dispatchEvent(new CustomEvent('dvw-watch-tabs')) }, [openTabPaths])
   useEffect(() => {
-    if (workspace !== undefined) retainEditorModels(openTabPaths === '' ? [] : openTabPaths.split('\0').map(path => `${workspace.cwd}/${path}`))
+    if (workspace !== undefined) retainEditorModels(openTabPaths === '' ? [] : openTabPaths.split('\0'))
   }, [workspace, openTabPaths])
   const loadTab = useCallback((path: string, groupId = focusedRef.current) => {
     if (sessionId === undefined) return
@@ -1576,7 +1626,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const refreshChangedTabs = useCallback((paths?: string[]) => {
     window.dispatchEvent(new CustomEvent('dvw-files-changed', { detail: paths }))
     for (const group of groupsRef.current) for (const tab of group.tabs) {
-      if (tab.path.startsWith('diff:') || tab.loaded === false) continue
+      if (tab.referenceUri!==undefined || tab.path.startsWith('diff:') || tab.loaded === false) continue
       if (paths === undefined || paths.some(path => tab.path === path || tab.path.startsWith(`${path}/`))) loadTab(tab.path, group.id)
     }
   }, [loadTab])
@@ -1661,6 +1711,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   // Stable handlers let the memoised side views skip re-rendering while the editor types.
   const openRef=useRef(open);openRef.current=open
   const openPath=useCallback((path:string,line?:number,column?:number,highlight?:string,focusOnReveal=true)=>openRef.current(path,line,column,highlight,focusOnReveal),[])
+  const openSourceFromView=useCallback((path:string)=>openPath(path,1,1),[openPath])
   const [switcherOpen,setSwitcherOpen]=useState(false);const [switcherChoices,setSwitcherChoices]=useState<WorkspaceChoice[]>([]);const [switcherBusy,setSwitcherBusy]=useState(false);const [switcherError,setSwitcherError]=useState<string>()
   const openSwitcher=useCallback(()=>{setSwitcherError(undefined);setSwitcherChoices(navigation?.choices(sessionId)??[]);setSwitcherOpen(true)},[navigation,sessionId])
   const showConversationAfterSwitch=useCallback(()=>{setSwitcherOpen(false);setDshTabActive(false);setChatVisible(true)},[])
@@ -1688,21 +1739,128 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     }catch(error){setSwitcherError(error instanceof Error?error.message:String(error))}
     finally{setSwitcherBusy(false)}
   },[navigation,sessionId])
-  const startLsp=useCallback(async(list:LspServerStatus[])=>{
-    if(!snapshot.visible||sessionId===undefined||workspace===undefined)return
-    if(!list.some(server=>server.installed)){lspManager.current?.dispose();lspManager.current=undefined;return}
-    const monaco=await loadMonaco()
-    lspManager.current??=new LspManager(monaco,sessionId,workspace.cwd)
-    setLspError((await lspManager.current.sync(list)).join('\n'))
-  },[snapshot.visible,sessionId,workspace])
-  const refreshLsp=useCallback(async()=>{if(sessionId===undefined)return;try{const list=await api<LspServerStatus[]>('lsp.status',{sessionId});setLspServers(list);await startLsp(list)}catch(error){setLspError(error instanceof Error?error.message:String(error))}},[sessionId,startLsp])
-  const changeLsp=useCallback(async(id:string,action:'install'|'uninstall')=>{if(sessionId===undefined)return;setLspBusy(id);setLspError('');try{const list=await api<LspServerStatus[]>(`lsp.${action}`,{sessionId,id});setLspServers(list);await startLsp(list)}catch(error){setLspError(error instanceof Error?error.message:String(error))}finally{setLspBusy(undefined)}},[sessionId,startLsp])
-  // The settings page is rendered through a portal from this tree; keep its callbacks referentially stable
-  // so its mount effect re-probes the machine once instead of on every render.
+  const workspaceRoot = workspace?.cwd
+  useEffect(()=>{
+    if(workspaceRoot===undefined)return
+    try{setPythonPath(localStorage.getItem(`dvw:python:${workspaceRoot}`)??'')}catch{}
+  },[workspaceRoot])
+  const changePythonPath=useCallback((value:string)=>{
+    if(workspaceRoot===undefined)return
+    const next=value.trim()
+    setPythonPath(next)
+    try{localStorage.setItem(`dvw:python:${workspaceRoot}`,next)}catch{}
+  },[workspaceRoot])
+  const effectivePythonPath=lspScope.current.pythonPath
+  useEffect(()=>{lspManager.current?.restart('python')},[effectivePythonPath])
+
+  const refreshLsp=useCallback(async()=>{
+    if(sessionId===undefined)return
+    const revision=++lspRefresh.current
+    try{
+      const list=await api<LspServerStatus[]>('lsp.status',{sessionId})
+      if(lspMounted.current&&revision===lspRefresh.current){setLspServers(list);setLspError('')}
+    }catch(error){if(lspMounted.current&&revision===lspRefresh.current)setLspError(String(error))}
+  },[sessionId])
+  const changeLsp=useCallback(async(id:string,action:'install'|'uninstall')=>{
+    if(sessionId===undefined)return
+    ++lspRefresh.current
+    setLspBusy(id)
+    setLspError('')
+    try{
+      const list=await api<LspServerStatus[]>(`lsp.${action}`,{sessionId,id})
+      if(lspMounted.current){++lspRefresh.current;setLspServers(list)}
+    }catch(error){if(lspMounted.current)setLspError(error instanceof Error?error.message:String(error))}
+    finally{if(lspMounted.current)setLspBusy(undefined)}
+  },[sessionId])
   const refreshLspAction=useCallback(()=>{void refreshLsp()},[refreshLsp])
   const changeLspAction=useCallback((id:string,action:'install'|'uninstall')=>{void changeLsp(id,action)},[changeLsp])
-  useEffect(()=>{if(!snapshot.visible||sessionId===undefined||workspace===undefined)return;void refreshLsp()},[snapshot.visible,sessionId,workspace,refreshLsp])
-  useEffect(()=>()=>{lspManager.current?.dispose()},[])
+  const restartLspAction=useCallback((id:string)=>lspManager.current?.restart(id),[])
+  useEffect(()=>{
+    lspMounted.current=true
+    return()=>{lspMounted.current=false;++lspRefresh.current}
+  },[])
+  useEffect(()=>{if(snapshot.visible&&workspaceRoot!==undefined)void refreshLsp()},[snapshot.visible,workspaceRoot,refreshLsp])
+  useEffect(()=>{
+    if(workspaceRoot===undefined)return
+    return()=>{
+      lspManager.current?.dispose()
+      lspManager.current=undefined
+      lspDocuments.current?.dispose()
+      lspDocuments.current=undefined
+      renameDecision.current?.(false)
+    }
+  },[workspaceRoot])
+  const previewRename=useCallback((files:RenamePreviewFile[],token:CancellationToken):Promise<boolean>=>{
+    if(token.isCancellationRequested||!lspMounted.current)return Promise.resolve(false)
+    renameDecision.current?.(false)
+    return new Promise(resolve=>{
+      let cancellation:{dispose():void}|undefined
+      const finish=(apply:boolean)=>{
+        cancellation?.dispose()
+        renameDecision.current=undefined
+        if(lspMounted.current)setRenamePreview(undefined)
+        resolve(apply)
+      }
+      renameDecision.current=finish
+      cancellation=token.onCancellationRequested(()=>finish(false))
+      if(renameDecision.current!==finish){cancellation.dispose();return}
+      setRenamePreview(files)
+    })
+  },[])
+  useEffect(()=>{if(!snapshot.visible)renameDecision.current?.(false)},[snapshot.visible])
+  useEffect(()=>{
+    if(sessionId===undefined||workspaceRoot===undefined||(!snapshot.visible&&lspManager.current===undefined))return
+    if(lspManager.current===undefined&&!lspServers.some(server=>server.installed))return
+    let cancelled=false
+    void loadMonaco().then(monaco=>{
+      if(cancelled)return
+      lspDocuments.current??=new LspWorkspaceDocuments(
+        monaco,workspaceRoot,()=>lspScope.current.sessionId,
+        path=>groupsRef.current.flatMap(group=>group.tabs).find(tab=>tab.path===path&&tab.loaded!==false),
+        (doc,draft)=>setGroups(current=>{
+          let found=false
+          const next=current.map(group=>({...group,tabs:group.tabs.map(tab=>{
+            if(tab.path!==doc.path)return tab
+            found=true
+            return {...tab,draft,dirty:draft!==tab.content}
+          })}))
+          if(found||draft===doc.content)return next
+          return next.map(group=>group.id===focusedRef.current
+            ? {...group,tabs:[...group.tabs,{...doc,instance:Symbol(doc.path),draft,dirty:true,loaded:true}]}
+            : group)
+        }),
+        uri=>groupsRef.current.some(group=>group.tabs.some(tab=>tab.referenceUri===uri||workspacePathFromModel(workspaceRoot,uri)===tab.path)),
+      )
+      const documents=lspDocuments.current
+      lspManager.current??=new LspManager(monaco,sessionId,workspaceRoot,{
+        loadModel:(uri,readExternal)=>documents.load(uri,readExternal),
+        trackWorkspaceEdits:files=>documents.trackEdits(files),
+        retainEditModels:uris=>documents.retainEditModels(uris),
+        previewRename,
+        onStatus:(id,status)=>{if(lspMounted.current)setLspRuntime(current=>({...current,[id]:status}))},
+        onDiagnostics:(id,uri,markers)=>{
+          const path=workspacePathFromModel(workspaceRoot,uri)
+          if(path===undefined||!lspMounted.current)return
+          const key=`${id}\0${uri}`
+          setLspDiagnostics(current=>{
+            if(markers.length===0&&!(key in current))return current
+            const next={...current}
+            if(markers.length===0)delete next[key]
+            else next[key]=markers.map(marker=>({path,marker}))
+            return next
+          })
+        },
+        configuration:section=>{
+          const interpreter=lspScope.current.pythonPath
+          if(section==='python')return interpreter===''?{}:{pythonPath:interpreter}
+          if(section==='python.analysis')return {autoImportCompletions:true}
+          return undefined
+        },
+      })
+      lspManager.current.sync(lspServers,sessionId)
+    }).catch(error=>{if(!cancelled)setLspError(String(error))})
+    return()=>{cancelled=true}
+  },[snapshot.visible,sessionId,workspaceRoot,lspServers,previewRename])
   useEffect(()=>{try{localStorage.setItem(TS_INTELLISENSE_KEY,tsIntellisense?'on':'off')}catch{}},[tsIntellisense])
   const hasTextTabs = groups.some(group => group.tabs.some(tab => tab.loaded && !tab.documentPreview && !tab.imageUrl))
   // Definition and reference jumps land in workbench tabs for every language, including LSP servers
@@ -1710,19 +1868,38 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   useEffect(()=>{
     if(!snapshot.visible||sessionId===undefined||workspace===undefined)return
     if (!hasTextTabs) return
-    let cancelled=false;let disposable:{dispose():void}|undefined
+    let cancelled=false;let disposable:{dispose():void}|undefined;let markers:{dispose():void}|undefined
     void loadMonaco().then(monaco=>{
       if(cancelled)return
       const cwd=workspace.cwd
-      disposable=monaco.editor.registerEditorOpener({openCodeEditor:(_source,resource,selection)=>{const path=workspacePathFromModel(cwd,resource.toString());if(path===undefined)return false;const position=selection===undefined?undefined:'startLineNumber' in selection?{line:selection.startLineNumber,column:selection.startColumn}:{line:selection.lineNumber,column:selection.column};openPath(path,position?.line,position?.column);return true}})
+      disposable=monaco.editor.registerEditorOpener({openCodeEditor:(_source,resource,selection)=>{
+        const path=workspacePathFromModel(cwd,resource.toString())
+        const position=selection===undefined?undefined:'startLineNumber' in selection
+          ?{line:selection.startLineNumber,column:selection.startColumn}:{line:selection.lineNumber,column:selection.column}
+        if(path!==undefined){openPath(path,position?.line,position?.column);return true}
+        if(resource.scheme!=='file'||monaco.editor.getModel(resource)===null)return false
+        setPendingReference({resource,line:position?.line,column:position?.column})
+        return true
+      }})
+      const refreshMarkers=()=>{
+        const problems:Problem[]=[]
+        for(const marker of monaco.editor.getModelMarkers?.({})??[]){
+          if(marker.owner.startsWith('lsp:'))continue
+          const path=workspacePathFromModel(cwd,marker.resource.toString())
+          if(path!==undefined)problems.push({path,marker})
+        }
+        setBuiltinProblems(problems)
+      }
+      markers=monaco.editor.onDidChangeMarkers?.(refreshMarkers)
+      refreshMarkers()
     }).catch(error => { if (!cancelled) setError(String(error)) })
-    return()=>{cancelled=true;disposable?.dispose()}
+    return()=>{cancelled=true;disposable?.dispose();markers?.dispose();setBuiltinProblems([])}
   },[snapshot.visible,sessionId,workspace,openPath,hasTextTabs])
   useEffect(()=>{
     if(sessionId===undefined||workspace===undefined)return
     const cwd=workspace.cwd
     // Not installed: never load Monaco just for this, only release an index a previous install built.
-    if(!tsIntellisense){if(window.monaco!==undefined)disposeTypeScriptProject(window.monaco);setTsIndex({state:'idle'});return}
+    if(!tsIntellisense||installedTypeScript){if(window.monaco!==undefined)disposeTypeScriptProject(window.monaco);setTsIndex({state:'idle'});return}
     const existing=typeScriptProjectStatus(cwd)
     if(existing!==undefined)setTsIndex(current=>current.state==='ready'&&current.files===existing.files&&current.truncated===existing.truncated?current:{state:'ready',...existing})
     if(!snapshot.visible)return
@@ -1738,8 +1915,34 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     if(window.monaco!==undefined)start(window.monaco)
     else void loadMonaco().then(start).catch(error => { if (!cancelled) setTsIndex({state:"error",error:String(error)}) })
     return()=>{cancelled=true;if(changed!==undefined)window.removeEventListener('dvw-files-changed',changed)}
-  },[snapshot.visible,sessionId,workspace,tsIntellisense])
+  },[snapshot.visible,sessionId,workspace,tsIntellisense,installedTypeScript])
   useEffect(()=>()=>{if(window.monaco!==undefined)disposeTypeScriptProject(window.monaco)},[])
+  useEffect(()=>{
+    if(pendingReference===undefined)return
+    setPendingReference(undefined)
+    const {resource,line,column}=pendingReference
+    const model=window.monaco?.editor.getModel(resource)
+    if(model==null)return
+    const uri=resource.toString()
+    const path=`lsp:${uri}`
+    const content=model.getValue()
+    const tab={...unloadedTab(path),referenceUri:uri,title:resource.path.split('/').at(-1),content,draft:content,loaded:true,line,column,focusOnReveal:true}
+    leaveDshPanel()
+    setTabs(rows=>rows.some(row=>row.path===path)?rows.map(row=>row.path===path?{...row,line,column}:row):[...rows,tab])
+    setActive(path)
+  },[pendingReference,leaveDshPanel,setTabs,setActive])
+  useEffect(()=>{
+    if(!snapshot.visible)return
+    const keydown=(event:KeyboardEvent)=>{
+      if((event.metaKey||event.ctrlKey)&&event.shiftKey&&!event.altKey&&event.code==='KeyM'){
+        event.preventDefault()
+        event.stopPropagation()
+        service.toggleBottomPanel('problems')
+      }
+    }
+    window.addEventListener('keydown',keydown,true)
+    return()=>window.removeEventListener('keydown',keydown,true)
+  },[service,snapshot.visible])
   const openCommitPreview=useCallback((commit:string,path:string,title?:string)=>{
     const key=`commit-file:${commit}:${path}`
     const url=`/dsh-vscode/file?sessionId=${encodeURIComponent(sessionId??'')}&path=${encodeURIComponent(path)}&commit=${encodeURIComponent(commit)}`
@@ -1771,7 +1974,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     for (const key of loadingTabs.current.keys()) if (key.endsWith(suffix)) loadingTabs.current.delete(key)
   },[])
   const save = async (tab: Tab) => {
-    if (sessionId === undefined || !tab.dirty || savingTabs.current.has(tab.path)) return
+    if (sessionId === undefined || tab.referenceUri!==undefined || !tab.dirty || savingTabs.current.has(tab.path)) return
     const epoch = workspaceRequests.current.current()
     const groupId = focusedRef.current
     savingTabs.current.add(tab.path)
@@ -1780,6 +1983,10 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
       const doc = await api<FileDocument>('fs.save', { sessionId, path: tab.path, content: tab.draft, revision: tab.revision })
       if (!workspaceRequests.current.isCurrent(epoch)) return
       cancelTabLoads(tab.path)
+      if(workspaceRoot!==undefined&&window.monaco!==undefined){
+        const uri=window.monaco.Uri.parse(projectModelPath(workspaceRoot,tab.path)).toString()
+        lspManager.current?.saved(uri,doc.content)
+      }
       setTabsIn(groupId, rows => rows.map(row => row.path === tab.path && row.instance === tab.instance ? { ...row, ...doc, draft: row.draft, dirty: row.draft !== doc.content, external: false } : row))
     } catch (error) { if (workspaceRequests.current.isCurrent(epoch)) setError(String(error)) }
     finally { savingTabs.current.delete(tab.path) }
@@ -1788,6 +1995,35 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const closeAll=()=>{const dirty=tabs.filter(tab=>tab.dirty);if(dirty.length>0&&!confirm(`有 ${dirty.length} 个文件包含未保存更改，确定全部关闭？`))return;loadingTabs.current.clear();setTabs([]);setActive(undefined);setError(undefined);setTabMenu(undefined)}
   const removeTabs=(targets:Tab[],verb:string)=>{if(targets.length===0)return;const dirty=targets.filter(tab=>tab.dirty).length;if(dirty>0&&!confirm(`有 ${dirty} 个文件包含未保存更改，确定${verb}？`))return;const paths=new Set(targets.map(tab=>tab.path));for(const path of paths)loadingTabs.current.delete(tabLoadKey(focusedRef.current,path));const remaining=tabsRef.current.filter(tab=>!paths.has(tab.path));setTabs(remaining);if(active!==undefined&&paths.has(active))setActive(remaining.at(-1)?.path);setTabMenu(undefined)}
   const activeTab=tabs.find(tab=>tab.path===active)
+  const outlineServer=activeTab===undefined?undefined:languageServerIdForPath(activeTab.path,lspServers)
+  const outlinePath=outlineServer!==undefined&&lspRuntime[outlineServer]?.state==='ready'&&activeTab?.loaded&&activeTab.diff===undefined&&activeTab.referenceUri===undefined
+    ?activeTab.path:undefined
+  const outlineDraft=activeTab?.draft
+  useEffect(()=>{
+    if(!snapshot.visible||snapshot.view!=='explorer'||!primarySideVisible||!codeOutlineOpen||outlinePath===undefined||workspaceRoot===undefined)return
+    const controller=new AbortController()
+    let cancel:(()=>void)|undefined
+    const timer=setTimeout(()=>{
+      const monaco=window.monaco
+      const manager=lspManager.current
+      if(monaco===undefined||manager===undefined)return
+      const uri=monaco.Uri.parse(projectModelPath(workspaceRoot,outlinePath))
+      const token={
+        get isCancellationRequested(){return controller.signal.aborted},
+        onCancellationRequested(listener:(event:unknown)=>void){
+          const abort=()=>listener(undefined)
+          controller.signal.addEventListener('abort',abort,{once:true})
+          cancel=()=>controller.signal.removeEventListener('abort',abort)
+          return {dispose:cancel}
+        },
+      }
+      void manager.documentSymbols(uri,token).then(symbols=>{
+        if(!controller.signal.aborted)setCodeOutline({path:outlinePath,symbols})
+      }).catch(()=>{})
+    },220)
+    return()=>{clearTimeout(timer);controller.abort();cancel?.()}
+  },[snapshot.visible,snapshot.view,primarySideVisible,codeOutlineOpen,outlinePath,outlineDraft,workspaceRoot,lspRuntime])
+
   // Files the workbench cannot render fall back to the desktop's own file handlers.
   const unsupportedTab=activeTab!==undefined&&(activeTab.binary||activeTab.tooLarge)&&!activeTab.path.startsWith('diff:')
     ?{path:activeTab.path,label:activeTab.binary?'该格式文件暂时无法预览':`文件超过 5 MiB：${activeTab.path}`}
@@ -1831,7 +2067,15 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
       window.dispatchEvent(new CustomEvent('dvw-files-changed',{detail:paths}))
     }catch(cause){setError(cause instanceof Error?cause.message:String(cause))}
   }
-  const Panel=panels.find(panel=>panel.id===snapshot.bottomPanel)?.component; const terminalAvailable=panels.some(panel=>panel.id==='terminal')
+  const Panel=panels.find(panel=>panel.id===snapshot.bottomPanel)?.component
+  const Terminal=panels.find(panel=>panel.id==='terminal')?.component
+  const terminalAvailable=Terminal!==undefined
+  const [retainedTerminalSession,setRetainedTerminalSession]=useState<string>()
+  const terminalSelected=snapshot.bottomPanel==='terminal'
+  useEffect(()=>{
+    if(terminalSelected)setRetainedTerminalSession(sessionId)
+    else if(snapshot.bottomPanel===undefined)setRetainedTerminalSession(undefined)
+  },[sessionId,snapshot.bottomPanel,terminalSelected])
   const menuTab=tabMenu===undefined?undefined:tabs.find(tab=>tab.path===tabMenu.path); const menuIndex=menuTab===undefined?-1:tabs.findIndex(tab=>tab.path===menuTab.path); const savedTabs=tabs.filter(tab=>!tab.dirty)
   const selectView=(view:WorkbenchView)=>{if(snapshot.view===view&&primarySideVisible){setPrimarySideVisible(false);return}setPrimarySideVisible(true);service.show(view)}
   const [activityOrder,setActivityOrder]=useState<string[]>(readActivityOrder)
@@ -1909,7 +2153,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const commitModelAvailable=commitModels.status==='ready'&&commitModel!==undefined&&commitModels.models.some(model=>model.provider===commitModel.provider&&model.model===commitModel.model)
   const commitModelHint=commitModels.status==='loading'||commitModels.status==='idle'?'正在读取 DSH 聊天中的模型':commitModels.status==='error'||commitModels.unavailable.length>0?'聊天模型当前不可用，请在设置中刷新或重新选择':'没有可用的聊天模型，请在设置中选择'
   const [gitStatusSlot,setGitStatusSlot] = useState<HTMLDivElement|null>(null)
-  const settingsPage=<WorkbenchSettings gitDiffStyle={gitDiffStyle} setGitDiffStyle={setGitDiffStyle} gitLineBlame={gitLineBlame} setGitLineBlame={setGitLineBlame} reviewMode={reviewMode} setReviewMode={setReviewMode} reviewFollow={reviewFollow} setReviewFollow={setReviewFollow} theme={theme} setTheme={setTheme} fontSize={fontSize} setFontSize={setFontSize} minimap={minimap} setMinimap={setMinimap} primarySideVisible={primarySideVisible} setPrimarySideVisible={setPrimarySideVisible} chatVisible={chatVisible} setChatVisible={setChatVisible} statusVisible={statusVisible} setStatusVisible={setStatusVisible} markdownView={markdownView} setMarkdownView={setMarkdownView} defaultBrowser={defaultBrowser} setDefaultBrowser={setDefaultBrowser} openMode={openMode} setOpenMode={setOpenMode} resetFloatWindow={resetFloatGeometry} commitDetail={commitDetail} setCommitDetail={setCommitDetail} commitLanguage={commitLanguage} setCommitLanguage={setCommitLanguage} commitModel={commitModel} commitModelConfigured={commitModelConfigured} setCommitModel={selectCommitModel} commitModels={commitModels.models} commitModelStatus={commitModels.status} commitModelUnavailable={commitModels.unavailable} commitModelError={commitModels.error??''} refreshCommitModels={()=>void refreshCommitModels()} tsIntellisense={tsIntellisense} setTsIntellisense={setTsIntellisense} tsIndex={tsIndex} lspServers={lspServers} lspBusy={lspBusy} lspError={lspError} changeLsp={changeLspAction} refreshLsp={refreshLspAction}/>
+  const settingsPage=<WorkbenchSettings gitDiffStyle={gitDiffStyle} setGitDiffStyle={setGitDiffStyle} gitLineBlame={gitLineBlame} setGitLineBlame={setGitLineBlame} reviewMode={reviewMode} setReviewMode={setReviewMode} reviewFollow={reviewFollow} setReviewFollow={setReviewFollow} theme={theme} setTheme={setTheme} fontSize={fontSize} setFontSize={setFontSize} minimap={minimap} setMinimap={setMinimap} primarySideVisible={primarySideVisible} setPrimarySideVisible={setPrimarySideVisible} chatVisible={chatVisible} setChatVisible={setChatVisible} statusVisible={statusVisible} setStatusVisible={setStatusVisible} markdownView={markdownView} setMarkdownView={setMarkdownView} defaultBrowser={defaultBrowser} setDefaultBrowser={setDefaultBrowser} openMode={openMode} setOpenMode={setOpenMode} resetFloatWindow={resetFloatGeometry} commitDetail={commitDetail} setCommitDetail={setCommitDetail} commitLanguage={commitLanguage} setCommitLanguage={setCommitLanguage} commitModel={commitModel} commitModelConfigured={commitModelConfigured} setCommitModel={selectCommitModel} commitModels={commitModels.models} commitModelStatus={commitModels.status} commitModelUnavailable={commitModels.unavailable} commitModelError={commitModels.error??''} refreshCommitModels={()=>void refreshCommitModels()} tsIntellisense={tsIntellisense} setTsIntellisense={setTsIntellisense} tsIndex={tsIndex} lspServers={lspServers} lspBusy={lspBusy} lspError={lspError} lspRuntime={lspRuntime} restartLsp={restartLspAction} pythonPath={pythonPath} setPythonPath={changePythonPath} changeLsp={changeLspAction} refreshLsp={refreshLspAction}/>
   if(!snapshot.visible)return settingsNode===undefined?null:createPortal(settingsPage,settingsNode)
   const floatTop=dshTitlebarHeight()
   const floatRectNow=floatMax
@@ -1944,7 +2188,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const inlineReviewChanges=activeReviewChanges.filter(change=>!change.created||activeReviewChanges.length===1)
     const rejectReview=(ids:string[])=>{if(activeTab!==undefined)void rejectReviewIn(group.id,activeTab,ids)}
     const selectHeading = (index: number) => { if (activeTab === undefined) return; setTabs(rows => rows.map(tab => tab.path === activeTab.path ? { ...tab, preview: true } : tab)); window.setTimeout(() => window.dispatchEvent(new CustomEvent('dvw-markdown-heading', { detail: index })), 50) }
-    return <><div className="dvw-tabs" data-empty={(tabs.length===0&&dshPanelId===undefined&&browserTabs.length===0)||undefined}><div className="dvw-tab-list" ref={focused?tabListRef:undefined}>{focused&&browserTabs.map(tab=><button className="dvw-tab" key={tab.id} data-dvw-browser-tab={tab.id} data-active={browserId===tab.id&&!dshTabActive} title={tab.title} onClick={()=>{leaveDshPanel();setBrowserId(tab.id)}}><Icon name="globe"/><span className="dvw-tab-name">{tab.title}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();browser?.close(tab.sessionId,tab.id)}}><Icon name="close"/></span></button>)}{focused&&dshPanelId!==undefined&&<button className="dvw-tab" data-active={dshTabActive} data-dvw-dsh-tab="" title={`${dshPanelLabel(dshPanelId)}（DSH 官方页面）`} onClick={()=>setDshTabActive(true)}><span className="dvw-dsh-tab-mark"/><span className="dvw-tab-name">{dshPanelLabel(dshPanelId)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();closeDshPanel()}}><Icon name="close"/></span></button>}{tabs.map(tab=>{const count=reviewEnabled?(reviewByPath.get(tab.path)?.length??0):0;const conflict=reviewEnabled&&(reviewByPath.get(tab.path)??[]).some(change=>reviewSnapshot.conflicts[change.id]!==undefined);return <button className="dvw-tab" data-active={tab.path===active&&!dshTabActive&&browserId===undefined} data-review-conflict={conflict||undefined} key={tab.path} data-tab-path={tab.path} draggable onDragStart={event=>startTabDrag(event,group.id,tab)} onDragEnd={endTabDrag} title={conflict?`${tab.diffSourcePath??tab.path} · AI 改动与当前文件状态冲突`:tab.diffSourcePath??tab.path} onClick={()=>{setBrowserId(undefined);setDshTabActive(false);setActive(tab.path)}} onAuxClick={event=>{if(event.button===1){event.preventDefault();close(tab)}}} onMouseDown={event=>{if(event.button===1)event.preventDefault()}} onContextMenu={event=>{event.preventDefault();setBrowserId(undefined);setDshTabActive(false);setActive(tab.path);setTabMenu({x:event.clientX,y:event.clientY,path:tab.path})}}><FileIcon name={tabLabel(tab)} className="dvw-tab-icon"/><span className="dvw-tab-name">{tab.dirty?'● ':''}{tabLabel(tab)}</span>{count>0&&<span className="dvw-tab-review" data-conflict={conflict||undefined} title={`${count} 处 AI 改动待审阅`}>{count}</span>}<span className="dvw-tab-close" onClick={event=>{event.stopPropagation();close(tab)}}><Icon name="close"/></span></button>})}</div></div><div className="dvw-editor" data-dvw-focused-editor={focused||undefined} data-review={hasActiveReview||undefined} data-outline={markdownPreview&&outlineVisible&&headings.length>0} data-browser-active={focused&&browserId!==undefined||undefined} onKeyDownCapture={event=>{if(!hasActiveReview||activeTab===undefined||!(event.target instanceof Element)||event.target.closest('.monaco-editor')===null)return;const command=event.ctrlKey||event.metaKey;if(command&&!event.altKey&&!event.shiftKey&&event.key==='Enter'){event.preventDefault();event.stopPropagation();keepReview(activeReviewChanges.map(change=>change.id));return}if(command&&!event.altKey&&!event.shiftKey&&event.key==='Backspace'){event.preventDefault();event.stopPropagation();rejectReview(activeReviewChanges.map(change=>change.id));return}const singleModifier=navigator.userAgent.includes('Mac')?event.ctrlKey&&!event.metaKey&&!event.altKey:event.altKey&&!command;if(singleModifier&&!event.shiftKey&&(event.code==='KeyY'||event.code==='KeyN')){const change=inlineReviewChanges.find(item=>item.id===reviewActiveId)??inlineReviewChanges[0];if(change===undefined)return;event.preventDefault();event.stopPropagation();if(event.code==='KeyY')keepReview([change.id]);else rejectReview([change.id])}}}>{error&&<div className="dvw-error"><button className="dvw-icon" onClick={()=>setError(undefined)}><Icon name="close"/></button>{error}</div>}{sessionId===undefined&&<div className="dvw-error">未取得当前会话（sessionId 为空）：文件与目录都无法加载。请切换到任意会话后重试，仍不行请重启 DSH。</div>}{hasActiveReview&&activeTab&&<div className="dvw-review-filebar"><strong>AI 改动 · {activeReviewChanges.length} 处</strong><span>{activeTab.path}</span><button type="button" data-action="accept" disabled={reviewSnapshot.busy||reviewSnapshot.working} title="接受本文件全部 AI 改动 (Ctrl+Enter)" onClick={()=>keepReview(activeReviewChanges.map(change=>change.id))}>接受</button><button type="button" data-action="reject" disabled={reviewSnapshot.busy||reviewSnapshot.working||activeTab.dirty} title="拒绝本文件全部 AI 改动 (Ctrl+Backspace)" onClick={()=>rejectReview(activeReviewChanges.map(change=>change.id))}>拒绝</button></div>}{markdownPreview&&outlineVisible&&headings.length>0&&<MarkdownOutline headings={headings} onClose={()=>setOutlineVisible(false)} onHeading={selectHeading}/>} {markdown&&activeTab&&<div className="dvw-editor-toolbar" style={{top:hasActiveReview?35:0}}><button className="dvw-icon dvw-outline-toggle" data-active={outlineVisible} title={outlineVisible?'关闭 Markdown 大纲':'显示 Markdown 大纲'} onClick={()=>setOutlineVisible(value=>!value)}><Icon name="list-tree"/></button><button className="dvw-mode-button" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="code"/> 源码</button><button className="dvw-mode-button" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{activeTab?.diff&&!showTextDiff&&<div className="dvw-editor-toolbar dvw-diff-toolbar" style={{top:hasActiveReview?35:0}}>{diffControls}</div>}<div className="dvw-editor-body" data-toolbar={markdown||activeTab?.diff!==undefined} style={{top:(markdown&&!activeTab?.preview?35:0)+(activeTab?.diff&&!showTextDiff?35:0)+(hasActiveReview?35:0)}}>{activeTab===undefined?<div className="dvw-empty"><div><strong>DSH Workbench</strong><br/>从资源管理器或搜索结果打开文件<div className="dvw-start-tools"><button onClick={()=>{if(snapshot.bottomPanel!=='terminal')service.toggleBottomPanel('terminal');queueMicrotask(()=>service.runCommand('terminal.new'))}} disabled={!terminalAvailable}><Icon name="terminal"/>新建终端</button>{browser!==undefined&&<button onClick={()=>void newBrowser()} disabled={!browserSnapshot.available}><Icon name="globe"/>浏览器</button>}</div></div></div>:activeTab.diff?diffMarkdown&&activeTab.preview?<MarkdownPreview source={activeTab.diff.modified} sessionId={sessionId} path={activeTab.diffSourcePath??''}/>:<MonacoDiffEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} original={activeTab.diff.original} modified={activeTab.diff.modified} mode={diffMode} style={gitDiffStyle} viewControls={diffControls} versions={diffVersions} sourcePath={activeTab.diffSourcePath} blame={activeTab.diff.blame} blameSessionId={gitLineBlame?sessionId:undefined} theme={colorScheme} fontSize={fontSize}/>:activeTab.imageUrl?<div className="dvw-image-preview" key={activeTab.path}><img src={activeTab.imageUrl} alt={activeTab.diffSourcePath??activeTab.path}/><span>{activeTab.diffSourcePath??activeTab.path}</span></div>:activeTab.documentPreview&&activeTab.documentUrl?<DocumentPreview key={activeTab.path} kind={activeTab.documentPreview} src={activeTab.documentUrl} path={activeTab.path}/>:markdown&&activeTab.preview?<MarkdownPreview source={activeTab.draft} sessionId={sessionId} path={activeTab.path}/>:activeTab.binary||activeTab.tooLarge?<div className="dvw-message">{activeTab.binary?'二进制文件无法在文本编辑器或差异视图中打开':`文件超过 5 MiB：${activeTab.path}`}{activeTab.binary&&activeTab.diffSourcePath!==undefined&&!activeTab.path.startsWith('diff:commit:')&&<button onClick={()=>void openPath(activeTab.diffSourcePath!)}>打开文件</button>}</div>:activeTab.loaded===false?<div className="dvw-message">{sessionId===undefined?'未取得会话，无法读取文件；请切换会话后重试。':'正在加载文件…'}</div>:<MonacoEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} breakpoints={(debugState.breakpoints[activeTab.path]??[]).map(row=>row.line)} pausedLine={debugState.frames.find(frame=>{if(frame.path===undefined)return false;const norm=(v:string)=>v.replace(/\\/g,'/');return norm(frame.path).endsWith(norm(activeTab.path))})?.line} onToggleBreakpoint={line=>{if(sessionId!==undefined)debugController.toggleBreakpoint(sessionId,activeTab.path,line)}} onAddToDsh={selection=>addToDsh(dshReference(activeTab.path,{selection}))} value={activeTab.draft} theme={colorScheme} fontSize={fontSize} minimap={minimap} line={activeTab.line} column={activeTab.column} highlight={activeTab.highlight} focusOnReveal={activeTab.focusOnReveal} blame={gitLineBlame&&sessionId?{sessionId,path:activeTab.path,revision:activeTab.revision,dirty:activeTab.dirty}:undefined} review={reviewEnabled&&inlineReviewChanges.length>0?{changes:inlineReviewChanges.map(change=>({...change,...(reviewSnapshot.conflicts[change.id]===undefined?{}:{conflict:reviewSnapshot.conflicts[change.id]})})),activeId:reviewActiveId,rejectDisabled:reviewSnapshot.busy||reviewSnapshot.working||activeTab.dirty,onFocus:setReviewActiveId,onKeep:changeId=>keepReview([changeId]),onReject:changeId=>rejectReview([changeId])}:undefined} onChange={draft=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,draft,dirty:draft!==tab.content}:tab))} onSave={()=>void save(activeTab)}/>}</div></div></>
+    return <><div className="dvw-tabs" data-empty={(tabs.length===0&&dshPanelId===undefined&&browserTabs.length===0)||undefined}><div className="dvw-tab-list" ref={focused?tabListRef:undefined}>{focused&&browserTabs.map(tab=><button className="dvw-tab" key={tab.id} data-dvw-browser-tab={tab.id} data-active={browserId===tab.id&&!dshTabActive} title={tab.title} onClick={()=>{leaveDshPanel();setBrowserId(tab.id)}}><Icon name="globe"/><span className="dvw-tab-name">{tab.title}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();browser?.close(tab.sessionId,tab.id)}}><Icon name="close"/></span></button>)}{focused&&dshPanelId!==undefined&&<button className="dvw-tab" data-active={dshTabActive} data-dvw-dsh-tab="" title={`${dshPanelLabel(dshPanelId)}（DSH 官方页面）`} onClick={()=>setDshTabActive(true)}><span className="dvw-dsh-tab-mark"/><span className="dvw-tab-name">{dshPanelLabel(dshPanelId)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();closeDshPanel()}}><Icon name="close"/></span></button>}{tabs.map(tab=>{const count=reviewEnabled?(reviewByPath.get(tab.path)?.length??0):0;const conflict=reviewEnabled&&(reviewByPath.get(tab.path)??[]).some(change=>reviewSnapshot.conflicts[change.id]!==undefined);return <button className="dvw-tab" data-active={tab.path===active&&!dshTabActive&&browserId===undefined} data-review-conflict={conflict||undefined} key={tab.path} data-tab-path={tab.path} draggable onDragStart={event=>startTabDrag(event,group.id,tab)} onDragEnd={endTabDrag} title={conflict?`${tab.diffSourcePath??tab.path} · AI 改动与当前文件状态冲突`:tab.diffSourcePath??tab.path} onClick={()=>{setBrowserId(undefined);setDshTabActive(false);setActive(tab.path)}} onAuxClick={event=>{if(event.button===1){event.preventDefault();close(tab)}}} onMouseDown={event=>{if(event.button===1)event.preventDefault()}} onContextMenu={event=>{event.preventDefault();setBrowserId(undefined);setDshTabActive(false);setActive(tab.path);setTabMenu({x:event.clientX,y:event.clientY,path:tab.path})}}><FileIcon name={tabLabel(tab)} className="dvw-tab-icon"/><span className="dvw-tab-name">{tab.dirty?'● ':''}{tabLabel(tab)}</span>{count>0&&<span className="dvw-tab-review" data-conflict={conflict||undefined} title={`${count} 处 AI 改动待审阅`}>{count}</span>}<span className="dvw-tab-close" onClick={event=>{event.stopPropagation();close(tab)}}><Icon name="close"/></span></button>})}</div></div><div className="dvw-editor" data-dvw-focused-editor={focused||undefined} data-review={hasActiveReview||undefined} data-outline={markdownPreview&&outlineVisible&&headings.length>0} data-browser-active={focused&&browserId!==undefined||undefined} onKeyDownCapture={event=>{if(!hasActiveReview||activeTab===undefined||!(event.target instanceof Element)||event.target.closest('.monaco-editor')===null)return;const command=event.ctrlKey||event.metaKey;if(command&&!event.altKey&&!event.shiftKey&&event.key==='Enter'){event.preventDefault();event.stopPropagation();keepReview(activeReviewChanges.map(change=>change.id));return}if(command&&!event.altKey&&!event.shiftKey&&event.key==='Backspace'){event.preventDefault();event.stopPropagation();rejectReview(activeReviewChanges.map(change=>change.id));return}const singleModifier=navigator.userAgent.includes('Mac')?event.ctrlKey&&!event.metaKey&&!event.altKey:event.altKey&&!command;if(singleModifier&&!event.shiftKey&&(event.code==='KeyY'||event.code==='KeyN')){const change=inlineReviewChanges.find(item=>item.id===reviewActiveId)??inlineReviewChanges[0];if(change===undefined)return;event.preventDefault();event.stopPropagation();if(event.code==='KeyY')keepReview([change.id]);else rejectReview([change.id])}}}>{error&&<div className="dvw-error"><button className="dvw-icon" onClick={()=>setError(undefined)}><Icon name="close"/></button>{error}</div>}{hasActiveReview&&activeTab&&<div className="dvw-review-filebar"><strong>AI 改动 · {activeReviewChanges.length} 处</strong><span>{activeTab.path}</span><button type="button" data-action="accept" disabled={reviewSnapshot.busy||reviewSnapshot.working} title="接受本文件全部 AI 改动 (Ctrl+Enter)" onClick={()=>keepReview(activeReviewChanges.map(change=>change.id))}>接受</button><button type="button" data-action="reject" disabled={reviewSnapshot.busy||reviewSnapshot.working||activeTab.dirty} title="拒绝本文件全部 AI 改动 (Ctrl+Backspace)" onClick={()=>rejectReview(activeReviewChanges.map(change=>change.id))}>拒绝</button></div>}{markdownPreview&&outlineVisible&&headings.length>0&&<MarkdownOutline headings={headings} onClose={()=>setOutlineVisible(false)} onHeading={selectHeading}/>} {markdown&&activeTab&&<div className="dvw-editor-toolbar" style={{top:hasActiveReview?35:0}}><button className="dvw-icon dvw-outline-toggle" data-active={outlineVisible} title={outlineVisible?'关闭 Markdown 大纲':'显示 Markdown 大纲'} onClick={()=>setOutlineVisible(value=>!value)}><Icon name="list-tree"/></button><button className="dvw-mode-button" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="code"/> 源码</button><button className="dvw-mode-button" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{activeTab?.diff&&!showTextDiff&&<div className="dvw-editor-toolbar dvw-diff-toolbar" style={{top:hasActiveReview?35:0}}>{diffControls}</div>}<div className="dvw-editor-body" data-toolbar={markdown||activeTab?.diff!==undefined} style={{top:(markdown&&!activeTab?.preview?35:0)+(activeTab?.diff&&!showTextDiff?35:0)+(hasActiveReview?35:0)}}>{activeTab===undefined?<div className="dvw-empty"><div><strong>DSH Workbench</strong><br/>从资源管理器或搜索结果打开文件<div className="dvw-start-tools"><button onClick={()=>{if(snapshot.bottomPanel!=='terminal')service.toggleBottomPanel('terminal');queueMicrotask(()=>service.runCommand('terminal.new'))}} disabled={!terminalAvailable}><Icon name="terminal"/>新建终端</button>{browser!==undefined&&<button onClick={()=>void newBrowser()} disabled={!browserSnapshot.available}><Icon name="globe"/>浏览器</button>}</div></div></div>:activeTab.diff?diffMarkdown&&activeTab.preview?<MarkdownPreview source={activeTab.diff.modified} sessionId={sessionId} path={activeTab.diffSourcePath??''}/>:<MonacoDiffEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} original={activeTab.diff.original} modified={activeTab.diff.modified} mode={diffMode} style={gitDiffStyle} viewControls={diffControls} versions={diffVersions} sourcePath={activeTab.diffSourcePath} blame={activeTab.diff.blame} blameSessionId={gitLineBlame?sessionId:undefined} theme={colorScheme} fontSize={fontSize}/>:activeTab.imageUrl?<div className="dvw-image-preview" key={activeTab.path}><img src={activeTab.imageUrl} alt={activeTab.diffSourcePath??activeTab.path}/><span>{activeTab.diffSourcePath??activeTab.path}</span></div>:activeTab.documentPreview&&activeTab.documentUrl?<DocumentPreview key={activeTab.path} kind={activeTab.documentPreview} src={activeTab.documentUrl} path={activeTab.path}/>:markdown&&activeTab.preview?<MarkdownPreview source={activeTab.draft} sessionId={sessionId} path={activeTab.path}/>:activeTab.binary||activeTab.tooLarge?<div className="dvw-message">{activeTab.binary?'二进制文件无法在文本编辑器或差异视图中打开':`文件超过 5 MiB：${activeTab.path}`}{activeTab.binary&&activeTab.diffSourcePath!==undefined&&!activeTab.path.startsWith('diff:commit:')&&<button onClick={()=>void openPath(activeTab.diffSourcePath!)}>打开文件</button>}</div>:activeTab.loaded===false?<div className="dvw-message">正在加载文件…</div>:<MonacoEditor uri={activeTab.referenceUri??projectModelPath(workspace?.cwd??'',activeTab.path)} readOnly={activeTab.referenceUri!==undefined} breakpoints={(debugState.breakpoints[activeTab.path]??[]).map(row=>row.line)} pausedLine={debugState.frames.find(frame=>{if(frame.path===undefined)return false;const norm=(v:string)=>v.replace(/\\/g,'/');return norm(frame.path).endsWith(norm(activeTab.path))})?.line} onToggleBreakpoint={line=>{if(sessionId!==undefined&&activeTab.referenceUri===undefined)debugController.toggleBreakpoint(sessionId,activeTab.path,line)}} onAddToDsh={activeTab.referenceUri===undefined?selection=>addToDsh(dshReference(activeTab.path,{selection})):undefined} value={activeTab.draft} theme={colorScheme} fontSize={fontSize} minimap={minimap} line={activeTab.line} column={activeTab.column} highlight={activeTab.highlight} focusOnReveal={activeTab.focusOnReveal} blame={gitLineBlame&&sessionId&&activeTab.referenceUri===undefined?{sessionId,path:activeTab.path,revision:activeTab.revision,dirty:activeTab.dirty}:undefined} review={reviewEnabled&&inlineReviewChanges.length>0?{changes:inlineReviewChanges.map(change=>({...change,...(reviewSnapshot.conflicts[change.id]===undefined?{}:{conflict:reviewSnapshot.conflicts[change.id]})})),activeId:reviewActiveId,rejectDisabled:reviewSnapshot.busy||reviewSnapshot.working||activeTab.dirty,onFocus:setReviewActiveId,onKeep:changeId=>keepReview([changeId]),onReject:changeId=>rejectReview([changeId])}:undefined} onChange={draft=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,draft,dirty:draft!==tab.content}:tab))} onSave={()=>void save(activeTab)}/>}</div></div></>
   }
 
   // ---- editor groups -------------------------------------------------------
@@ -2175,7 +2419,15 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
         ]}
         order={activityOrder} hidden={activityHidden}
         onOrderChange={setActivityOrder} onHiddenChange={setActivityHidden}/>
-    <aside className="dvw-side" data-side-width={sideWidth}>{snapshot.view==='explorer'&&workspace!==undefined&&<ExplorerView sessionId={sessionId} cwd={workspace.cwd} selected={active} onOpen={openFromView} onAddToDsh={addEntryToDsh}/>} {workspace && <SearchView key={JSON.stringify([sessionId, workspace.cwd])} sessionId={sessionId} cwd={workspace.cwd} visible={snapshot.view==='search' && primarySideVisible} focus={searchFocus} isDirty={hasUnsavedSearchFile} onChanged={refreshChangedTabs} onOpen={openFromView}/>} {(snapshot.view==='git'||(workspace&&statusVisible))&&<GitView visible={snapshot.view==='git'} statusSlot={statusVisible?gitStatusSlot:null} sessionId={sessionId} preferences={commitPreferences} model={commitModel} key={sessionId} onOpenFile={openFromView} modelConfigured={commitModelConfigured} modelAvailable={commitModelAvailable} modelHint={commitModelHint} onDiff={(path,diff,title,source,preview)=>{leaveDshPanel();openDiff(path,diff,title,source,preview)}}/>}</aside>
+    <aside className="dvw-side" data-side-width={sideWidth}>{snapshot.view==='explorer'&&workspace!==undefined&&<><ExplorerView sessionId={sessionId} cwd={workspace.cwd} selected={active} onOpen={openFromView} onOpenSource={openSourceFromView} onAddToDsh={addEntryToDsh}/>{outlinePath!==undefined&&<section className="dvw-outline dvw-symbol-outline">
+      <button className="dvw-outline-head" type="button" aria-expanded={codeOutlineOpen} onClick={()=>setCodeOutlineOpen(value=>!value)}>
+        <Icon name={codeOutlineOpen?'chevron-down':'chevron-right'}/> 大纲
+      </button>
+      {codeOutlineOpen&&<div className="dvw-outline-list">
+        <CodeOutline symbols={codeOutline?.path===outlinePath?codeOutline.symbols:[]}
+          onSelect={symbol=>openPath(outlinePath,symbol.selectionRange.startLineNumber,symbol.selectionRange.startColumn)}/>
+      </div>}
+    </section>}</>} {workspace && <SearchView key={JSON.stringify([sessionId, workspace.cwd])} sessionId={sessionId} cwd={workspace.cwd} visible={snapshot.view==='search' && primarySideVisible} focus={searchFocus} isDirty={hasUnsavedSearchFile} onChanged={refreshChangedTabs} onOpen={openFromView}/>} {(snapshot.view==='git'||(workspace&&statusVisible))&&<GitView visible={snapshot.view==='git'} statusSlot={statusVisible?gitStatusSlot:null} sessionId={sessionId} preferences={commitPreferences} model={commitModel} key={sessionId} onOpenFile={openFromView} modelConfigured={commitModelConfigured} modelAvailable={commitModelAvailable} modelHint={commitModelHint} onDiff={(path,diff,title,source,preview)=>{leaveDshPanel();openDiff(path,diff,title,source,preview)}}/>}</aside>
     <PanelResizer className="dvw-side-resizer" label="拖动调整源码管理侧边栏宽度" size={sideWidth} min={210} max={640} defaultSize={210} direction={1} hideBelow={105} onHide={()=>setPrimarySideVisible(false)} onResize={setSideWidth}/>
     <main className="dvw-main" onDragOverCapture={paneDragOver} onDragLeaveCapture={paneDragLeave} onDropCapture={paneDropHandler}><div className="dvw-panes">{renderNode(layout)}</div>{snapshot.bottomPanel===undefined&&<div className="dvw-bottom-reveal" title="向上拖动打开终端" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();service.toggleBottomPanel('terminal');const statusHeight=statusVisible?24:0;const heightAt=(clientY:number)=>Math.max(120,Math.min(window.innerHeight-160,window.innerHeight-clientY-statusHeight));const move=(e:PointerEvent)=>setPanelHeight(heightAt(e.clientY));const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>}</main>
     {tabMenu&&menuTab&&<div className="dvw-context-menu dvw-tab-menu" role="menu" style={{left:Math.min(tabMenu.x,window.innerWidth-240),top:Math.min(tabMenu.y,window.innerHeight-180)}} onPointerDown={event=>event.stopPropagation()}>
@@ -2186,7 +2438,41 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
       <button role="menuitem" onClick={closeAll}>全部关闭<span>Ctrl+K W</span></button>
     </div>}
     {sessionId!==undefined&&browserTabs.map(tab=><DshBrowserPage key={tab.id} sessionId={sessionId} tabId={tab.id} colorScheme={colorScheme} active={browserId===tab.id&&!dshTabActive&&!switcherOpen&&snapshot.visible}/>)}
-    {snapshot.bottomPanel&&<section className="dvw-bottom" style={{height:panelHeight}}><div className="dvw-bottom-resizer" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();const startY=event.clientY,startHeight=panelHeight;const move=(e:PointerEvent)=>setPanelHeight(Math.max(120,Math.min(window.innerHeight-160,startHeight+startY-e.clientY)));const up=(e:PointerEvent)=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);if(startHeight+startY-e.clientY<80)service.toggleBottomPanel(snapshot.bottomPanel!)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/><div className="dvw-bottom-head"><button className="dvw-bottom-title">{panels.find(p=>p.id===snapshot.bottomPanel)?.title??snapshot.bottomPanel}</button>{snapshot.bottomPanel==='terminal'&&<button className="dvw-icon" title="新建终端" onClick={()=>window.dispatchEvent(new Event('dvw-terminal-new'))}><Icon name="add"/></button>}<button className="dvw-icon" style={{marginLeft:'auto'}} onClick={()=>service.toggleBottomPanel(snapshot.bottomPanel!)}><Icon name="close"/></button></div><div className="dvw-bottom-body">{Panel&&workspace&&<Panel sessionId={sessionId} cwd={workspace.cwd} visible colorScheme={colorScheme}/>}</div></section>}
-    <footer className="dvw-status"><div ref={setGitStatusSlot}/>{watchSkipped.length > 0 && <span className="dvw-status-warn" title={watchSkipped.map(row => `${row.path}（${row.reason === 'link' ? '符号链接' : row.reason === 'ignored' ? '已忽略' : row.reason}）`).join('\n')}>已跳过 {watchSkipped.length} 个不监听的路径</span>}<span>{workspace?.cwd??cwd??''}</span>{activeTab?.external&&<span>磁盘文件已变化</span>}<button className="dvw-status-action" title={activeTab===undefined?'先在编辑器里打开一个文件':'调试当前文件（F5）'} disabled={activeTab===undefined} onClick={()=>{ if(sessionId!==undefined&&activeTab!==undefined) debugController.start(sessionId,activeTab.path,'',debugController.getSnapshot().adapterId) }}>▶ 调试</button><button className="dvw-status-action" title={activeTab===undefined?'先在编辑器里打开一个文件':'直接运行当前文件（不调试）'} disabled={activeTab===undefined} onClick={()=>{ if(sessionId!==undefined&&activeTab!==undefined) debugController.run(sessionId,activeTab.path,'') }}>▷ 运行</button><button className="dvw-icon" style={{color:'inherit',marginLeft:'auto'}} onClick={()=>service.hide()}>返回 DSH</button></footer>
+    {snapshot.bottomPanel&&<section className="dvw-bottom" style={{height:panelHeight}}><div className="dvw-bottom-resizer" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();const startY=event.clientY,startHeight=panelHeight;const move=(e:PointerEvent)=>setPanelHeight(Math.max(120,Math.min(window.innerHeight-160,startHeight+startY-e.clientY)));const up=(e:PointerEvent)=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);if(startHeight+startY-e.clientY<80)service.toggleBottomPanel(snapshot.bottomPanel!)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/><div className="dvw-bottom-head">
+      {terminalAvailable&&<button type="button" className="dvw-bottom-title" aria-pressed={snapshot.bottomPanel==='terminal'}
+        onClick={()=>{if(snapshot.bottomPanel!=='terminal')service.toggleBottomPanel('terminal')}}>终端</button>}
+      <button type="button" className="dvw-bottom-title" aria-pressed={snapshot.bottomPanel==='problems'}
+        onClick={()=>{if(snapshot.bottomPanel!=='problems')service.toggleBottomPanel('problems')}}>问题</button>
+      {snapshot.bottomPanel!=='terminal'&&snapshot.bottomPanel!=='problems'&&snapshot.bottomPanel!=='debug'&&<span className="dvw-bottom-title" data-active="true">{panels.find(p=>p.id===snapshot.bottomPanel)?.title??snapshot.bottomPanel}</span>}
+      {panels.some(panel=>panel.id==='debug')&&<button type="button" className="dvw-bottom-title" aria-pressed={snapshot.bottomPanel==='debug'}
+        onClick={()=>{if(snapshot.bottomPanel!=='debug')service.toggleBottomPanel('debug')}}>调试</button>}
+      <button type="button" className="dvw-icon" style={{marginLeft:'auto'}} title="关闭底部面板" aria-label="关闭底部面板"
+        onClick={()=>service.toggleBottomPanel(snapshot.bottomPanel!)}><Icon name="close"/></button>
+    </div><div className="dvw-bottom-body">
+      {Terminal&&workspace&&(terminalSelected||retainedTerminalSession===sessionId)&&<div hidden={!terminalSelected} style={{height:'100%'}}>
+        <Terminal sessionId={sessionId} cwd={workspace.cwd} visible={terminalSelected} colorScheme={colorScheme}/>
+      </div>}
+      {snapshot.bottomPanel==='problems'?<ProblemsPanel problems={problems} onOpen={openPath}/>:!terminalSelected&&Panel&&workspace&&<Panel sessionId={sessionId} cwd={workspace.cwd} visible colorScheme={colorScheme}/>}
+    </div></section>}
+    {renamePreview!==undefined&&<div className="dvw-confirm-backdrop" onMouseDown={()=>renameDecision.current?.(false)}>
+      <section className="dvw-confirm dvw-rename-preview" role="dialog" aria-modal="true" aria-labelledby="dvw-rename-preview-title"
+        onMouseDown={event=>event.stopPropagation()} onKeyDown={event=>{if(event.key==='Escape'){event.stopPropagation();renameDecision.current?.(false)}}}>
+        <h2 id="dvw-rename-preview-title">预览重命名</h2>
+        <p>将编辑 {renamePreview.length} 个文件，应用后可在编辑器中检查并保存。</p>
+        <div className="dvw-rename-preview-list">{renamePreview.map((file,index)=><details key={`${file.path}:${index}`} open>
+          <summary>{file.path}（{file.changes.length} 处）</summary>
+          {file.changes.slice(0,50).map((change,index)=><div key={index}><span>{change.line}</span><del>{change.before}</del><ins>{change.after}</ins></div>)}
+          {file.changes.length>50&&<small>其余 {file.changes.length-50} 处更改</small>}
+        </details>)}</div>
+        <footer>
+          <button type="button" autoFocus onClick={()=>renameDecision.current?.(false)}>取消</button>
+          <button type="button" onClick={()=>renameDecision.current?.(true)}>应用重命名</button>
+        </footer>
+      </section>
+    </div>}
+    <footer className="dvw-status"><div ref={setGitStatusSlot}/>{watchSkipped.length > 0 && <span className="dvw-status-warn" title={watchSkipped.map(row => `${row.path}（${row.reason === 'link' ? '符号链接' : row.reason === 'ignored' ? '已忽略' : row.reason}）`).join('\n')}>已跳过 {watchSkipped.length} 个不监听的路径</span>}<button type="button" className="dvw-icon dvw-status-problems" title="问题" aria-label="问题" onClick={()=>service.toggleBottomPanel('problems')}>
+      <span><Icon name="error"/>{problems.filter(problem=>problem.marker.severity===8).length}</span>
+      <span><Icon name="warning"/>{problems.filter(problem=>problem.marker.severity===4).length}</span>
+    </button><span>{workspace?.cwd??cwd??''}</span>{activeTab?.referenceUri!==undefined&&<span><Icon name="lock"/> 只读</span>}{activeTab?.external&&<span>磁盘文件已变化</span>}<button className="dvw-status-action" title={activeTab===undefined?'先在编辑器里打开一个文件':'调试当前文件（F5）'} disabled={activeTab===undefined} onClick={()=>{ if(sessionId!==undefined&&activeTab!==undefined) debugController.start(sessionId,activeTab.path,'',debugController.getSnapshot().adapterId) }}>▶ 调试</button><button className="dvw-status-action" title={activeTab===undefined?'先在编辑器里打开一个文件':'直接运行当前文件（不调试）'} disabled={activeTab===undefined} onClick={()=>{ if(sessionId!==undefined&&activeTab!==undefined) debugController.run(sessionId,activeTab.path,'') }}>▷ 运行</button><button className="dvw-icon" style={{color:'inherit',marginLeft:'auto'}} onClick={()=>service.hide()}>返回 DSH</button></footer>
   </div>
 }

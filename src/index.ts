@@ -15,7 +15,7 @@ import type { HostContext } from './context.ts'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import { commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, type CommitModelCatalog, type CommitModelSelection, type DshChatModelCatalog } from './commit-message.ts'
 import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitPreviewFile, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, replaceSearchResults, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host.ts'
-import { installLsp, lspStatuses, resolveLsp, uninstallLsp, pipeLanguageServer } from './lsp.ts'
+import { attachLanguageServerSocket, installLsp, lspStatuses, uninstallLsp } from './lsp.ts'
 import { createDebugBridge } from './debug.ts'
 import { officePdf, officePdfBuffer, officeStatus } from './office.ts'
 import { WorkspaceSite } from './site.ts'
@@ -216,10 +216,10 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
       if (site === undefined) throw new WorkbenchError('site-unavailable', 'HTML 预览服务不可用', 503)
       return { url: await site.url(sessionId, stringField(body, 'path')) }
     }
-    case 'workspace.open': return openWorkspaceFromPicker(dshDirectoryPicker, dshWorkspaceRegistry, signal ?? new AbortController().signal)
-    case 'lsp.status': return cached('lsp.status', 15_000, () => lspStatuses())
-    case 'lsp.install': await installLsp(stringField(body, 'id'), signal); probeCache.delete('lsp.status'); return lspStatuses()
-    case 'lsp.uninstall': await uninstallLsp(stringField(body, 'id')); probeCache.delete('lsp.status'); return lspStatuses()
+    case 'workspace.open': return openWorkspaceFromPicker(dshDirectoryPicker, dshWorkspaceRegistry, AbortSignal.any([AbortSignal.timeout(10 * 60 * 1000), ...(signal === undefined ? [] : [signal])]))
+    case 'lsp.status': return lspStatuses(cwd)
+    case 'lsp.install': await installLsp(stringField(body, 'id'), signal); return lspStatuses(cwd)
+    case 'lsp.uninstall': await uninstallLsp(stringField(body, 'id')); return lspStatuses(cwd)
     case 'search': return searchWorkspace(cwd, body as unknown as SearchRequest, signal)
     case 'search.replace':
       if (cwd !== stringField(body, 'cwd')) throw new WorkbenchError('workspace-changed', '工作区已切换，请重新搜索', 409)
@@ -455,7 +455,7 @@ export function apply(ctx: HostContext): void {
             pendingManifest = undefined
             applyWatch(queued.version, queued.paths)
           }
-}).catch(error => { send({ type: 'files.watch-error', message: String(error) }) })
+        }).catch(error => { send({ type: 'files.watch-error', message: String(error) }) })
         // A client that never sends a manifest still expects notifications for the whole tree.
         const legacyTimer = setTimeout(() => {
           if (appliedVersion >= 0) return
@@ -489,7 +489,7 @@ export function apply(ctx: HostContext): void {
     },
   }), 'dsh-vscode-workbench: file watcher')
 
-  const lspWss = new WebSocketServer({ noServer: true })
+  const lspWss = new WebSocketServer({ noServer: true, maxPayload: 32 * 1024 * 1024 })
   ctx.effect(() => ctx.webServer.registerUpgrade({
     path: '/dsh-vscode/ws/lsp', handler(req, socket, head) {
       if (ctx.connection.requestRejection(req) !== undefined) { socket.destroy(); return }
@@ -500,27 +500,11 @@ export function apply(ctx: HostContext): void {
         let workspace: string
         try { workspace = cwdFor(ctx, sessionId) }
         catch { ws.close(1008, 'session workspace unavailable'); return }
-        void (async () => {
-          try {
-            const server = await resolveLsp(serverId)
-            const child = spawn(server.command, server.args, { cwd: workspace, stdio: ['pipe', 'pipe', 'pipe'], shell: server.shell, windowsHide: true })
-            const bridge = pipeLanguageServer(child, {
-              onMessage: message => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)) },
-              onStderr: text => console.warn('[dsh-vscode-workbench] lsp:', text.trim().slice(0, 500)),
-              onExit: code => { if (ws.readyState === WebSocket.OPEN) ws.close(1000, `server exited ${code ?? ''}`.trim()) },
-            })
-            ws.on('message', data => bridge.write(String(data)))
-            ws.on('close', () => bridge.kill())
-            ws.on('error', () => bridge.kill())
-            child.on('error', error => { if (ws.readyState === WebSocket.OPEN) ws.close(1011, String(error).slice(0, 120)) })
-          } catch (error) {
-            ws.close(1008, (error instanceof Error ? error.message : 'language server unavailable').slice(0, 120))
-          }
-        })()
+        void attachLanguageServerSocket(ws, workspace, serverId)
       })
     },
   }), 'dsh-vscode-workbench: language server bridge')
-  ctx.effect(() => () => { lspWss.close() }, 'dsh-vscode-workbench: language server teardown')
+  ctx.effect(() => () => { for (const ws of lspWss.clients) ws.terminate(); lspWss.close() }, 'dsh-vscode-workbench: language server teardown')
   const debugWss = new WebSocketServer({ noServer: true })
   ctx.effect(() => ctx.webServer.registerUpgrade({
     path: '/dsh-vscode/ws/debug', handler(req, socket, head) {

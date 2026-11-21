@@ -1,3 +1,5 @@
+import type { languages } from 'monaco-editor'
+import { editorLanguageForPath } from './lspLanguage.ts'
 import { colorInlineGitDiff, connectGitSplit } from './GitSplitDiff.ts'
 import type { GitDiff } from '../types.ts'
 import { clickedCodeLine, clickedDeletedLine, createGitLineBlame, lastBlameLine } from './GitLineBlame.ts'
@@ -6,11 +8,12 @@ import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { locateReviewChange, type ReviewChange } from './aiReview.ts'
 import { searchHighlightRange } from './searchHighlight.ts'
 import type { EditorSelection } from './dshComposer.ts'
-import { isIndexedModel } from './typescriptProject.ts'
+import { isIndexedModel, projectModelPath } from './typescriptProject.ts'
+import { isLspPreviewModel } from './lspWorkspace.ts'
 import { completeMonacoChineseMessages, localizeMonacoActions } from './monacoLocale.ts'
 
 type Monaco = typeof import('monaco-editor')
-declare global { interface Window { require?: { (ids: string[], done: () => void, error?: (cause: unknown) => void): void; config(value: unknown): void }; monaco?: Monaco } }
+declare global { interface Window { require?: { <T>(ids: string[], done: (module: T) => void, error?: (cause: unknown) => void): void; config(value: unknown): void }; monaco?: Monaco } }
 let loading: Promise<Monaco> | undefined
 /** Monaco chrome used by both editors so only the narrow native scrollbar remains. */
 export const WORKBENCH_EDITOR_CHROME = {
@@ -186,6 +189,16 @@ export function loadMonaco(): Promise<Monaco> {
         completeMonacoChineseMessages()
         loader(['vs/editor/editor.main'], () => {
           if (window.monaco === undefined) return reject(new Error('Monaco 编辑器初始化失败'))
+          const { languages: registry } = window.monaco
+          if (!registry.getLanguages().some(language => language.id === 'vue')) {
+            registry.register({ id: 'vue', extensions: ['.vue'], aliases: ['Vue'] })
+            registry.onLanguage('vue', () => {
+              loader(['vs/basic-languages/html/html'], (html: { language: languages.IMonarchLanguage; conf: languages.LanguageConfiguration }) => {
+                registry.setLanguageConfiguration('vue', html.conf)
+                registry.setMonarchTokensProvider('vue', html.language)
+              })
+            })
+          }
           defineWorkbenchThemes(window.monaco)
           resolve(window.monaco)
         }, reject)
@@ -247,8 +260,8 @@ export function MonacoDiffEditor(props: {
       const current = latest.current
       const name = (current.sourcePath ?? current.uri).replace(/\\/g, '/').replace(/^\/+/, '')
       const path = `/diff/${++diffModelSequence}/${name}`
-      const original = monaco.editor.createModel(current.original, undefined, monaco.Uri.from({ scheme: 'dvw-diff-original', path }))
-      const modified = monaco.editor.createModel(current.modified, undefined, monaco.Uri.from({ scheme: 'dvw-diff-modified', path }))
+      const original = monaco.editor.createModel(current.original, editorLanguageForPath(current.sourcePath ?? path), monaco.Uri.from({ scheme: 'dvw-diff-original', path }))
+      const modified = monaco.editor.createModel(current.modified, editorLanguageForPath(current.sourcePath ?? path), monaco.Uri.from({ scheme: 'dvw-diff-modified', path }))
       const instance = monaco.editor.createDiffEditor(root.current, {
         automaticLayout: true, readOnly: true, originalEditable: false, ignoreTrimWhitespace: false,
         ...WORKBENCH_EDITOR_CHROME,
@@ -426,7 +439,7 @@ export function preloadMonaco(): void {
 }
 
 function modelUri(monaco: Monaco, uri: string): import('monaco-editor').Uri {
-  return monaco.Uri.parse(`file:///${uri.replace(/^\/+/, '')}`)
+  return monaco.Uri.parse(uri.startsWith('file:') ? uri : projectModelPath('', uri))
 }
 
 /** Scroll and cursor positions per document, kept while its tab stays open. */
@@ -444,6 +457,7 @@ export function retainEditorModels(uris: string[]): void {
     const key = model.uri.toString()
     if (model.uri.scheme !== 'file' || keep.has(key) || model.isAttachedToEditor()) continue
     // Closing a tab returns its file to the language-service index instead of dropping it.
+    if (isLspPreviewModel(model)) continue
     if (isIndexedModel(key)) { viewStates.delete(key); revealedHits.delete(key); continue }
     viewStates.delete(key); revealedHits.delete(key); model.dispose()
   }
@@ -561,7 +575,7 @@ export interface MonacoReviewProps {
   onReject(id: string): void
 }
 
-export function MonacoEditor(props: { uri: string; value: string; theme: MonacoColorScheme; line?: number; column?: number; fontSize?: number; minimap?: boolean; highlight?: string; focusOnReveal?: boolean; review?: MonacoReviewProps; blame?: { sessionId: string; path: string; revision: string; dirty: boolean }; breakpoints?: number[]; pausedLine?: number; onToggleBreakpoint?(line: number): void; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
+export function MonacoEditor(props: { uri: string; value: string; readOnly?: boolean; theme: MonacoColorScheme; line?: number; column?: number; fontSize?: number; minimap?: boolean; highlight?: string; focusOnReveal?: boolean; review?: MonacoReviewProps; blame?: { sessionId: string; path: string; revision: string; dirty: boolean }; breakpoints?: number[]; pausedLine?: number; onToggleBreakpoint?(line: number): void; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
   const root = useRef<HTMLDivElement>(null)
   const editor = useRef<import('monaco-editor').editor.IStandaloneCodeEditor>()
   const lineBlame = useRef<ReturnType<typeof createGitLineBlame>>()
@@ -741,7 +755,7 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
     if (previous?.uri.toString() === next.toString()) return
     const state = instance.saveViewState()
     if (previous !== null && state !== null) viewStates.set(previous.uri.toString(), state)
-    const model = monaco.editor.getModel(next) ?? monaco.editor.createModel(value, undefined, next)
+    const model = monaco.editor.getModel(next) ?? monaco.editor.createModel(value, editorLanguageForPath(next.path ?? uri), next)
     if (model.getValue() !== value) model.setValue(value)
     instance.setModel(model)
     const saved = viewStates.get(next.toString())
@@ -777,7 +791,7 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
     void loadMonaco().then((monaco) => {
       if (disposed || root.current === null) return
       const props = latest.current
-const instance = monaco.editor.create(root.current, { model: null, automaticLayout: true, theme: monacoThemeFor(props.theme), fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off', minimap: minimapOptions(minimapEnabled(props)) })
+      const instance = monaco.editor.create(root.current, { model: null, automaticLayout: true, readOnly: props.readOnly, 'semanticHighlighting.enabled': true, theme: monacoThemeFor(props.theme), fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off', minimap: minimapOptions(minimapEnabled(props)) })
       // Breakpoints live in the line-decorations strip so the layout does not shift, and a click
       // there toggles one exactly like VS Code's gutter.
       instance.onMouseDown(event => {
@@ -796,7 +810,7 @@ const instance = monaco.editor.create(root.current, { model: null, automaticLayo
           sessionId:blame.sessionId,source:{kind:'document',path:blame.path,revision:blame.revision},
         }
       })
-      instance.onDidChangeModelContent(() => latest.current.onChange(instance.getValue()))
+      instance.onDidChangeModelContent(() => { if (!latest.current.readOnly) latest.current.onChange(instance.getValue()) })
       instance.onMouseDown(event => {
         const id = reviewLineIds.current.get(event.target.position?.lineNumber ?? 0)
         if (id !== undefined) latest.current.review?.onFocus(id)
@@ -870,7 +884,7 @@ const instance = monaco.editor.create(root.current, { model: null, automaticLayo
     if (instance !== undefined && monaco !== undefined) paintReview(monaco, instance)
   }, [props.uri, props.value, props.fontSize, props.review, props.review?.activeId, props.review?.changes])
   useEffect(() => { if (window.monaco !== undefined) window.monaco.editor.setTheme(monacoThemeFor(props.theme)) }, [props.theme])
-  useEffect(() => { editor.current?.updateOptions({ fontSize: props.fontSize ?? 14 }) }, [props.fontSize])
+  useEffect(() => { editor.current?.updateOptions({ fontSize: props.fontSize ?? 14, readOnly: props.readOnly ?? false }) }, [props.fontSize, props.readOnly])
   useEffect(() => { editor.current?.updateOptions({ minimap: minimapOptions(minimapEnabled(props)) }) }, [props.minimap])
   useEffect(() => {
     const instance = editor.current; const monaco = window.monaco; const model = instance?.getModel()

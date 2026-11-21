@@ -24,7 +24,7 @@ it('gives only the external-process calls a deadline of their own', () => {
 it('cancels a request through to the directory picker and the LSP install', () => {
   const index = read('src/index.ts')
   const lsp = read('src/lsp.ts')
-  expect(index).toContain('openWorkspaceFromPicker(dshDirectoryPicker, dshWorkspaceRegistry, signal ?? new AbortController().signal)')
+  expect(index).toContain('openWorkspaceFromPicker(dshDirectoryPicker, dshWorkspaceRegistry, AbortSignal.any([AbortSignal.timeout(10 * 60 * 1000), ...(signal === undefined ? [] : [signal])]))')
   expect(index).toContain("installLsp(stringField(body, 'id'), signal)")
   expect(lsp).toContain("signal?.addEventListener('abort', abort")
   expect(lsp).toContain('child.kill()')

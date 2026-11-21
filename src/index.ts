@@ -21,7 +21,8 @@ import { officePdf, officePdfBuffer, officeStatus } from './office.ts'
 import { WorkspaceSite } from './site.ts'
 import type { SearchFileEdits, SearchRequest } from './types.ts'
 import { watchIgnore, workspaceWatchIgnores } from './watch-ignore.ts'
-import { applyManifest, escapesWorkspace, isStaleManifest } from './workspace-watch.ts'
+import { isStaleManifest } from './workspace-watch.ts'
+import { createWorkspaceWatcher } from './workspace-watch-host.ts'
 import { readBinaryBody, readBody, send, sendError, stringField, authorize, WorkbenchError } from './wire.ts'
 
 export { WorkbenchError } from './wire.ts'
@@ -413,103 +414,58 @@ export function apply(ctx: HostContext): void {
         let workspace: string
         try { workspace = cwdFor(ctx, sessionId) }
         catch { ws.close(1008, 'session workspace unavailable'); return }
-        let watcher: ReturnType<typeof chokidar.watch> | undefined
+        let watcher: ReturnType<typeof createWorkspaceWatcher> | undefined
         let legacy: ReturnType<typeof chokidar.watch> | undefined
         let paths = new Set<string>(); let timer: ReturnType<typeof setTimeout> | undefined
-        // On-demand watching: the client names what it can see, and only those paths are watched.
-        const tracked = new Set<string>()
         let appliedVersion = -1
-        let rules: { isLink(absolute: string): boolean; ignored(absolute: string): boolean } | undefined
-        // The rebuild after a collapse needs the same exclusions the first watcher used.
-        let ignoreRule: ((absolute: string) => boolean) | undefined
+        let ready = false
+        let pendingManifest: { version: number; paths: string[] } | undefined
         const send = (payload: unknown) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload)) }
         const flush = (changed: string) => {
           paths.add(changed)
           clearTimeout(timer)
           timer = setTimeout(() => { send({ type: 'files.changed', paths: [...paths] }); paths = new Set() }, 150)
         }
-        const onChange = (_event: string, path: string) => {
-          flush((isAbsolute(path) ? relative(workspace, path) : path).split(sep).join('/'))
+        const applyWatch = (version: number, list: string[]) => {
+          if (isStaleManifest(version, appliedVersion)) return
+          if (watcher === undefined) { pendingManifest = { version, paths: list }; return }
+          appliedVersion = version
+          clearTimeout(legacyTimer)
+          void legacy?.close()
+          legacy = undefined
+          const result = watcher.apply({ version, paths: list })
+          // The client refreshes exactly the directories it asked for, which closes the window
+          // between "directory listed" and "watch installed".
+          send({ type: 'files.ready', version: result.version, added: result.added, paths: result.watching, skipped: result.skipped })
         }
         // Exclusions come from the workspace's .gitignore plus the built-in dependency/build trees.
         void workspaceWatchIgnores(workspace).then(extra => {
-          const ignored = ignoreRule = watchIgnore(workspace, extra)
-          const workspaceReal = realpathSync(workspace)
-          const instance = watcher = chokidar.watch([], {
-            ignoreInitial: true, followSymlinks: false, depth: 0, ignored,
-            awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
-          })
-          instance.on('error', error => {
-            console.warn('[dsh-vscode-workbench] file watcher stopped:', error)
-            send({ type: 'files.watch-error', message: String(error) })
-            void instance.close()
-          })
-          instance.on('all', onChange)
-          rules = {
-            // A junction or symlink would drag the watcher out of the workspace, so it is refused.
-            // Resolving as well catches `link/sub`, where the entry is a plain directory but its
-            // real location is outside the workspace.
-            isLink: absolute => {
-              try {
-                if (lstatSync(absolute).isSymbolicLink()) return true
-                return escapesWorkspace(workspaceReal, realpathSync(absolute), sep)
-              } catch { return true }
-            },
-            ignored: absolute => ignored(absolute),
-          }
+          if (ws.readyState !== WebSocket.OPEN) return
+          ready = true
+          watcher = createWorkspaceWatcher({ workspace, ignored: watchIgnore(workspace, extra), onChange: flush })
           if (pendingManifest !== undefined) {
             const queued = pendingManifest
             pendingManifest = undefined
             applyWatch(queued.version, queued.paths)
           }
+        }).catch(error => {
+          send({ type: 'files.watch-error', message: String(error) })
         })
-        // A client that never sends a manifest still expects change notifications for the whole tree.
+        // A client that never sends a manifest still expects notifications for the whole tree.
         const legacyTimer = setTimeout(() => {
           if (appliedVersion >= 0) return
           void workspaceWatchIgnores(workspace).then(extra => {
+            if (ws.readyState !== WebSocket.OPEN || appliedVersion >= 0) return
             const instance = legacy = chokidar.watch(workspace, {
               ignoreInitial: true, ignored: watchIgnore(workspace, extra),
               awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
             })
-            instance.on('all', onChange)
+            instance.on('all', (_event, path) => {
+              flush((isAbsolute(path) ? relative(workspace, path) : path).split(sep).join('/'))
+            })
             instance.on('error', () => { void instance.close() })
-          })
+          }).catch(error => { send({ type: 'files.watch-error', message: String(error) }) })
         }, 1500)
-        // One manifest handler, so a manifest that arrives before the ignore rules are ready is
-        // replayed instead of being silently dropped.
-        let pendingManifest: { version: number; paths: string[] } | undefined
-        const applyWatch = (version: number, list: string[]) => {
-          if (isStaleManifest(version, appliedVersion)) return
-          if (rules === undefined) { pendingManifest = { version, paths: list }; return }
-          appliedVersion = version
-          clearTimeout(legacyTimer)
-          void legacy?.close()
-          legacy = undefined
-          const backend = {
-            add(absolute: string) { tracked.add(absolute); void watcher?.add(absolute) },
-            // chokidar's unwatch() drops only the closer for the directory itself; the per-child
-            // file closers it created keep the handle alive. Rebuilding from the surviving set
-            // releases them, which is what "collapse releases the watch" has to mean.
-            unwatch(absolute: string) {
-              tracked.delete(absolute)
-              void watcher?.close()
-              const rebuilt = watcher = chokidar.watch([...tracked], {
-                ignoreInitial: true, followSymlinks: false, depth: 0, ignored: ignoreRule ?? (() => false),
-                awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
-              })
-              rebuilt.on('all', onChange)
-              rebuilt.on('error', error => {
-                console.warn('[dsh-vscode-workbench] file watcher stopped:', error)
-                send({ type: 'files.watch-error', message: String(error) })
-                void rebuilt.close()
-              })
-            },
-          }
-          const result = applyManifest(workspace, { version, paths: list }, new Set(tracked), backend, rules, join)
-          // The client refreshes exactly the directories it asked for, which closes the window
-          // between "directory listed" and "watch installed".
-          send({ type: 'files.ready', version: result.version, added: result.added, paths: result.watching, skipped: result.skipped })
-        }
         ws.on('message', data => {
           let message: { type?: string; version?: number; paths?: unknown }
           try { message = JSON.parse(String(data)) } catch { return }
@@ -518,7 +474,12 @@ export function apply(ctx: HostContext): void {
           const list = Array.isArray(message.paths) ? message.paths.filter((row): row is string => typeof row === 'string') : []
           applyWatch(version, list)
         })
-        ws.on('close', () => { clearTimeout(timer); clearTimeout(legacyTimer); void watcher?.close(); void legacy?.close() })
+        ws.on('close', () => {
+          clearTimeout(timer)
+          clearTimeout(legacyTimer)
+          void watcher?.close()
+          void legacy?.close()
+        })
       })
     },
   }), 'dsh-vscode-workbench: file watcher')

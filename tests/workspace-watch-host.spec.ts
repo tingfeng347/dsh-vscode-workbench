@@ -23,8 +23,8 @@ it('notifies while a directory is expanded and goes quiet once it is collapsed',
   const events: string[] = []
   const watcher = createWorkspaceWatcher({ workspace: root, ignored: () => false, onChange: path => events.push(path) })
 
-  watcher.apply({ version: 1, paths: [''] })
-  watcher.apply({ version: 2, paths: ['', 'wide'] })
+  await watcher.apply({ version: 1, paths: [''] })
+  await watcher.apply({ version: 2, paths: ['', 'wide'] })
   await settle()
 
   writeFileSync(join(root, 'wide', 'b.txt'), 'b')
@@ -33,7 +33,7 @@ it('notifies while a directory is expanded and goes quiet once it is collapsed',
 
   // Collapsing must stop the notifications, not merely drop a bookkeeping entry.
   events.length = 0
-  watcher.apply({ version: 3, paths: [''] })
+  await watcher.apply({ version: 3, paths: [''] })
   expect(watcher.watching()).toEqual([root])
   await settle()
   writeFileSync(join(root, 'wide', 'c.txt'), 'c')
@@ -41,7 +41,7 @@ it('notifies while a directory is expanded and goes quiet once it is collapsed',
   expect(events.filter(path => path.startsWith('wide/'))).toEqual([])
 
   // Re-expanding reads the directory fresh and resumes notifications.
-  watcher.apply({ version: 4, paths: ['', 'wide'] })
+  await watcher.apply({ version: 4, paths: ['', 'wide'] })
   await settle()
   writeFileSync(join(root, 'wide', 'd.txt'), 'd')
   await settle()
@@ -59,8 +59,24 @@ it('never watches a path that resolves outside the workspace', async () => {
   const watcher = createWorkspaceWatcher({ workspace: root, ignored: () => false, onChange: () => undefined })
   // A junction/symlink is platform-dependent to create portably, so assert on the pure rule the
   // host relies on: the resolved path of a sibling root is outside.
-  const result = watcher.apply({ version: 1, paths: ['', '../..'] })
+  const result = await watcher.apply({ version: 1, paths: ['', '../..'] })
   expect(result.skipped.map(row => row.reason)).toContain('outside')
   expect(result.watching).toEqual([''])
+  await watcher.close()
+}, 30000)
+it('only reports ready once a write can actually be observed', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dvw-armed-'))
+  roots.push(root)
+  mkdirSync(join(root, 'live'))
+
+  const events: string[] = []
+  const watcher = createWorkspaceWatcher({ workspace: root, ignored: () => false, onChange: path => events.push(path) })
+
+  // apply() resolves only when the watch is armed, so a write immediately afterwards must be seen.
+  await watcher.apply({ version: 1, paths: ['', 'live'] })
+  writeFileSync(join(root, 'live', 'instant.txt'), 'x')
+  await settle(900)
+
+  expect(events.some(path => path.startsWith('live/'))).toBe(true)
   await watcher.close()
 }, 30000)

@@ -433,10 +433,12 @@ export function apply(ctx: HostContext): void {
           clearTimeout(legacyTimer)
           void legacy?.close()
           legacy = undefined
-          const result = watcher.apply({ version, paths: list })
-          // The client refreshes exactly the directories it asked for, which closes the window
-          // between "directory listed" and "watch installed".
-          send({ type: 'files.ready', version: result.version, added: result.added, paths: result.watching, skipped: result.skipped })
+          // The reply is sent only after the watch is armed, so the client's re-read cannot race it.
+          void watcher.apply({ version, paths: list }).then(result => {
+            send({ type: 'files.ready', version: result.version, added: result.added, paths: result.watching, skipped: result.skipped })
+          }).catch(error => {
+            send({ type: 'files.watch-error', message: String(error) })
+          })
         }
         // Exclusions come from the workspace's .gitignore plus the built-in dependency/build trees.
         void workspaceWatchIgnores(workspace).then(extra => {

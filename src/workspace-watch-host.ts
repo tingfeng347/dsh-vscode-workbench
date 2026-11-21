@@ -20,7 +20,8 @@ export interface WorkspaceWatcherOptions {
 }
 
 export interface WorkspaceWatcher {
-  apply(manifest: WatchManifest): ReturnType<typeof applyManifest>
+  /** Resolves once every watched path is actually armed, so a later re-read cannot miss a write. */
+  apply(manifest: WatchManifest): Promise<ReturnType<typeof applyManifest>>
   /** Paths currently watched, relative, for assertions and diagnostics. */
   watching(): string[]
   close(): Promise<void>
@@ -71,9 +72,31 @@ export function createWorkspaceWatcher(options: WorkspaceWatcherOptions): Worksp
     },
   }
 
+  const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
+
+  /**
+   * Wait until chokidar reports the path as watched.
+   *
+   * `add()` returns before the underlying watcher exists (measured at ~7ms here, and a write in the
+   * same tick is silently lost). Replying `files.ready` before that point hands the client a re-read
+   * that cannot see the change it was meant to catch.
+   */
+  const waitArmed = async (absolutes: readonly string[], timeoutMs = 2000): Promise<void> => {
+    const normalise = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '')
+    const wanted = absolutes.map(normalise)
+    const deadline = Date.now() + timeoutMs
+    while (Date.now() < deadline) {
+      const keys = new Set(Object.keys(instance.getWatched()).map(normalise))
+      if (wanted.every(path => keys.has(path))) return
+      await sleep(10)
+    }
+  }
+
   return {
-    apply(manifest) {
-      return applyManifest(options.workspace, manifest, new Set(tracked), backend, rules, join)
+    async apply(manifest) {
+      const result = applyManifest(options.workspace, manifest, new Set(tracked), backend, rules, join)
+      await waitArmed(result.watching.map(relative => relative === '' ? options.workspace : join(options.workspace, relative)))
+      return result
     },
     watching() { return [...tracked] },
     async close() { await instance.close() },

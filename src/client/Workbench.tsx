@@ -22,7 +22,7 @@ import { DshBrowserPage } from './DshBrowserPage.tsx'
 import { createLeaf, dropPosition, MAX_PANES, paneCount, normalizeLayout, removeGroup, setRatio, splitAt, type PaneNode, type SplitDirection, type SplitPosition } from './panes.ts'
 import { moveTabToGroup, swapActiveTab } from './tabs.ts'
 import { RESTORE_STEP_MS, shouldPauseRestore, splitRestore } from './restore.ts'
-import { getWatchExpanded, mergeWatchPaths, setWatchExpanded } from './watch-paths.ts'
+import { getWatchExpanded, mergeWatchPaths, nextRetryDelay, setWatchExpanded } from './watch-paths.ts'
 import { debugController } from './debug.ts'
 import type { NativeBrowser, BrowserSnapshot } from './browser.ts'
 import { dshPanelLabel } from './dshPanels.ts'
@@ -1588,30 +1588,60 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const ws = new WebSocket(url)
     let closed = false
     // Everything currently visible: the root, the expanded directories and the open files.
+    let watchPaths: string[] = ['']
     let watchVersion = 0
+    // The explorer owns the expanded set; the tabs own the open files. Both feed one manifest.
+    let expandedDetail: string[] = getWatchExpanded()
+    // onopen refreshes everything once; the first ready reply would only repeat that work.
     let firstReadyPending = true
     const sendWatch = () => {
       // Test doubles and older shells may expose a socket without send(); never assume it.
       if (closed || ws.readyState !== WebSocket.OPEN || typeof ws.send !== 'function') return
-      const open = groupsRef.current.flatMap(group => group.tabs).filter(tab => !tab.path.startsWith('diff:')).map(tab => tab.path)
-      ws.send(JSON.stringify({ type: 'watch', version: ++watchVersion, paths: mergeWatchPaths(getWatchExpanded(), open) }))
+      ws.send(JSON.stringify({ type: 'watch', version: ++watchVersion, paths: watchPaths }))
     }
+    const syncWatch = (detail?: string[]) => {
+      if (detail !== undefined) expandedDetail = detail
+      const open = groupsRef.current.flatMap(group => group.tabs).filter(tab => !tab.path.startsWith('diff:')).map(tab => tab.path)
+      watchPaths = mergeWatchPaths(expandedDetail, open)
+      sendWatch()
+    }
+    const onWatchPaths = (event: Event) => {
+      const detail = (event as CustomEvent<string[]>).detail
+      syncWatch(Array.isArray(detail) ? detail : getWatchExpanded())
+    }
+    // Opening or closing a tab changes the set of individually watched files.
+    const onWatchTabs = () => syncWatch()
     const refresh = (paths?: string[]) => {
       if (closed) return
       refreshChangedTabs(paths)
     }
     ws.onopen = () => {
       refresh()
-      window.addEventListener('dvw-watch-paths', sendWatch)
-      // onopen refreshes everything once; the first ready reply would only repeat that work.
+      window.addEventListener('dvw-watch-paths', onWatchPaths)
+      window.addEventListener('dvw-watch-tabs', onWatchTabs)
+      // The first open has nothing to catch up on; a later one always does.
+      // A later open means notifications were missed; re-read what is visible.
+      if (watchRetry > 0) window.dispatchEvent(new CustomEvent('dvw-files-reload'))
+      // Never reset the expanded set here: the explorer may be unmounted and unable to re-send it.
       firstReadyPending = true
-      sendWatch()
+      syncWatch(getWatchExpanded())
     }
     ws.onmessage = event => {
-      try { const value = JSON.parse(String(event.data)) as { type?: string; paths?: string[]; added?: string[] }; if (value.type === 'files.ready') { if (!firstReadyPending && Array.isArray(value.added) && value.added.length > 0) refresh(value.added); firstReadyPending = false; return } if (Array.isArray(value.paths) && value.paths.every(path => typeof path === 'string')) refresh(value.paths) } catch { /* Ignore invalid notifications. */ }
+      try { const value = JSON.parse(String(event.data)) as { type?: string; paths?: string[]; added?: string[] }; if (value.type === 'files.ready') {
+        setWatchSkipped(Array.isArray((value as { skipped?: Array<{ path: string; reason: string }> }).skipped) ? (value as { skipped: Array<{ path: string; reason: string }> }).skipped : [])
+        if (!firstReadyPending && Array.isArray(value.added) && value.added.length > 0) refresh(value.added)
+        firstReadyPending = false
+        return
+      } if (Array.isArray(value.paths) && value.paths.every(path => typeof path === 'string')) refresh(value.paths) } catch { /* Ignore invalid notifications. */ }
     }
-    return () => { closed = true; window.removeEventListener('dvw-watch-paths', sendWatch); ws.close() }
-  }, [snapshot.visible, sessionId, workspace, refreshChangedTabs])
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    ws.onclose = () => {
+      if (closed) return
+      // A dropped socket silently stops every notification; reconnect and resend the manifest.
+      retryTimer = setTimeout(() => setWatchRetry(value => value + 1), nextRetryDelay(watchRetry))
+    }
+    return () => { closed = true; clearTimeout(retryTimer); window.removeEventListener('dvw-watch-paths', onWatchPaths); window.removeEventListener('dvw-watch-tabs', onWatchTabs); ws.close() }
+  }, [snapshot.visible, sessionId, workspace, refreshChangedTabs, watchRetry])
   useEffect(() => {
     if (!snapshot.visible || sessionId === undefined || workspace === undefined) return
     for (const group of groups) {

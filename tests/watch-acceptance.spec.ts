@@ -40,7 +40,8 @@ function makeWorkspace(count: number): { root: string; wide: string; deep: strin
   return { root, wide: 'wide', deep }
 }
 
-// Removing tens of thousands of files takes longer than the default hook budget.\nafterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force: true, maxRetries: 5 }) }, 180000)
+// Removing tens of thousands of files takes longer than the default hook budget.
+afterAll(() => { for (const root of roots) rmSync(root, { recursive: true, force: true, maxRetries: 5 }) }, 180000)
 
 it.skipIf(!enabled)('watches only the paths the manifest names, and releases them again', async () => {
   const { root, wide } = makeWorkspace(scale)
@@ -82,7 +83,7 @@ it.skipIf(!enabled)('watches only the paths the manifest names, and releases the
   expect(first.watching).toEqual([''])
   expect(second.added).toEqual([wide])
   // The watcher may index the direct children of a watched directory, but never a sibling subtree.
-  expect(watchedAfterExpand.filter(path => path.includes(`${wide}/`))).toEqual([])
+  expect(watchedAfterExpand.filter(path => path.startsWith(join(root, wide) + sep))).toEqual([])
   // Direct children of the root stay indexed while the root itself is watched; what must vanish
   // is any watch *inside* the collapsed directory.
   expect(watchedAfterCollapse.filter(path => path.startsWith(join(root, wide) + sep) || path.startsWith(join(root, wide) + '/'))).toEqual([])

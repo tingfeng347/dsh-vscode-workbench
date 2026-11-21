@@ -22,7 +22,7 @@ import { DshBrowserPage } from './DshBrowserPage.tsx'
 import { createLeaf, dropPosition, MAX_PANES, paneCount, normalizeLayout, removeGroup, setRatio, splitAt, type PaneNode, type SplitDirection, type SplitPosition } from './panes.ts'
 import { moveTabToGroup, swapActiveTab } from './tabs.ts'
 import { RESTORE_STEP_MS, shouldPauseRestore, splitRestore } from './restore.ts'
-import { mergeWatchPaths, nextRetryDelay } from './watch-paths.ts'
+import { getWatchExpanded, mergeWatchPaths, nextRetryDelay, setWatchExpanded } from './watch-paths.ts'
 import { debugController } from './debug.ts'
 import type { NativeBrowser, BrowserSnapshot } from './browser.ts'
 import { dshPanelLabel } from './dshPanels.ts'
@@ -465,6 +465,7 @@ function Explorer(props: { sessionId: string; cwd?: string; selected?: string; o
   const [pendingDelete, setPendingDelete] = useState<FileEntry[]>()
   // The host only watches what the user can see; this is that set, minus the root it always keeps.
   useEffect(() => {
+    setWatchExpanded(['', ...expanded])
     window.dispatchEvent(new CustomEvent('dvw-watch-paths', { detail: ['', ...expanded] }))
   }, [expanded, props.cwd])
   // A saved tree can hold dozens of directories; expanding them all at once starts that many
@@ -1567,8 +1568,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     let watchPaths: string[] = ['']
     let watchVersion = 0
     // The explorer owns the expanded set; the tabs own the open files. Both feed one manifest.
-    let expandedDetail: string[] = ['']
-    let reconnected = false
+    let expandedDetail: string[] = getWatchExpanded()
     const sendWatch = () => {
       // Test doubles and older shells may expose a socket without send(); never assume it.
       if (closed || ws.readyState !== WebSocket.OPEN || typeof ws.send !== 'function') return
@@ -1596,9 +1596,10 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
       window.addEventListener('dvw-watch-paths', onWatchPaths)
       window.addEventListener('dvw-watch-tabs', onWatchTabs)
       // The first open has nothing to catch up on; a later one always does.
-      if (reconnected) window.dispatchEvent(new CustomEvent('dvw-files-reload'))
-      reconnected = true
-      syncWatch([''])
+      // A later open means notifications were missed; re-read what is visible.
+      if (watchRetry > 0) window.dispatchEvent(new CustomEvent('dvw-files-reload'))
+      // Never reset the expanded set here: the explorer may be unmounted and unable to re-send it.
+      syncWatch(getWatchExpanded())
     }
     ws.onmessage = event => {
       try { const value = JSON.parse(String(event.data)) as { type?: string; paths?: string[]; added?: string[] }; if (value.type === 'files.ready') {

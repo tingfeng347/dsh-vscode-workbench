@@ -1,5 +1,6 @@
 import { expect, it } from 'vitest'
-import { isStaleManifest, mergeWatchPaths, nextRetryDelay, nextWatchVersion } from '../src/client/watch-paths.ts'
+import { isStaleManifest, nextWatchVersion } from '../src/workspace-watch.ts'
+import { mergeWatchPaths, nextRetryDelay } from '../src/client/watch-paths.ts'
 
 it('always includes the workspace root', () => {
   expect(mergeWatchPaths([], [])).toEqual([''])

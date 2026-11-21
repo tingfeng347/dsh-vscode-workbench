@@ -21,7 +21,7 @@ import { officePdf, officePdfBuffer, officeStatus } from './office.ts'
 import { WorkspaceSite } from './site.ts'
 import type { SearchFileEdits, SearchRequest } from './types.ts'
 import { watchIgnore, workspaceWatchIgnores } from './watch-ignore.ts'
-import { applyManifest, escapesWorkspace } from './workspace-watch.ts'
+import { applyManifest, escapesWorkspace, isStaleManifest } from './workspace-watch.ts'
 import { readBinaryBody, readBody, send, sendError, stringField, authorize, WorkbenchError } from './wire.ts'
 
 export { WorkbenchError } from './wire.ts'
@@ -420,6 +420,8 @@ export function apply(ctx: HostContext): void {
         const tracked = new Set<string>()
         let appliedVersion = -1
         let rules: { isLink(absolute: string): boolean; ignored(absolute: string): boolean } | undefined
+        // The rebuild after a collapse needs the same exclusions the first watcher used.
+        let ignoreRule: ((absolute: string) => boolean) | undefined
         const send = (payload: unknown) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload)) }
         const flush = (changed: string) => {
           paths.add(changed)
@@ -431,7 +433,7 @@ export function apply(ctx: HostContext): void {
         }
         // Exclusions come from the workspace's .gitignore plus the built-in dependency/build trees.
         void workspaceWatchIgnores(workspace).then(extra => {
-          const ignored = watchIgnore(workspace, extra)
+          const ignored = ignoreRule = watchIgnore(workspace, extra)
           const workspaceReal = realpathSync(workspace)
           const instance = watcher = chokidar.watch([], {
             ignoreInitial: true, followSymlinks: false, depth: 0, ignored,
@@ -477,7 +479,7 @@ export function apply(ctx: HostContext): void {
         // replayed instead of being silently dropped.
         let pendingManifest: { version: number; paths: string[] } | undefined
         const applyWatch = (version: number, list: string[]) => {
-          if (version <= appliedVersion) return
+          if (isStaleManifest(version, appliedVersion)) return
           if (rules === undefined) { pendingManifest = { version, paths: list }; return }
           appliedVersion = version
           clearTimeout(legacyTimer)
@@ -485,7 +487,23 @@ export function apply(ctx: HostContext): void {
           legacy = undefined
           const backend = {
             add(absolute: string) { tracked.add(absolute); void watcher?.add(absolute) },
-            unwatch(absolute: string) { tracked.delete(absolute); void watcher?.unwatch(absolute) },
+            // chokidar's unwatch() drops only the closer for the directory itself; the per-child
+            // file closers it created keep the handle alive. Rebuilding from the surviving set
+            // releases them, which is what "collapse releases the watch" has to mean.
+            unwatch(absolute: string) {
+              tracked.delete(absolute)
+              void watcher?.close()
+              const rebuilt = watcher = chokidar.watch([...tracked], {
+                ignoreInitial: true, followSymlinks: false, depth: 0, ignored: ignoreRule ?? (() => false),
+                awaitWriteFinish: { stabilityThreshold: 100, pollInterval: 50 },
+              })
+              rebuilt.on('all', onChange)
+              rebuilt.on('error', error => {
+                console.warn('[dsh-vscode-workbench] file watcher stopped:', error)
+                send({ type: 'files.watch-error', message: String(error) })
+                void rebuilt.close()
+              })
+            },
           }
           const result = applyManifest(workspace, { version, paths: list }, new Set(tracked), backend, rules, join)
           // The client refreshes exactly the directories it asked for, which closes the window

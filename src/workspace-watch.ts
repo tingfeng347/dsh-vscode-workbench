@@ -86,7 +86,8 @@ export function applyManifest(
     if ('reason' in normalized) { skipped.push({ path: raw, reason: normalized.reason }); continue }
     const relative = normalized.path
     const absolute = relative === '' ? root : join(root, relative)
-    if (rules.isLink(absolute)) { skipped.push({ path: relative, reason: 'link' }); continue }
+    // The root arrives from the session's cwd, never from the manifest, so it is never refused.
+    if (relative !== '' && rules.isLink(absolute)) { skipped.push({ path: relative, reason: 'link' }); continue }
     if (relative !== '' && rules.ignored(absolute)) { skipped.push({ path: relative, reason: 'ignored' }); continue }
     desired.set(absolute, relative)
   }
@@ -127,4 +128,14 @@ export function escapesWorkspace(workspaceReal: string, resolved: string, separa
   if (resolved === workspaceReal) return false
   const prefix = workspaceReal.endsWith(separator) ? workspaceReal : workspaceReal + separator
   return !resolved.startsWith(prefix)
+}
+
+/** A manifest may only move forward; a stale or malformed version is ignored. */
+export function isStaleManifest(incoming: number, applied: number): boolean {
+  return !Number.isFinite(incoming) || incoming <= applied
+}
+
+/** The next manifest version. */
+export function nextWatchVersion(previous: number): number {
+  return previous + 1
 }

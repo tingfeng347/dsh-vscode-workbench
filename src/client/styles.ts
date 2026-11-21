@@ -507,6 +507,7 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-debug{display:flex;flex-direction:column;height:100%;min-height:0;color:var(--dvw-text);font:12px/1.5 var(--dvw-font,system-ui)}
 .dvw-debug-toolbar{display:flex;align-items:center;gap:4px;padding:4px 8px;border-bottom:1px solid var(--dvw-border-soft)}
 .dvw-debug-toolbar .dvw-icon{width:24px;height:22px;font-size:12px}
+.dvw-status-warn{color:#b8860b;cursor:help;margin-left:8px}
 .dvw-status-action{margin-left:8px;height:18px;padding:0 6px;border:1px solid var(--dvw-border-soft);border-radius:3px;background:transparent;color:inherit;font-size:11px;cursor:pointer}
 .dvw-status-action:disabled{opacity:.4;cursor:default}
 .dvw-status-action:hover:not(:disabled){background:var(--dvw-hover)}

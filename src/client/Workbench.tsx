@@ -21,6 +21,8 @@ import { DshPanelPage } from './DshPanelPage.tsx'
 import { DshBrowserPage } from './DshBrowserPage.tsx'
 import { createLeaf, dropPosition, MAX_PANES, paneCount, normalizeLayout, removeGroup, setRatio, splitAt, type PaneNode, type SplitDirection, type SplitPosition } from './panes.ts'
 import { moveTabToGroup, swapActiveTab } from './tabs.ts'
+import { RESTORE_STEP_MS, shouldPauseRestore, splitRestore } from './restore.ts'
+import { mergeWatchPaths, nextRetryDelay } from './watch-paths.ts'
 import { debugController } from './debug.ts'
 import type { NativeBrowser, BrowserSnapshot } from './browser.ts'
 import { dshPanelLabel } from './dshPanels.ts'
@@ -417,6 +419,12 @@ function Tree({ sessionId, root, path, depth, expanded, selected, selectedPaths,
       .catch(error => { if (!controller.signal.aborted) setError(String(error)) })
   }, [sessionId, path])
   useEffect(() => () => listing.current?.abort(), [load])
+  // The socket reconnected, so anything that changed while it was down has to be re-read.
+  useEffect(() => {
+    const reload = () => load()
+    window.addEventListener('dvw-files-reload', reload)
+    return () => window.removeEventListener('dvw-files-reload', reload)
+  }, [load])
   useEffect(load, [load])
   useEffect(() => {
     const handler = (event:Event) => { const paths=(event as CustomEvent<string[]>).detail; if(!Array.isArray(paths)||directoryAffected(path,paths))load() }; window.addEventListener('dvw-files-changed', handler); return () => window.removeEventListener('dvw-files-changed', handler)
@@ -455,7 +463,37 @@ function Explorer(props: { sessionId: string; cwd?: string; selected?: string; o
   const [selection, setSelection] = useState<TreeSelection>({ selected: new Set() })
   const [selectionEntries, setSelectionEntries] = useState<Map<string, FileEntry>>(new Map())
   const [pendingDelete, setPendingDelete] = useState<FileEntry[]>()
-  useEffect(() => { if (props.cwd) { try { setExpanded(new Set(JSON.parse(localStorage.getItem(`dvw:tree:${props.cwd}`) ?? '[]') as string[])) } catch { setExpanded(new Set()) } } }, [props.cwd])
+  // The host only watches what the user can see; this is that set, minus the root it always keeps.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('dvw-watch-paths', { detail: ['', ...expanded] }))
+  }, [expanded, props.cwd])
+  // A saved tree can hold dozens of directories; expanding them all at once starts that many
+  // directory reads before anything is on screen. Replay them shallowest-first, two at a time.
+  const restoreTimer = useRef<ReturnType<typeof setTimeout>>()
+  const restoreQueue = useRef<string[][]>([])
+  const lastUserToggle = useRef<number>()
+  useEffect(() => {
+    if (!props.cwd) return
+    clearTimeout(restoreTimer.current)
+    let saved: string[] = []
+    try { saved = JSON.parse(localStorage.getItem(`dvw:tree:${props.cwd}`) ?? '[]') as string[] } catch { saved = [] }
+    const batches = splitRestore(saved)
+    setExpanded(new Set(batches[0] ?? []))
+    restoreQueue.current = batches.slice(1)
+    const step = () => {
+      const next = restoreQueue.current[0]
+      if (next === undefined) return
+      if (shouldPauseRestore(lastUserToggle.current, Date.now())) {
+        restoreTimer.current = setTimeout(step, RESTORE_STEP_MS)
+        return
+      }
+      restoreQueue.current.shift()
+      setExpanded(current => new Set([...current, ...next]))
+      restoreTimer.current = setTimeout(step, RESTORE_STEP_MS)
+    }
+    restoreTimer.current = setTimeout(step, RESTORE_STEP_MS)
+    return () => clearTimeout(restoreTimer.current)
+  }, [props.cwd])
   useEffect(() => { if (props.cwd) localStorage.setItem(`dvw:tree:${props.cwd}`, JSON.stringify([...expanded])) }, [props.cwd, expanded])
   useEffect(() => {
     setSelection({ selected: new Set() })
@@ -672,7 +710,7 @@ function Explorer(props: { sessionId: string; cwd?: string; selected?: string; o
   return <>
     <div className="dvw-side-head">资源管理器<div className="dvw-toolbar"><input ref={picker} className="dvw-file-picker" type="file" accept="*/*" multiple onChange={event => { if (event.currentTarget.files) void upload(destination, event.currentTarget.files); event.currentTarget.value = '' }}/><button className="dvw-icon" title={`上传文件到 ${destination || '工作区根目录'}`} onClick={() => picker.current?.click()}><Icon name="cloud-upload"/></button><button className="dvw-icon" title="新建文件" onClick={() => startCreating('file')}><Icon name="new-file"/></button><button className="dvw-icon" title="新建文件夹" onClick={() => startCreating('directory')}><Icon name="new-folder"/></button><button className="dvw-icon" title="刷新" onClick={() => { window.dispatchEvent(new Event('dvw-files-changed')) }}><Icon name="refresh"/></button></div></div>
     <div className="dvw-tree" role="tree" aria-multiselectable="true" tabIndex={0} title="Ctrl/⌘ 点击多选，Shift 点击连续选择" data-dvw-upload-directory="" data-drop-target={dropTarget} onKeyDown={treeKeyDown} onDragEnter={treeDrag} onDragOver={treeDrag} onDragLeave={event => { setDropTarget(false); if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) clearMoveTarget() }} onDrop={event => { if (draggedEntry !== undefined) { void dropEntry(event, props.sessionId, ''); return } drop(event) }}>
-      <Tree sessionId={props.sessionId} root={props.cwd ?? ''} path="" depth={0} expanded={expanded} selected={props.selected} selectedPaths={selection.selected} selectedEntries={selectedEntries} statuses={statuses} onToggle={path => setExpanded(current => { const next = new Set(current); next.has(path) ? next.delete(path) : next.add(path); return next })} onSelect={selectRow} onContextSelect={contextSelectRow} onDelete={requestDelete} onRenamed={renamedSelection} onOpen={path => { lastEntry.current = { path, directory: false }; props.onOpen(path) }} onAddToDsh={props.onAddToDsh} onChange={() => window.dispatchEvent(new Event('dvw-files-changed'))} onUpload={(directory, files) => void upload(directory, files)} creating={creating} onCreatingChange={value => setCreating(current => current && ({ ...current, value, error: undefined }))} onCreatingCancel={() => setCreating(undefined)} onCreatingSubmit={() => void submitCreating()}/>
+      <Tree sessionId={props.sessionId} root={props.cwd ?? ''} path="" depth={0} expanded={expanded} selected={props.selected} selectedPaths={selection.selected} selectedEntries={selectedEntries} statuses={statuses} onToggle={path => { lastUserToggle.current = Date.now(); setExpanded(current => { const next = new Set(current); next.has(path) ? next.delete(path) : next.add(path); return next }) }} onSelect={selectRow} onContextSelect={contextSelectRow} onDelete={requestDelete} onRenamed={renamedSelection} onOpen={path => { lastEntry.current = { path, directory: false }; props.onOpen(path) }} onAddToDsh={props.onAddToDsh} onChange={() => window.dispatchEvent(new Event('dvw-files-changed'))} onUpload={(directory, files) => void upload(directory, files)} creating={creating} onCreatingChange={value => setCreating(current => current && ({ ...current, value, error: undefined }))} onCreatingCancel={() => setCreating(undefined)} onCreatingSubmit={() => void submitCreating()}/>
     </div>
     {pendingDelete !== undefined && <div className="dvw-confirm-backdrop" role="presentation"><section className="dvw-confirm" role="alertdialog" aria-modal="true" aria-labelledby="dvw-delete-title" aria-describedby="dvw-delete-message"><h2 id="dvw-delete-title">删除{pendingDelete.length > 1 ? ` ${pendingDelete.length} 个项目` : pendingDelete[0]?.kind === 'directory' ? '文件夹' : '文件'}</h2><p id="dvw-delete-message">{pendingDelete.length === 1 ? `是否删除“${pendingDelete[0]?.name}”？` : `是否删除已选择的 ${pendingDelete.length} 个项目？`}</p><p className="dvw-confirm-note">此操作无法撤销。</p><footer><button autoFocus onClick={() => setPendingDelete(undefined)}>取消</button><button className="dvw-danger-button" onClick={() => void remove()}>删除</button></footer></section></div>}
   </>
@@ -1029,6 +1067,10 @@ const GitView = memo(Git)
 
 export function Workbench({ service, browser, sessionId, cwd, navigation, dshPanelId: hostDshPanelId, onOpenDshPanel, onRestoreConversation, onCloseDshPanel, openSettings }: { service: VscodeWorkbench; browser?: NativeBrowser; sessionId?: string; cwd?: string; navigation?: DshNavigation; dshPanelId?: string; onOpenDshPanel?(panelId: string): void; onRestoreConversation?(): void; onCloseDshPanel?(): void; openSettings?(): void }) {
   const [snapshot, setSnapshot] = useState(() => service.getSnapshot()); const [panels, setPanels] = useState(() => service.getPanels())
+  // Paths the host declined to watch; shown so a missing notification is never a mystery.
+  const [watchSkipped, setWatchSkipped] = useState<Array<{ path: string; reason: string }>>([])
+  // Bumped when the files socket drops, so the effect reconnects and resends the manifest.
+  const [watchRetry, setWatchRetry] = useState(0)
   useEffect(() => service.subscribe(() => { setSnapshot(service.getSnapshot()); setPanels(service.getPanels()) }), [service])
   const [workspace,setWorkspace]=useState<{cwd:string;name:string}>()
   const [groups,setGroups]=useState<EditorGroup[]>(()=>[{id:'pane-1',tabs:[]}])
@@ -1476,6 +1518,8 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     return () => cancelIdleCallback(handle)
   }, [snapshot.visible])
   const openTabPaths = groups.flatMap(group => group.tabs).filter(tab => !tab.path.startsWith('diff:')).map(tab => tab.path).join('\0')
+  // Watch the files the user opened, even when their directory is collapsed.
+  useEffect(() => { window.dispatchEvent(new CustomEvent('dvw-watch-tabs')) }, [openTabPaths])
   useEffect(() => {
     if (workspace !== undefined) retainEditorModels(openTabPaths === '' ? [] : openTabPaths.split('\0').map(path => `${workspace.cwd}/${path}`))
   }, [workspace, openTabPaths])
@@ -1519,16 +1563,58 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     if (url === undefined) return
     const ws = new WebSocket(url)
     let closed = false
+    // Everything currently visible: the root, the expanded directories and the open files.
+    let watchPaths: string[] = ['']
+    let watchVersion = 0
+    // The explorer owns the expanded set; the tabs own the open files. Both feed one manifest.
+    let expandedDetail: string[] = ['']
+    let reconnected = false
+    const sendWatch = () => {
+      // Test doubles and older shells may expose a socket without send(); never assume it.
+      if (closed || ws.readyState !== WebSocket.OPEN || typeof ws.send !== 'function') return
+      ws.send(JSON.stringify({ type: 'watch', version: ++watchVersion, paths: watchPaths }))
+    }
+    const syncWatch = (detail?: string[]) => {
+      if (detail !== undefined) expandedDetail = detail
+      const open = groupsRef.current.flatMap(group => group.tabs).filter(tab => !tab.path.startsWith('diff:')).map(tab => tab.path)
+      watchPaths = mergeWatchPaths(expandedDetail, open)
+      sendWatch()
+    }
+    const onWatchPaths = (event: Event) => {
+      const detail = (event as CustomEvent<string[]>).detail
+      if (!Array.isArray(detail)) return
+      syncWatch(detail)
+    }
+    // Opening or closing a tab changes the set of individually watched files.
+    const onWatchTabs = () => syncWatch()
     const refresh = (paths?: string[]) => {
       if (closed) return
       refreshChangedTabs(paths)
     }
-    ws.onopen = () => refresh()
-    ws.onmessage = event => {
-      try { const value = JSON.parse(String(event.data)) as { paths?: string[] }; if (Array.isArray(value.paths) && value.paths.every(path => typeof path === 'string')) refresh(value.paths) } catch { /* Ignore invalid notifications. */ }
+    ws.onopen = () => {
+      refresh()
+      window.addEventListener('dvw-watch-paths', onWatchPaths)
+      window.addEventListener('dvw-watch-tabs', onWatchTabs)
+      // The first open has nothing to catch up on; a later one always does.
+      if (reconnected) window.dispatchEvent(new CustomEvent('dvw-files-reload'))
+      reconnected = true
+      syncWatch([''])
     }
-    return () => { closed = true; ws.close() }
-  }, [snapshot.visible, sessionId, workspace, refreshChangedTabs])
+    ws.onmessage = event => {
+      try { const value = JSON.parse(String(event.data)) as { type?: string; paths?: string[]; added?: string[] }; if (value.type === 'files.ready') {
+        setWatchSkipped(Array.isArray((value as { skipped?: Array<{ path: string; reason: string }> }).skipped) ? (value as { skipped: Array<{ path: string; reason: string }> }).skipped : [])
+        if (Array.isArray(value.added) && value.added.length > 0) refresh(value.added)
+        return
+      } if (Array.isArray(value.paths) && value.paths.every(path => typeof path === 'string')) refresh(value.paths) } catch { /* Ignore invalid notifications. */ }
+    }
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    ws.onclose = () => {
+      if (closed) return
+      // A dropped socket silently stops every notification; reconnect and resend the manifest.
+      retryTimer = setTimeout(() => setWatchRetry(value => value + 1), nextRetryDelay(watchRetry))
+    }
+    return () => { closed = true; clearTimeout(retryTimer); window.removeEventListener('dvw-watch-paths', onWatchPaths); window.removeEventListener('dvw-watch-tabs', onWatchTabs); ws.close() }
+  }, [snapshot.visible, sessionId, workspace, refreshChangedTabs, watchRetry])
   useEffect(() => {
     if (!snapshot.visible || sessionId === undefined || workspace === undefined) return
     for (const group of groups) {
@@ -2072,6 +2158,6 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     </div>}
     {sessionId!==undefined&&browserTabs.map(tab=><DshBrowserPage key={tab.id} sessionId={sessionId} tabId={tab.id} colorScheme={colorScheme} active={browserId===tab.id&&!dshTabActive&&!switcherOpen&&snapshot.visible}/>)}
     {snapshot.bottomPanel&&<section className="dvw-bottom" style={{height:panelHeight}}><div className="dvw-bottom-resizer" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();const startY=event.clientY,startHeight=panelHeight;const move=(e:PointerEvent)=>setPanelHeight(Math.max(120,Math.min(window.innerHeight-160,startHeight+startY-e.clientY)));const up=(e:PointerEvent)=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);if(startHeight+startY-e.clientY<80)service.toggleBottomPanel(snapshot.bottomPanel!)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/><div className="dvw-bottom-head"><button className="dvw-bottom-title">{panels.find(p=>p.id===snapshot.bottomPanel)?.title??snapshot.bottomPanel}</button>{snapshot.bottomPanel==='terminal'&&<button className="dvw-icon" title="新建终端" onClick={()=>window.dispatchEvent(new Event('dvw-terminal-new'))}><Icon name="add"/></button>}<button className="dvw-icon" style={{marginLeft:'auto'}} onClick={()=>service.toggleBottomPanel(snapshot.bottomPanel!)}><Icon name="close"/></button></div><div className="dvw-bottom-body">{Panel&&workspace&&<Panel sessionId={sessionId} cwd={workspace.cwd} visible colorScheme={colorScheme}/>}</div></section>}
-    <footer className="dvw-status"><div ref={setGitStatusSlot}/><span>{workspace?.cwd??cwd??''}</span>{activeTab?.external&&<span>磁盘文件已变化</span>}<button className="dvw-status-action" title={activeTab===undefined?'先在编辑器里打开一个文件':'调试当前文件（F5）'} disabled={activeTab===undefined} onClick={()=>{ if(sessionId!==undefined&&activeTab!==undefined) debugController.start(sessionId,activeTab.path,'',debugController.getSnapshot().adapterId) }}>▶ 调试</button><button className="dvw-status-action" title={activeTab===undefined?'先在编辑器里打开一个文件':'直接运行当前文件（不调试）'} disabled={activeTab===undefined} onClick={()=>{ if(sessionId!==undefined&&activeTab!==undefined) debugController.run(sessionId,activeTab.path,'') }}>▷ 运行</button><button className="dvw-icon" style={{color:'inherit',marginLeft:'auto'}} onClick={()=>service.hide()}>返回 DSH</button></footer>
+    <footer className="dvw-status"><div ref={setGitStatusSlot}/>{watchSkipped.length > 0 && <span className="dvw-status-warn" title={watchSkipped.map(row => `${row.path}（${row.reason === 'link' ? '符号链接' : row.reason === 'ignored' ? '已忽略' : row.reason}）`).join('\n')}>已跳过 {watchSkipped.length} 个不监听的路径</span>}<span>{workspace?.cwd??cwd??''}</span>{activeTab?.external&&<span>磁盘文件已变化</span>}<button className="dvw-status-action" title={activeTab===undefined?'先在编辑器里打开一个文件':'调试当前文件（F5）'} disabled={activeTab===undefined} onClick={()=>{ if(sessionId!==undefined&&activeTab!==undefined) debugController.start(sessionId,activeTab.path,'',debugController.getSnapshot().adapterId) }}>▶ 调试</button><button className="dvw-status-action" title={activeTab===undefined?'先在编辑器里打开一个文件':'直接运行当前文件（不调试）'} disabled={activeTab===undefined} onClick={()=>{ if(sessionId!==undefined&&activeTab!==undefined) debugController.run(sessionId,activeTab.path,'') }}>▷ 运行</button><button className="dvw-icon" style={{color:'inherit',marginLeft:'auto'}} onClick={()=>service.hide()}>返回 DSH</button></footer>
   </div>
 }

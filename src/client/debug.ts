@@ -91,8 +91,15 @@ export class DebugController {
 
   /** Open the bridge for a session; connecting twice keeps the newest socket. */
   connect(sessionId: string): void {
-    if (this.socket !== undefined && this.snapshot.sessionId === sessionId) return
+    const previous = this.snapshot.sessionId
+    if (this.socket !== undefined && previous === sessionId) return
     this.closeSocket()
+    // A new session usually means a new workspace: breakpoints, run state and messages queued for
+    // the old socket must not leak into it (an old reply would otherwise land on the new session).
+    if (previous !== undefined && previous !== sessionId) {
+      this.pending.length = 0
+      this.update({ breakpoints: {}, frames: [], scopes: [], variables: {}, frameId: undefined, state: 'idle', reason: undefined, console: [] })
+    }
     const url = websocketUrl(`/dsh-vscode/ws/debug?sessionId=${encodeURIComponent(sessionId)}`)
     if (url === undefined) return
     const socket = this.socket = new WebSocket(url)
@@ -147,15 +154,27 @@ export class DebugController {
         this.update({ console: [...this.snapshot.console, { kind: 'result', text: String(message.result ?? '') }] })
         break
       case 'output':
+        // The debuggee's stderr is the most useful thing a failing script prints; dropping it
+        // left the console empty while the program reported errors.
         if (message.category === 'console' || message.category === 'stdout') this.update({ console: [...this.snapshot.console, { kind: 'output', text: String(message.text ?? '') }] })
+        else if (message.category === 'stderr') this.update({ console: [...this.snapshot.console, { kind: 'error', text: String(message.text ?? '') }] })
         break
       case 'breakpoints': {
+        // The host answers with the resolved absolute path. Only refresh entries the panel knows:
+        // storing the absolute path as a new key made the next start send it back and fail the
+        // workspace check.
         const path = String(message.path)
-        this.update({ breakpoints: { ...this.snapshot.breakpoints, [path]: this.snapshot.breakpoints[path] ?? [] } })
+        if (this.snapshot.breakpoints[path] !== undefined) {
+          this.update({ breakpoints: { ...this.snapshot.breakpoints, [path]: this.snapshot.breakpoints[path]! } })
+        }
         break
       }
       case 'error':
-        this.update({ console: [...this.snapshot.console, { kind: 'error', text: String(message.message ?? '调试错误') }] })
+        // A rejected start used to leave the panel on "启动中…" with both buttons disabled.
+        this.update({
+          console: [...this.snapshot.console, { kind: 'error', text: String(message.message ?? '调试错误') }],
+          ...(this.snapshot.state === 'starting' ? { state: 'ended' as DebugState } : {}),
+        })
         break
       case 'adapters':
         this.update({ adapters: (message.adapters ?? []) as DebugSnapshot['adapters'] })
@@ -170,7 +189,10 @@ export class DebugController {
     this.connect(sessionId === '' ? this.snapshot.sessionId ?? '' : sessionId)
     const adapter = adapterId ?? this.snapshot.adapterId ?? guessAdapter(program)
     this.update({ state: 'starting', console: [], adapterId: adapter })
-    this.send({ type: 'start', adapterId: adapter, program, cwd, breakpoints: this.snapshot.breakpoints })
+    // Cleared files leave an empty list behind; sending those keys makes the host resolve paths
+    // that may no longer exist.
+    const breakpoints = Object.fromEntries(Object.entries(this.snapshot.breakpoints).filter(([, list]) => list.length > 0))
+    this.send({ type: 'start', adapterId: adapter, program, cwd, breakpoints })
   }
 
   /** The active file decides the default adapter, unless the user picked one explicitly. */

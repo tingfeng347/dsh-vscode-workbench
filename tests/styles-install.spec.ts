@@ -31,4 +31,13 @@ describe('installStyles', () => {
     expect(css).toContain('.dvw-debug-paused-line')
     dispose()
   })
+
+  test('maps every codicon the workbench renders, including the debug entry', () => {
+    const dispose = installStyles()
+    const css = document.head.querySelector(SELECTOR)?.textContent ?? ''
+    // The activity bar renders Icon name="debug-alt"; without this rule the button is blank.
+    expect(css).toContain('.codicon-debug-alt:before{content:"\\eb91"}')
+    expect(css).toContain('.codicon-terminal:before')
+    dispose()
+  })
 })

@@ -150,10 +150,14 @@ export async function resolveDebugPaths(
   try {
     switch (message.type) {
       case 'start': {
+        // The program is the target of this launch: if it escapes the workspace the launch fails.
         const program = await resolve(message.program)
         const breakpoints: Record<string, DebugBreakpoint[]> = {}
         for (const [path, list] of Object.entries(message.breakpoints ?? {})) {
-          breakpoints[await resolve(path)] = list
+          if (list.length === 0) continue
+          // A breakpoint left on a deleted (or no longer resolvable) file must not block a launch
+          // of a file that is perfectly valid: skip it instead of failing the whole start.
+          try { breakpoints[await resolve(path)] = list } catch { /* stale breakpoint */ }
         }
         return { ...message, program, breakpoints }
       }
@@ -242,6 +246,8 @@ class NodeDebugSession {
   private readonly scopeChains = new Map<string, CdpScope[]>()
   /** scriptId → file path; Node omits `url` on call frames, so this is the only source of paths. */
   private readonly scripts = new Map<string, string>()
+  /** Breakpoints currently bound at the runtime, so a line removed while paused can be unbound. */
+  private readonly bound = new Map<string, Map<number, { id: string; condition?: string }>>()
 
   constructor(private readonly send: (message: DebugOutgoing) => void) {}
 
@@ -255,13 +261,16 @@ class NodeDebugSession {
     })
     const url = await new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Node 没有在 15 秒内打开调试端口')), 15000)
-      const listen = (chunk: Buffer) => {
+      let opened = false
+      // Keep forwarding stderr after the inspector URL appears: it is the only place a failing
+      // script explains itself, and removing the listener here used to swallow it entirely.
+      child.stderr?.on('data', (chunk: Buffer) => {
         const text = chunk.toString()
         this.send({ type: 'output', category: 'stderr', text })
+        if (opened) return
         const match = /ws:\/\/[^\s]+/.exec(text)
-        if (match !== null) { clearTimeout(timer); resolve(match[0]); child.stderr?.off('data', listen) }
-      }
-      child.stderr?.on('data', listen)
+        if (match !== null) { opened = true; clearTimeout(timer); resolve(match[0]) }
+      })
       child.stdout?.on('data', chunk => this.send({ type: 'output', category: 'stdout', text: String(chunk) }))
       child.on('error', error => { clearTimeout(timer); reject(error) })
       child.on('exit', code => { clearTimeout(timer); reject(new Error(`进程退出（${code ?? 0}）`)) })
@@ -326,8 +335,12 @@ class NodeDebugSession {
       const params = message.params as { reason?: string; callFrames?: CdpFrame[] } | undefined
       if (this.skipEntryPause) {
         this.skipEntryPause = false
-        void this.request('Debugger.resume').catch(() => undefined)
-        return
+        // `--inspect-brk` pauses before the first line; resuming past that would swallow a
+        // breakpoint the user set on the first executable statement.
+        if (!this.pausedOnBreakpoint(params)) {
+          void this.request('Debugger.resume').catch(() => undefined)
+          return
+        }
       }
       this.stopped = true
       this.objects.clear()
@@ -349,6 +362,14 @@ class NodeDebugSession {
       this.send({ type: 'stack', frames: this.frames })
       return
     }
+    if (message.method === 'Runtime.executionContextDestroyed') {
+      // The debuggee finished. Node keeps the process alive ("Waiting for the debugger to
+      // disconnect…") until the inspector socket closes, so the end event must come from here.
+      this.send({ type: 'state', state: 'ended' })
+      this.send({ type: 'ended', code: 0 })
+      this.cleanup()
+      return
+    }
     if (message.method === 'Debugger.resumed') { this.stopped = false; this.send({ type: 'state', state: 'running' }); return }
     if (message.method === 'Runtime.consoleAPICalled') {
       const params = message.params as { args?: CdpRemote[] } | undefined
@@ -364,6 +385,20 @@ class NodeDebugSession {
 
   private urlToPath(url: string): string | undefined {
     try { return url.startsWith('file:') ? fileURLToPath(url) : url } catch { return url }
+  }
+
+  /** Whether the paused location itself carries a user breakpoint (used to keep the entry pause). */
+  private pausedOnBreakpoint(params: { callFrames?: CdpFrame[] } | undefined): boolean {
+    const frame = params?.callFrames?.[0]
+    if (frame === undefined) return false
+    const scriptId = frame.location.scriptId
+    const path = frame.url !== undefined && frame.url !== '' ? this.urlToPath(frame.url) : (scriptId === undefined ? undefined : this.scripts.get(scriptId))
+    if (path === undefined) return false
+    const line = frame.location.lineNumber + 1
+    for (const [key, list] of this.breakpoints) {
+      if (sameFile(key, path) && list.some(row => row.line === line)) return true
+    }
+    return false
   }
 
   private remoteText(value: CdpRemote): string {
@@ -400,16 +435,28 @@ class NodeDebugSession {
   private async applyBreakpoints(path: string, breakpoints: DebugBreakpoint[]): Promise<void> {
     if (this.socket === undefined) return
     const urlRegex = fileUrlRegex(path)
+    const previous = this.bound.get(path) ?? new Map<number, { id: string; condition?: string }>()
+    const next = new Map<number, { id: string; condition?: string }>()
     const verified: boolean[] = []
     for (const breakpoint of breakpoints) {
+      const condition = breakpoint.condition === undefined || breakpoint.condition === '' ? undefined : breakpoint.condition
+      const existing = previous.get(breakpoint.line)
+      if (existing !== undefined && existing.condition === condition) { next.set(breakpoint.line, existing); verified.push(true); continue }
+      if (existing !== undefined) await this.request('Debugger.removeBreakpoint', { breakpointId: existing.id }).catch(() => undefined)
       try {
         const result = await this.request('Debugger.setBreakpointByUrl', {
           lineNumber: breakpoint.line - 1, urlRegex,
-          ...(breakpoint.condition === undefined || breakpoint.condition === '' ? {} : { condition: breakpoint.condition }),
-        }) as { locations?: unknown[] }
+          ...(condition === undefined ? {} : { condition }),
+        }) as { breakpointId?: string; locations?: unknown[] }
+        if (result?.breakpointId !== undefined) next.set(breakpoint.line, { id: result.breakpointId, condition })
         verified.push(Array.isArray(result?.locations) && result.locations.length > 0)
       } catch { verified.push(false) }
     }
+    // A line removed while paused must be unbound at the runtime, or continuing stops there again.
+    for (const [line, stale] of previous) {
+      if (!next.has(line)) await this.request('Debugger.removeBreakpoint', { breakpointId: stale.id }).catch(() => undefined)
+    }
+    this.bound.set(path, next)
     this.send({ type: 'breakpoints', path, verified })
   }
 
@@ -480,6 +527,7 @@ class NodeDebugSession {
     this.objects.clear()
     this.scopeChains.clear()
     this.scripts.clear()
+    this.bound.clear()
     try { this.socket?.close() } catch { /* already closed */ }
     this.socket = undefined
     if (this.child !== undefined) { killTree(this.child); this.child = undefined }
@@ -880,6 +928,59 @@ class RunSession {
   }
 
   cleanup(): void { if (this.child !== undefined) { killTree(this.child); this.child = undefined } }
+}
+
+export interface DebugBridgeOptions {
+  /** Session workspace; every path a frame mentions is resolved inside it. */
+  workspace: string
+  adaptersRoot: string
+  /** Resolve a workspace-relative path to an absolute one; must throw when it escapes. */
+  resolvePath(path: string): Promise<string>
+  send(message: DebugOutgoing): void
+}
+
+/**
+ * One debug websocket: validate the frame, pin every path to the session workspace, then hand the
+ * result to a debug session. Extracted from the host route so a real WebSocket can drive exactly
+ * the same pipeline in a regression test.
+ */
+export function createDebugBridge(options: DebugBridgeOptions): { accept(raw: string | Buffer): Promise<void>; dispose(): void } {
+  // Resolved absolute path → the path the panel sent, so breakpoint results echo the relative form.
+  const displayPaths = new Map<string, string>()
+  const session = createDebugSession(message => {
+    if (message.type !== 'breakpoints') { options.send(message); return }
+    const original = displayPaths.get(message.path)
+    options.send(original === undefined ? message : { ...message, path: original })
+  }, { adaptersRoot: options.adaptersRoot })
+  let disposed = false
+  const reject = (message: string) => {
+    options.send({ type: 'error', message })
+    // A rejected start must leave the panel retryable instead of stuck on "启动中…".
+    options.send({ type: 'state', state: 'ended' })
+  }
+  let chain: Promise<void> = Promise.resolve()
+  return {
+    accept(raw) {
+      chain = chain.then(async () => {
+        if (disposed) return
+        const message = parseDebugMessage(raw)
+        if (message === undefined) { reject('调试消息格式无效'); return }
+        const resolved = await resolveDebugPaths(message, async path => {
+          const absolute = await options.resolvePath(path)
+          displayPaths.set(absolute, path)
+          return absolute
+        })
+        if (resolved === undefined) { reject('调试路径不在工作区内'); return }
+        // The panel never knows the workspace directory; every launch runs in the session's.
+        session.handle(resolved.type === 'start' || resolved.type === 'attach' || resolved.type === 'run' ? { ...resolved, cwd: options.workspace } : resolved)
+      }).catch(() => undefined)
+      return chain
+    },
+    dispose() {
+      disposed = true
+      session.dispose()
+    },
+  }
 }
 
 /** Create the handler for one workbench debug websocket. */

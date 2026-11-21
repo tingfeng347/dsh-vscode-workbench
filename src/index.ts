@@ -16,7 +16,7 @@ import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import { commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, type CommitModelCatalog, type CommitModelSelection, type DshChatModelCatalog } from './commit-message.ts'
 import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitPreviewFile, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, replaceSearchResults, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host.ts'
 import { installLsp, lspStatuses, resolveLsp, uninstallLsp, pipeLanguageServer } from './lsp.ts'
-import { createDebugSession, parseDebugMessage, resolveDebugPaths } from './debug.ts'
+import { createDebugBridge } from './debug.ts'
 import { officePdf, officePdfBuffer, officeStatus } from './office.ts'
 import { WorkspaceSite } from './site.ts'
 import type { SearchFileEdits, SearchRequest } from './types.ts'
@@ -537,25 +537,17 @@ export function apply(ctx: HostContext): void {
         // Adapters live outside the profile so a venv or adapter bundle never lands in the app dir.
         const adaptersRoot = process.env.DSH_WORKBENCH_ADAPTERS ?? joinPath(homedir(), '.dsh', 'workbench-adapters')
         traceDebug(`debug-ws-connect session=${sessionId}`)
-        const session = createDebugSession(message => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)) }, { adaptersRoot })
-        const reject = (message: string) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'error', message })) }
-        // Frames are resolved in arrival order: an adapter must never see a relative path, and a
-        // path outside the workspace must never reach it at all.
-        let chain: Promise<void> = Promise.resolve()
-        ws.on('message', data => {
-          const raw = data as Buffer
-          chain = chain.then(async () => {
-            if (ws.readyState !== WebSocket.OPEN) return
-            const message = parseDebugMessage(raw)
-            if (message === undefined) { reject('调试消息格式无效'); return }
-            const resolved = await resolveDebugPaths(message, path => workspacePath(workspace, path).then(found => found.absolute))
-            if (resolved === undefined) { reject('调试路径不在工作区内'); return }
-            // The panel never knows the workspace directory; every launch runs in the session's.
-            session.handle(resolved.type === 'start' || resolved.type === 'attach' || resolved.type === 'run' ? { ...resolved, cwd: workspace } : resolved)
-          }).catch(() => undefined)
+        const bridge = createDebugBridge({
+          workspace,
+          adaptersRoot,
+          resolvePath: async path => (await workspacePath(workspace, path)).absolute,
+          send: message => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)) },
         })
-        ws.on('close', () => session.dispose())
-        ws.on('error', () => session.dispose())
+        // Frames are handled in arrival order: an adapter must never see a relative path, and a
+        // path outside the workspace must never reach it at all.
+        ws.on('message', data => { void bridge.accept(data as Buffer) })
+        ws.on('close', () => bridge.dispose())
+        ws.on('error', () => bridge.dispose())
       })
     },
   }), 'dsh-vscode-workbench: debug bridge')

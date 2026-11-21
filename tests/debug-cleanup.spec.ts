@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { expect, it } from 'vitest'
@@ -94,7 +94,10 @@ it('stops on a Node breakpoint, reports the frame source, and kills the debuggee
 
   const events: DebugOutgoing[] = []
   const session = createDebugSession(message => events.push(message))
-  session.handle({ type: 'start', adapterId: 'node', program, cwd: directory, breakpoints: { [program]: [{ line: 3 }] } })
+  // The host resolves paths through the workspace (realpath) before they reach an adapter; macOS
+  // temp directories are symlinks, so the breakpoint has to use the real path or it never binds.
+  const target = realpathSync(program)
+  session.handle({ type: 'start', adapterId: 'node', program: target, cwd: directory, breakpoints: { [target]: [{ line: 3 }] } })
 
   // `--inspect-brk` pauses at entry first; the session resumes past it, so wait for the stop that
   // actually landed on the breakpoint line instead of the first stack event.
@@ -103,7 +106,7 @@ it('stops on a Node breakpoint, reports the frame source, and kills the debuggee
   const frame = stack?.type === 'stack' ? stack.frames[0] : undefined
   // The call stack jump needs the source path and line, not just a function name.
   expect(frame?.line).toBe(3)
-  expect(sameFile(frame?.path, program), `frame=${JSON.stringify(frame)} program=${program}`).toBe(true)
+  expect(sameFile(frame?.path, target), `frame=${JSON.stringify(frame)} program=${target}`).toBe(true)
 
   await waitFor(() => existsSync(pidFile))
   const pid = Number(readFileSync(pidFile, 'utf8'))

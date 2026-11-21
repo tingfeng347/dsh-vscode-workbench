@@ -2,8 +2,11 @@
 import { inspectReview, rejectReview, reviewFeed, reviewPath } from './review.ts'
 import { createReadStream } from 'node:fs'
 import { readFile, stat } from 'node:fs/promises'
+import { appendFileSync, lstatSync, realpathSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import type { IncomingMessage } from 'node:http'
-import { isAbsolute, relative, sep } from 'node:path'
+import { isAbsolute, join, join as joinPath, relative, sep } from 'node:path'
+import { homedir } from 'node:os'
 import type { Duplex } from 'node:stream'
 import { spawn } from 'node:child_process'
 import chokidar from 'chokidar'
@@ -13,6 +16,7 @@ import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import { commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, type CommitModelCatalog, type CommitModelSelection, type DshChatModelCatalog } from './commit-message.ts'
 import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitPreviewFile, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, replaceSearchResults, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host.ts'
 import { installLsp, lspStatuses, resolveLsp, uninstallLsp, pipeLanguageServer } from './lsp.ts'
+import { createDebugBridge } from './debug.ts'
 import { officePdf, officePdfBuffer, officeStatus } from './office.ts'
 import { WorkspaceSite } from './site.ts'
 import type { SearchFileEdits, SearchRequest } from './types.ts'
@@ -38,6 +42,22 @@ interface DesktopOpener {
 }
 
 const NATIVE_OPEN_TIMEOUT_MS = 15000
+
+/** Deadlines for API calls that wait on an external process; everything else settles on its own. */
+const API_DEADLINES: Record<string, number> = {
+  'lsp.install': 10 * 60 * 1000,
+  'lsp.uninstall': 10 * 60 * 1000,
+}
+
+function withDeadline<T>(work: Promise<T>, ms: number, method: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new WorkbenchError('timeout', `${method} 超过 ${Math.round(ms / 1000)} 秒未返回`, 504)), ms)
+    work.then(
+      value => { clearTimeout(timer); resolve(value) },
+      cause => { clearTimeout(timer); reject(cause) },
+    )
+  })
+}
 
 function stringArrayField(body: Record<string, unknown>, key: string): string[] {
   const value = body[key]
@@ -83,6 +103,22 @@ async function loadChatModelCatalog(
     if (timer !== undefined) clearTimeout(timer)
     if (abortListener !== undefined) signal?.removeEventListener('abort', abortListener)
   }
+}
+
+/** Probes that spawn processes: serving a recent answer keeps startup from queueing behind them. */
+const probeCache = new Map<string, { at: number; value: unknown }>()
+
+async function cached<T>(key: string, ttl: number, produce: () => Promise<T> | T): Promise<T> {
+  const hit = probeCache.get(key)
+  if (hit !== undefined && Date.now() - hit.at < ttl) return hit.value as T
+  const value = await produce()
+  probeCache.set(key, { at: Date.now(), value })
+  return value
+}
+
+/** Evidence marker: if the new client bundle runs, it opens the debug socket on mount. */
+function traceDebug(text: string): void {
+  try { appendFileSync(joinPath(tmpdir(), 'dvw-api.log'), `${new Date().toISOString()} ${text}\n`) } catch { /* diagnosis only */ }
 }
 
 async function dispatch(ctx: HostContext, method: string, body: Record<string, unknown>, signal?: AbortSignal, site?: WorkspaceSite): Promise<unknown> {
@@ -180,18 +216,18 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
       if (site === undefined) throw new WorkbenchError('site-unavailable', 'HTML 预览服务不可用', 503)
       return { url: await site.url(sessionId, stringField(body, 'path')) }
     }
-    case 'workspace.open': return openWorkspaceFromPicker(dshDirectoryPicker, dshWorkspaceRegistry, AbortSignal.timeout(10 * 60 * 1000))
-    case 'lsp.status': return lspStatuses()
-    case 'lsp.install': await installLsp(stringField(body, 'id')); return lspStatuses()
-    case 'lsp.uninstall': await uninstallLsp(stringField(body, 'id')); return lspStatuses()
+    case 'workspace.open': return openWorkspaceFromPicker(dshDirectoryPicker, dshWorkspaceRegistry, signal ?? new AbortController().signal)
+    case 'lsp.status': return cached('lsp.status', 15_000, () => lspStatuses())
+    case 'lsp.install': await installLsp(stringField(body, 'id'), signal); probeCache.delete('lsp.status'); return lspStatuses()
+    case 'lsp.uninstall': await uninstallLsp(stringField(body, 'id')); probeCache.delete('lsp.status'); return lspStatuses()
     case 'search': return searchWorkspace(cwd, body as unknown as SearchRequest, signal)
     case 'search.replace':
       if (cwd !== stringField(body, 'cwd')) throw new WorkbenchError('workspace-changed', '工作区已切换，请重新搜索', 409)
       return replaceSearchResults(cwd, body.files as SearchFileEdits[])
-    case 'git.status': return gitStatus(cwd)
+    case 'git.status': return cached(`git.status:${cwd}`, 3_000, () => gitStatus(cwd))
     case 'git.blameRange': return gitBlameRange(cwd, body.source, body.startLine, body.endLine, signal)
     case 'git.blameLine': return gitBlameLine(cwd, body.source, body.line, signal)
-    case 'git.action': return gitAction(cwd, stringField(body, 'action'), typeof body.path === 'string' ? body.path : undefined, typeof body.value === 'string' ? body.value : undefined)
+    case 'git.action': probeCache.delete(`git.status:${cwd}`); return gitAction(cwd, stringField(body, 'action'), typeof body.path === 'string' ? body.path : undefined, typeof body.value === 'string' ? body.value : undefined)
     case 'git.commitMessage': {
       const hasExplicitSelection = body.provider !== undefined || body.model !== undefined
       const selection = hasExplicitSelection
@@ -313,7 +349,15 @@ export function apply(ctx: HostContext): void {
         res.once('close', () => { if (!res.writableEnded) controller.abort() })
         const path = new URL(req.url ?? '/', 'http://dsh.local').pathname
         const method = path.slice('/dsh-vscode/api/'.length)
-        send(res, 200, { ok: true, value: await dispatch(ctx, method, await readBody(req), controller.signal, site) })
+        const body = await readBody(req)
+        // Only calls that wait on something external get a deadline. A directory picker waits for
+        // the user and an LSP install waits for npm, so one shared 8 second cap used to 504 them
+        // while the work kept running in the background. Everything else is bounded inside itself.
+        const deadline = API_DEADLINES[method]
+        const value = deadline === undefined
+          ? await dispatch(ctx, method, body, controller.signal, site)
+          : await withDeadline(dispatch(ctx, method, body, controller.signal, site), deadline, method)
+        send(res, 200, { ok: true, value })
       } catch (error) { sendError(res, error) }
     },
   }), 'dsh-vscode-workbench: API')
@@ -411,7 +455,7 @@ export function apply(ctx: HostContext): void {
             pendingManifest = undefined
             applyWatch(queued.version, queued.paths)
           }
-        }).catch(error => { send({ type: 'files.watch-error', message: String(error) }) })
+}).catch(error => { send({ type: 'files.watch-error', message: String(error) }) })
         // A client that never sends a manifest still expects notifications for the whole tree.
         const legacyTimer = setTimeout(() => {
           if (appliedVersion >= 0) return
@@ -477,5 +521,36 @@ export function apply(ctx: HostContext): void {
     },
   }), 'dsh-vscode-workbench: language server bridge')
   ctx.effect(() => () => { lspWss.close() }, 'dsh-vscode-workbench: language server teardown')
+  const debugWss = new WebSocketServer({ noServer: true })
+  ctx.effect(() => ctx.webServer.registerUpgrade({
+    path: '/dsh-vscode/ws/debug', handler(req, socket, head) {
+      if (ctx.connection.requestRejection(req) !== undefined) { socket.destroy(); return }
+      debugWss.handleUpgrade(req as IncomingMessage, socket as Duplex, head, ws => {
+        const search = new URL(req.url ?? '/', 'http://dsh.local').searchParams
+        const sessionId = search.get('sessionId')
+        // The bridge spawns and kills processes, so it only exists inside a real DSH session.
+        if (sessionId === null || sessionId === '') { ws.close(1008, 'sessionId is required'); return }
+        let workspace: string
+        try { workspace = cwdFor(ctx, sessionId) }
+        catch { ws.close(1008, 'session workspace unavailable'); return }
+        // The session owns a spawned runtime, so every message is resolved inside its workspace.
+        // Adapters live outside the profile so a venv or adapter bundle never lands in the app dir.
+        const adaptersRoot = process.env.DSH_WORKBENCH_ADAPTERS ?? joinPath(homedir(), '.dsh', 'workbench-adapters')
+        traceDebug(`debug-ws-connect session=${sessionId}`)
+        const bridge = createDebugBridge({
+          workspace,
+          adaptersRoot,
+          resolvePath: async path => (await workspacePath(workspace, path)).absolute,
+          send: message => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)) },
+        })
+        // Frames are handled in arrival order: an adapter must never see a relative path, and a
+        // path outside the workspace must never reach it at all.
+        ws.on('message', data => { void bridge.accept(data as Buffer) })
+        ws.on('close', () => bridge.dispose())
+        ws.on('error', () => bridge.dispose())
+      })
+    },
+  }), 'dsh-vscode-workbench: debug bridge')
+  ctx.effect(() => () => { debugWss.close() }, 'dsh-vscode-workbench: debug teardown')
   ctx.effect(() => () => { wss.close() }, 'dsh-vscode-workbench: watcher teardown')
 }

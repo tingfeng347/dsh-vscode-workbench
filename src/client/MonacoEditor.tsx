@@ -561,7 +561,7 @@ export interface MonacoReviewProps {
   onReject(id: string): void
 }
 
-export function MonacoEditor(props: { uri: string; value: string; theme: MonacoColorScheme; line?: number; column?: number; fontSize?: number; minimap?: boolean; highlight?: string; focusOnReveal?: boolean; review?: MonacoReviewProps; blame?: { sessionId: string; path: string; revision: string; dirty: boolean }; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
+export function MonacoEditor(props: { uri: string; value: string; theme: MonacoColorScheme; line?: number; column?: number; fontSize?: number; minimap?: boolean; highlight?: string; focusOnReveal?: boolean; review?: MonacoReviewProps; blame?: { sessionId: string; path: string; revision: string; dirty: boolean }; breakpoints?: number[]; pausedLine?: number; onToggleBreakpoint?(line: number): void; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
   const root = useRef<HTMLDivElement>(null)
   const editor = useRef<import('monaco-editor').editor.IStandaloneCodeEditor>()
   const lineBlame = useRef<ReturnType<typeof createGitLineBlame>>()
@@ -752,12 +752,40 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
   }
   // One editor instance serves every text tab: switching tabs swaps its model
   // instead of rebuilding Monaco's DOM, workers and services.
+  // Breakpoint dots and the paused line are decorations on the existing model, so no rebuild.
+  useEffect(() => {
+    const instance = editor.current
+    const model = instance?.getModel()
+    if (instance === undefined || model === null || model === undefined) return
+    const collections = (instance as unknown as { __dvwDebug?: import('monaco-editor').editor.IEditorDecorationsCollection }).__dvwDebug
+      ?? instance.createDecorationsCollection([])
+    ;(instance as unknown as { __dvwDebug?: unknown }).__dvwDebug = collections
+    const decorations = (props.breakpoints ?? []).map(line => ({
+      range: { startLineNumber: line, startColumn: 1, endLineNumber: line, endColumn: 1 },
+      options: { isWholeLine: false, linesDecorationsClassName: 'dvw-debug-breakpoint' },
+    }))
+    if (props.pausedLine !== undefined) {
+      decorations.push({
+        range: { startLineNumber: props.pausedLine, startColumn: 1, endLineNumber: props.pausedLine, endColumn: 1 },
+        options: { isWholeLine: true, className: 'dvw-debug-paused-line', linesDecorationsClassName: 'dvw-debug-paused-arrow' },
+      } as never)
+    }
+    collections.set(decorations as never)
+  }, [props.breakpoints, props.pausedLine])
   useEffect(() => {
     let disposed = false
     void loadMonaco().then((monaco) => {
       if (disposed || root.current === null) return
       const props = latest.current
-      const instance = monaco.editor.create(root.current, { model: null, automaticLayout: true, theme: monacoThemeFor(props.theme), fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off', minimap: minimapOptions(minimapEnabled(props)) })
+const instance = monaco.editor.create(root.current, { model: null, automaticLayout: true, theme: monacoThemeFor(props.theme), fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off', minimap: minimapOptions(minimapEnabled(props)) })
+      // Breakpoints live in the line-decorations strip so the layout does not shift, and a click
+      // there toggles one exactly like VS Code's gutter.
+      instance.onMouseDown(event => {
+        const type = event.target.type
+        if (type !== monaco.editor.MouseTargetType.GUTTER_LINE_DECORATIONS && type !== monaco.editor.MouseTargetType.GUTTER_LINE_NUMBERS) return
+        const line = event.target.position?.lineNumber
+        if (line !== undefined) latest.current.onToggleBreakpoint?.(line)
+      })
       localizeMonacoActions(instance)
       editor.current = instance
       const attribution = createGitLineBlame()

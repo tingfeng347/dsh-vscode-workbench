@@ -161,7 +161,7 @@ export async function lspStatuses(): Promise<LspStatus[]> {
 }
 
 /** Install an npm-distributed server into the plugin's private directory. */
-export async function installLsp(id: string): Promise<void> {
+export async function installLsp(id: string, signal?: AbortSignal): Promise<void> {
   const server = definition(id)
   if (server.install.kind !== 'npm') throw new WorkbenchError('lsp-manual', server.install.hint, 409)
   const directory = join(lspRoot(), id)
@@ -171,14 +171,18 @@ export async function installLsp(id: string): Promise<void> {
       cwd: directory, shell: process.platform === 'win32', windowsHide: true,
     })
     let error = ''
+    let settled = false
     child.stderr.on('data', chunk => { error = (error + String(chunk)).slice(-4000) })
-    const timer = setTimeout(() => { child.kill(); reject(new WorkbenchError('lsp-timeout', '语言服务器安装超时', 504)) }, 10 * 60 * 1000)
-    child.on('error', cause => { clearTimeout(timer); reject(new WorkbenchError('lsp-install', String(cause), 500)) })
-    child.on('close', code => {
-      clearTimeout(timer)
+    const finish = (action: () => void) => { if (settled) return; settled = true; clearTimeout(timer); signal?.removeEventListener('abort', abort); action() }
+    const timer = setTimeout(() => { child.kill(); finish(() => reject(new WorkbenchError('lsp-timeout', '语言服务器安装超时', 504))) }, 10 * 60 * 1000)
+    // Cancelling the request has to stop npm; otherwise the UI gives up while the install continues.
+    const abort = () => { child.kill(); finish(() => reject(new WorkbenchError('lsp-cancel', '语言服务器安装已取消', 499))) }
+    signal?.addEventListener('abort', abort, { once: true })
+    child.on('error', cause => finish(() => reject(new WorkbenchError('lsp-install', String(cause), 500))))
+    child.on('close', code => finish(() => {
       if (code === 0) resolve()
       else reject(new WorkbenchError('lsp-install', error.trim() || `npm exited with ${code}`, 500))
-    })
+    }))
   })
 }
 

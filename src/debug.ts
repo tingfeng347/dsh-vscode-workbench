@@ -10,6 +10,7 @@ import { join } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import WebSocket from 'ws'
 import { frameLsp, lspFrameParser } from './lsp.ts'
+import { WorkbenchError } from './wire.ts'
 
 export interface DebugBreakpoint { line: number; condition?: string }
 export interface DebugFrame { id: string; name: string; path?: string; line?: number; column?: number }
@@ -247,6 +248,7 @@ class NodeDebugSession {
   private endedSent = false
   /** True for attach mode, where no child process will ever report an exit code. */
   private attached = false
+  private defaultContextId: number | undefined
   /** scope reference → CDP objectId, for both scope entries and expanded child objects. */
   private readonly objects = new Map<string, string>()
   private readonly scopeChains = new Map<string, CdpScope[]>()
@@ -367,8 +369,15 @@ class NodeDebugSession {
       this.handlePause(params)
       return
     }
+    if (message.method === 'Runtime.executionContextCreated') {
+      const params = message.params as { context?: { id: number; auxData?: { isDefault?: boolean } } } | undefined
+      if (params?.context?.auxData?.isDefault === true) this.defaultContextId = params.context.id
+      return
+    }
     if (message.method === 'Runtime.executionContextDestroyed') {
-      if (this.finished) return
+      const params = message.params as { executionContextId?: number } | undefined
+      // vm contexts have their own lifecycle. Only the default context signals program shutdown.
+      if (this.finished || this.defaultContextId === undefined || params?.executionContextId !== this.defaultContextId) return
       this.finished = true
       if (this.child === undefined) {
         // Attached target: nothing will report an exit code, so close the session here.
@@ -714,7 +723,13 @@ class DapBackend {
     const parse = lspFrameParser(message => { dapLog(`<- ${JSON.stringify(message).slice(0, 600)}`); this.receive(message as DapResponse | DapEvent) })
     child.stdout?.on('data', chunk => parse(chunk as Buffer))
     child.stderr?.on('data', chunk => this.send({ type: 'output', category: 'stderr', text: String(chunk) }))
-    child.on('exit', code => { this.send({ type: 'state', state: 'ended' }); this.send({ type: 'ended', code: code ?? 0 }); this.cleanup() })
+    child.on('exit', code => {
+      if (this.child !== child) return
+      this.child = undefined
+      this.send({ type: 'state', state: 'ended' })
+      this.send({ type: 'ended', code: code ?? 0 })
+      this.cleanup()
+    })
     // A missing adapter binary never reaches 'exit'; without this the launch promise hangs.
     child.on('error', error => {
       this.send({ type: 'error', message: `调试适配器启动失败：${error.message}` })
@@ -723,11 +738,11 @@ class DapBackend {
     })
 
     const initialized = new Promise<void>(resolve => { this.onInitialized = resolve })
-    await this.request('initialize', {
+    const initialize = await this.request('initialize', {
       clientID: 'dsh-vscode-workbench', clientName: 'DSH Workbench', adapterID: 'dsh-workbench',
       linesStartAt1: true, columnsStartAt1: true, pathFormat: 'path', supportsRunInTerminalRequest: false,
     })
-    await Promise.race([initialized, new Promise(resolve => setTimeout(resolve, 4000))])
+    const supportsConfigurationDone = (initialize.body as { supportsConfigurationDoneRequest?: boolean } | undefined)?.supportsConfigurationDoneRequest === true
     const launchArgs = {
       program: options.program, args: options.args, cwd: this.cwd, console: 'internalConsole', justMyCode: false,
       stopOnEntry: this.forceEntryStop ? true : options.stopOnEntry,
@@ -737,21 +752,34 @@ class DapBackend {
     if (this.breakpointsFirst) {
       // Verified against GDB 15: pending breakpoints -> launch -> configurationDone stops on the
       // breakpoint; an automatic continue here runs the program straight past it.
+      await this.waitForInitialization(initialized)
       for (const [path, list] of this.breakpoints) await this.applyBreakpoints(path, list)
-      await this.request('launch', launchArgs, DAP_LAUNCH_TIMEOUT_MS).catch(() => undefined)
+      await this.request('launch', launchArgs, DAP_LAUNCH_TIMEOUT_MS)
       const entryStop = new Promise<void>(resolve => { this.onStop = resolve })
-      await this.request('configurationDone', {}, DAP_LAUNCH_TIMEOUT_MS).catch(() => undefined)
+      if (supportsConfigurationDone) await this.request('configurationDone', {}, DAP_LAUNCH_TIMEOUT_MS)
       await Promise.race([entryStop, new Promise(resolve => setTimeout(resolve, 4000))])
       return
     }
 
     // Verified against debugpy: it needs launch first (breakpoints go to a server that does not
     // exist yet otherwise), and it answers launch only after configurationDone.
-    const launching = this.request('launch', launchArgs, DAP_LAUNCH_TIMEOUT_MS)
-    for (const [path, list] of this.breakpoints) await this.applyBreakpoints(path, list)
-    void launching.catch(() => undefined)
-    await this.request('configurationDone', {}, DAP_LAUNCH_TIMEOUT_MS).catch(() => undefined)
-    this.send({ type: 'state', state: 'running' })
+    const configure = async () => {
+      await this.waitForInitialization(initialized)
+      if (this.child !== child) return
+      for (const [path, list] of this.breakpoints) await this.applyBreakpoints(path, list)
+      if (supportsConfigurationDone) await this.request('configurationDone', {}, DAP_LAUNCH_TIMEOUT_MS)
+    }
+    await Promise.all([this.request('launch', launchArgs, DAP_LAUNCH_TIMEOUT_MS), configure()])
+    if (!this.stopped && this.child === child) this.send({ type: 'state', state: 'running' })
+  }
+
+  private async waitForInitialization(initialized: Promise<void>): Promise<void> {
+    let timer: ReturnType<typeof setTimeout> | undefined
+    try {
+      await Promise.race([initialized, new Promise<void>(resolve => { timer = setTimeout(resolve, 4000) })])
+    } finally {
+      clearTimeout(timer)
+    }
   }
 
   async attach(): Promise<void> { throw new Error('该适配器暂不支持附加模式') }
@@ -911,6 +939,8 @@ class DapBackend {
 
   cleanup(): void {
     this.stopped = false
+    this.onInitialized?.()
+    this.onInitialized = undefined
     // Waiting requests must settle, or the serial command queue never reaches the next message.
     const waiting = [...this.pending.values()]
     this.pending.clear()
@@ -1025,12 +1055,25 @@ export function createDebugBridge(options: DebugBridgeOptions): { accept(raw: st
         if (disposed) return
         const message = parseDebugMessage(raw)
         if (message === undefined) { reject('调试消息格式无效'); return }
+        let pathError: unknown
         const resolved = await resolveDebugPaths(message, async path => {
-          const absolute = await options.resolvePath(path)
-          displayPaths.set(absolute, path)
-          return absolute
+          try {
+            const absolute = await options.resolvePath(path)
+            displayPaths.set(absolute, path)
+            return absolute
+          } catch (error) {
+            pathError = error
+            throw error
+          }
         })
-        if (resolved === undefined) { reject('调试路径不在工作区内', message.type === 'start' || message.type === 'run' || message.type === 'attach'); return }
+        if (resolved === undefined) {
+          const launch = message.type === 'start' || message.type === 'run'
+          const detail = pathError instanceof WorkbenchError && pathError.code === 'not-found'
+            ? (launch ? `工作区内找不到调试文件：${message.program}` : '工作区内找不到断点对应的文件')
+            : '调试路径不在工作区内'
+          reject(detail, launch)
+          return
+        }
         // The panel never knows the workspace directory; every launch runs in the session's.
         session.handle(resolved.type === 'start' || resolved.type === 'attach' || resolved.type === 'run' ? { ...resolved, cwd: options.workspace } : resolved)
       }).catch(() => undefined)

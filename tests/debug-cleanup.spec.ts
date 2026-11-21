@@ -1,12 +1,59 @@
-import { existsSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, it } from 'vitest'
+import { expect, it, vi } from 'vitest'
 import { createDebugSession, sameFile, type DebugOutgoing } from '../src/debug.ts'
 
 const alive = (pid: number): boolean => {
   try { process.kill(pid, 0); return true } catch { return false }
 }
+
+it('reports a DAP launch rejection and allows retry in the same session', async () => {
+  const { directory, program } = idleProgram()
+  writeFileSync(join(directory, 'adapter.cjs'), String.raw`
+let input = Buffer.alloc(0)
+let seq = 0
+process.stdin.on('data', chunk => {
+  input = Buffer.concat([input, chunk])
+  for (;;) {
+    const delimiter = input.indexOf('\r\n\r\n')
+    if (delimiter < 0) return
+    const size = Number(/Content-Length: (\d+)/i.exec(input.subarray(0, delimiter).toString())[1])
+    const end = delimiter + 4 + size
+    if (input.length < end) return
+    const request = JSON.parse(input.subarray(delimiter + 4, end))
+    input = input.subarray(end)
+    const success = request.command !== 'launch' || request.arguments.args.includes('valid')
+    reply({ type: 'response', request_seq: request.seq, command: request.command, success,
+      body: request.command === 'initialize' ? { supportsConfigurationDoneRequest: true } : {},
+      ...(success ? {} : { message: 'launch rejected by test adapter' }) })
+    if (request.command === 'launch' && success) reply({ type: 'event', event: 'initialized' })
+  }
+})
+function reply(message) {
+  const body = JSON.stringify({ ...message, seq: ++seq })
+  process.stdout.write('Content-Length: ' + Buffer.byteLength(body) + '\r\n\r\n' + body)
+}
+`)
+  vi.stubEnv('DSH_DEBUG_ADAPTER_COMMAND', process.execPath)
+  vi.stubEnv('DSH_DEBUG_ADAPTER_ARGS', 'adapter.cjs')
+  const events: DebugOutgoing[] = []
+  const session = createDebugSession(message => events.push(message))
+  try {
+    session.handle({ type: 'start', adapterId: 'custom', program, cwd: directory, breakpoints: { [program]: [{ line: 1 }] } })
+    await waitFor(() => events.some(event => event.type === 'error' || event.type === 'state' && event.state === 'running'))
+    expect(events).toContainEqual({ type: 'error', message: 'launch rejected by test adapter' })
+    expect(events).toContainEqual({ type: 'state', state: 'ended' })
+    expect(events).not.toContainEqual({ type: 'state', state: 'running' })
+
+    session.handle({ type: 'start', adapterId: 'custom', program, cwd: directory, args: ['valid'] })
+    await waitFor(() => events.some(event => event.type === 'state' && event.state === 'running'))
+  } finally {
+    session.dispose()
+    vi.unstubAllEnvs()
+    rmSync(directory, { recursive: true, force: true })
+  }
+}, 25_000)
 
 async function waitFor(check: () => boolean, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs

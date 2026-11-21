@@ -275,6 +275,19 @@ it('shares the diff layout across new and existing files and restores it after r
   expect(state.diff?.mode).toBe('inline')
 })
 
+it('only offers to launch the source file when switching between a file and its Git diff', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: ['a.js'], active: 'a.js' }, [], [
+    { path: 'a.js', index: '.', worktree: 'M', staged: false, untracked: false },
+  ])
+  const actions = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.dvw-status-action'))
+  expect(actions().map(button => button.disabled)).toEqual([false, false])
+  await act(async () => document.querySelector<HTMLElement>('.dvw-change')!.click())
+  expect(actions().map(button => button.disabled)).toEqual([true, true])
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-tab-path="a.js"]')!.click())
+  expect(actions().map(button => button.disabled)).toEqual([false, false])
+})
+
 it('uses one persisted switch for line blame in both the file editor and Git diffs', async () => {
   localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
   await setup(false, { paths: ['a.txt'], active: 'a.txt', view: 'git' }, [], [

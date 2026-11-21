@@ -65,6 +65,31 @@ it('reports the real exit code exactly once when the script ends by itself', asy
   }
 }, 40_000)
 
+it('keeps later breakpoints after a temporary Node vm context is collected', async () => {
+  const { directory, path } = program([
+    'const vm = require("node:vm")',
+    'require("node:v8").setFlagsFromString("--expose_gc")',
+    'const gc = vm.runInNewContext("gc")',
+    'void vm.runInNewContext("1 + 1")',
+    'setTimeout(() => { for (let i = 0; i < 5; i++) gc() }, 50)',
+    'setTimeout(() => {',
+    '  console.log("later statement")',
+    '}, 500)',
+  ].join('\n'))
+  const events: DebugOutgoing[] = []
+  const session = createDebugSession(message => events.push(message))
+  try {
+    run(session, { type: 'start', adapterId: 'node', program: path, cwd: directory, breakpoints: { [path]: [{ line: 7 }] } })
+    await waitFor(() => stopped(events) || ended(events).length > 0, 5_000)
+    expect(frames(events)[0]?.line).toBe(7)
+    run(session, { type: 'resume' })
+    await waitFor(() => ended(events).length > 0)
+    expect(ended(events)).toEqual([{ type: 'ended', code: 0 }])
+  } finally {
+    session.dispose()
+  }
+}, 25_000)
+
 it('stops on a breakpoint set on the first executable statement', async () => {
   const { directory, path } = program('const value = 1\nconsole.log(value)\n')
   const events: DebugOutgoing[] = []

@@ -85,3 +85,21 @@ it('shows the debuggee stderr in the console', () => {
   socket.receive({ type: 'output', category: 'stderr', text: 'boom from stderr' })
   expect(controller.getSnapshot().console.some(entry => entry.text.includes('boom from stderr'))).toBe(true)
 })
+
+it('reconnects after a workspace change within the same session and ignores old replies', () => {
+  const controller = new DebugController()
+  controller.setSession('s1', '/old')
+  const first = FakeSocket.instances.at(-1)!
+  first.open()
+  controller.toggleBreakpoint('s1', 'a.js', 2)
+  controller.setSession('s1', '/new')
+  const second = FakeSocket.instances.at(-1)!
+  expect(second).not.toBe(first)
+  expect(first.readyState).toBe(FakeSocket.CLOSED)
+  first.receive({ type: 'state', state: 'stopped' })
+  expect(controller.getSnapshot()).toMatchObject({ state: 'idle', breakpoints: {}, conditionTarget: undefined })
+  second.open()
+  controller.start('s1', 'b.js', '')
+  expect(last(second, 'start')).toMatchObject({ program: 'b.js', breakpoints: {} })
+  controller.dispose()
+})

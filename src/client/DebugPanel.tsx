@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react'
+import { useEffect, useState, useSyncExternalStore } from 'react'
 import type { DebugController, DebugScope, DebugVariable } from './debug.ts'
 
 /** Bottom-panel debugger: toolbar, call stack, scopes, watch expressions and the debug console. */
-export function DebugPanel({ controller, sessionId, activePath, onOpenFrame }: {
+export function DebugPanel({ controller, sessionId, onOpenFrame }: {
   controller: DebugController
   sessionId: string
-  activePath?: string
   onOpenFrame?(path: string, line?: number): void
 }) {
   const snapshot = useSyncExternalStore(controller.subscribe, controller.getSnapshot)
@@ -16,7 +15,7 @@ export function DebugPanel({ controller, sessionId, activePath, onOpenFrame }: {
   // The controller needs the session before F5: without it the bridge opens on an empty session.
   useEffect(() => { controller.setSession(sessionId) }, [controller, sessionId])
   const running = snapshot.state === 'running' || snapshot.state === 'starting'
-  const active = snapshot.activePath ?? activePath
+  const active = snapshot.activePath
   const startDebug = () => controller.start(sessionId, active ?? '', '')
   const startRun = () => controller.run(sessionId, active ?? '', '')
   const paused = snapshot.state === 'stopped'
@@ -28,7 +27,7 @@ export function DebugPanel({ controller, sessionId, activePath, onOpenFrame }: {
     setDraft(row?.condition ?? '')
   }, [conditionTarget?.path, conditionTarget?.line])
 
-  const breakpoints = useMemo(() => activePath === undefined ? [] : controller.breakpointsFor(activePath), [controller, activePath, snapshot.breakpoints])
+  const breakpoints = active === undefined ? [] : snapshot.breakpoints[active] ?? []
 
   const toggle = (reference: string) => {
     setExpanded(current => {
@@ -74,7 +73,7 @@ export function DebugPanel({ controller, sessionId, activePath, onOpenFrame }: {
           <option value="all">异常：全部</option>
         </select>
         <span className="dvw-debug-spacer" />
-        <span className="dvw-debug-hint">{activePath === undefined ? '打开一个 JS 文件后按 F5' : `${breakpoints.length} 个断点`}</span>
+        <span className="dvw-debug-hint">{active === undefined ? '打开工作区内的源文件后按 F5' : `${breakpoints.length} 个断点`}</span>
       </div>
       <div className="dvw-debug-body">
         <section className="dvw-debug-column" aria-label="调用栈">

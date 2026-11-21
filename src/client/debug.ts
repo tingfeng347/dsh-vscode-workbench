@@ -74,6 +74,7 @@ export function guessAdapter(path: string | undefined): string {
 export class DebugController {
   private snapshot: DebugSnapshot = EMPTY
   private socket: WebSocket | undefined
+  private workspace: string | undefined
   private readonly listeners = new Set<() => void>()
 
   getSnapshot = (): DebugSnapshot => this.snapshot
@@ -84,31 +85,34 @@ export class DebugController {
   }
 
   /** Remember the session the panel belongs to, so F5 works before any breakpoint click. */
-  setSession(sessionId: string): void {
+  setSession(sessionId: string, workspace?: string): void {
     if (sessionId === '') return
-    this.connect(sessionId)
+    const workspaceChanged = workspace !== undefined && this.workspace !== undefined && workspace !== this.workspace
+    if (workspace !== undefined) this.workspace = workspace
+    this.connect(sessionId, workspaceChanged)
   }
 
   /** Open the bridge for a session; connecting twice keeps the newest socket. */
-  connect(sessionId: string): void {
+  connect(sessionId: string, workspaceChanged = false): void {
     const previous = this.snapshot.sessionId
-    if (this.socket !== undefined && previous === sessionId) return
+    if (this.socket !== undefined && previous === sessionId && !workspaceChanged) return
     this.closeSocket()
     // A new session usually means a new workspace: breakpoints, run state and messages queued for
     // the old socket must not leak into it (an old reply would otherwise land on the new session).
-    if (previous !== undefined && previous !== sessionId) {
+    if (workspaceChanged || (previous !== undefined && previous !== sessionId)) {
       this.pending.length = 0
-      this.update({ breakpoints: {}, frames: [], scopes: [], variables: {}, frameId: undefined, state: 'idle', reason: undefined, console: [] })
+      this.update({ breakpoints: {}, conditionTarget: undefined, frames: [], scopes: [], variables: {}, frameId: undefined, state: 'idle', reason: undefined, console: [] })
     }
     const url = websocketUrl(`/dsh-vscode/ws/debug?sessionId=${encodeURIComponent(sessionId)}`)
     if (url === undefined) return
     const socket = this.socket = new WebSocket(url)
     this.update({ sessionId })
-    socket.onopen = () => { this.flush(); this.send({ type: 'adapters' }) }
+    socket.onopen = () => { if (this.socket === socket) { this.flush(); this.send({ type: 'adapters' }) } }
     socket.onmessage = event => {
+      if (this.socket !== socket) return
       try { this.receive(JSON.parse(String(event.data)) as Record<string, unknown>) } catch { /* ignore malformed frames */ }
     }
-    socket.onerror = () => { this.update({ console: [...this.snapshot.console, { kind: 'error', text: '无法连接调试服务（WebSocket）' }] }) }
+    socket.onerror = () => { if (this.socket === socket) this.update({ console: [...this.snapshot.console, { kind: 'error', text: '无法连接调试服务（WebSocket）' }] }) }
     socket.onclose = () => { if (this.socket === socket) { this.socket = undefined; this.update({ state: this.snapshot.state === 'idle' ? 'idle' : 'ended' }) } }
   }
 

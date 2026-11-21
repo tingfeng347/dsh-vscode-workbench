@@ -1118,9 +1118,9 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const focusedGroup=groups.find(group=>group.id===focusedId)??groups[0]!
   const tabs=focusedGroup.tabs; const active=focusedGroup.active
   const debugState = useSyncExternalStore(debugController.subscribe, debugController.getSnapshot)
-  useEffect(() => { debugController.setActive(active) }, [active])
   // F5 must work even when the debug panel is closed, so the session is registered here.
-  useEffect(() => { if (sessionId !== undefined) debugController.setSession(sessionId) }, [sessionId])
+  const debugWorkspace = workspace?.cwd ?? cwd
+  useEffect(() => { if (sessionId !== undefined) debugController.setSession(sessionId, debugWorkspace) }, [sessionId,debugWorkspace])
   const setTabsIn=useCallback((id:string,update:Tab[]|((rows:Tab[])=>Tab[]))=>setGroups(current=>current.map(group=>group.id===id?{...group,tabs:typeof update==='function'?update(group.tabs):update}:group)),[])
   const setActiveIn=useCallback((id:string,value:string|undefined)=>setGroups(current=>current.map(group=>group.id===id?{...group,active:value}:group)),[])
   const setTabs=useCallback((update:Tab[]|((rows:Tab[])=>Tab[]))=>setTabsIn(focusedRef.current,update),[setTabsIn])
@@ -1995,6 +1995,9 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   const closeAll=()=>{const dirty=tabs.filter(tab=>tab.dirty);if(dirty.length>0&&!confirm(`有 ${dirty.length} 个文件包含未保存更改，确定全部关闭？`))return;loadingTabs.current.clear();setTabs([]);setActive(undefined);setError(undefined);setTabMenu(undefined)}
   const removeTabs=(targets:Tab[],verb:string)=>{if(targets.length===0)return;const dirty=targets.filter(tab=>tab.dirty).length;if(dirty>0&&!confirm(`有 ${dirty} 个文件包含未保存更改，确定${verb}？`))return;const paths=new Set(targets.map(tab=>tab.path));for(const path of paths)loadingTabs.current.delete(tabLoadKey(focusedRef.current,path));const remaining=tabsRef.current.filter(tab=>!paths.has(tab.path));setTabs(remaining);if(active!==undefined&&paths.has(active))setActive(remaining.at(-1)?.path);setTabMenu(undefined)}
   const activeTab=tabs.find(tab=>tab.path===active)
+  const debugPath = activeTab?.loaded && !activeTab.binary && !activeTab.tooLarge && !activeTab.path.startsWith('diff:') &&
+    activeTab.referenceUri === undefined && !activeTab.documentPreview && !activeTab.imageUrl ? activeTab.path : undefined
+  useEffect(() => { debugController.setActive(debugPath) }, [debugPath])
   const outlineServer=activeTab===undefined?undefined:languageServerIdForPath(activeTab.path,lspServers)
   const outlinePath=outlineServer!==undefined&&lspRuntime[outlineServer]?.state==='ready'&&activeTab?.loaded&&activeTab.diff===undefined&&activeTab.referenceUri===undefined
     ?activeTab.path:undefined
@@ -2473,6 +2476,6 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     <footer className="dvw-status"><div ref={setGitStatusSlot}/>{watchSkipped.length > 0 && <span className="dvw-status-warn" title={watchSkipped.map(row => `${row.path}（${row.reason === 'link' ? '符号链接' : row.reason === 'ignored' ? '已忽略' : row.reason}）`).join('\n')}>已跳过 {watchSkipped.length} 个不监听的路径</span>}<button type="button" className="dvw-icon dvw-status-problems" title="问题" aria-label="问题" onClick={()=>service.toggleBottomPanel('problems')}>
       <span><Icon name="error"/>{problems.filter(problem=>problem.marker.severity===8).length}</span>
       <span><Icon name="warning"/>{problems.filter(problem=>problem.marker.severity===4).length}</span>
-    </button><span>{workspace?.cwd??cwd??''}</span>{activeTab?.referenceUri!==undefined&&<span><Icon name="lock"/> 只读</span>}{activeTab?.external&&<span>磁盘文件已变化</span>}<button className="dvw-status-action" title={activeTab===undefined?'先在编辑器里打开一个文件':'调试当前文件（F5）'} disabled={activeTab===undefined} onClick={()=>{ if(sessionId!==undefined&&activeTab!==undefined) debugController.start(sessionId,activeTab.path,'',debugController.getSnapshot().adapterId) }}>▶ 调试</button><button className="dvw-status-action" title={activeTab===undefined?'先在编辑器里打开一个文件':'直接运行当前文件（不调试）'} disabled={activeTab===undefined} onClick={()=>{ if(sessionId!==undefined&&activeTab!==undefined) debugController.run(sessionId,activeTab.path,'') }}>▷ 运行</button><button className="dvw-icon" style={{color:'inherit',marginLeft:'auto'}} onClick={()=>service.hide()}>返回 DSH</button></footer>
+    </button><span>{workspace?.cwd??cwd??''}</span>{activeTab?.referenceUri!==undefined&&<span><Icon name="lock"/> 只读</span>}{activeTab?.external&&<span>磁盘文件已变化</span>}<button className="dvw-status-action" title={debugPath===undefined?'先打开工作区内的源文件':'调试当前文件（F5）'} disabled={debugPath===undefined} onClick={()=>{ if(sessionId!==undefined&&debugPath!==undefined) debugController.start(sessionId,debugPath,'',debugController.getSnapshot().adapterId) }}>▶ 调试</button><button className="dvw-status-action" title={debugPath===undefined?'先打开工作区内的源文件':'直接运行当前文件（不调试）'} disabled={debugPath===undefined} onClick={()=>{ if(sessionId!==undefined&&debugPath!==undefined) debugController.run(sessionId,debugPath,'') }}>▷ 运行</button><button className="dvw-icon" style={{color:'inherit',marginLeft:'auto'}} onClick={()=>service.hide()}>返回 DSH</button></footer>
   </div>
 }

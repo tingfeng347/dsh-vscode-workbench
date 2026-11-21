@@ -2,10 +2,11 @@ import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { tmpdir } from 'node:os'
-import { join, resolve, sep } from 'node:path'
+import { join } from 'node:path'
 import { afterEach, expect, it } from 'vitest'
 import { WebSocket, WebSocketServer } from 'ws'
 import { createDebugBridge } from '../src/debug.ts'
+import { workspacePath } from '../src/host.ts'
 
 // Production entry: the panel talks to `/dsh-vscode/ws/debug`, the route validates every frame and
 // pins paths to the session workspace before a debug session sees it. These tests drive that
@@ -29,15 +30,6 @@ function workspaceWith(source: string): { root: string; program: string } {
   return { root, program }
 }
 
-/** Resolve like the host's workspacePath: absolute, real, and never outside the workspace. */
-function resolver(root: string): (path: string) => Promise<string> {
-  return async path => {
-    const absolute = realpathSync(resolve(root, path))
-    if (absolute !== root && !absolute.startsWith(root + sep)) throw new Error('outside workspace')
-    return absolute
-  }
-}
-
 async function connect(root: string): Promise<{ socket: WebSocket; events: Array<Record<string, unknown>>; send(message: unknown): void }> {
   const events: Array<Record<string, unknown>> = []
   const wss = new WebSocketServer({ noServer: true })
@@ -47,7 +39,7 @@ async function connect(root: string): Promise<{ socket: WebSocket; events: Array
       const bridge = createDebugBridge({
         workspace: root,
         adaptersRoot: '',
-        resolvePath: resolver(root),
+        resolvePath: async path => (await workspacePath(root, path)).absolute,
         send: message => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)) },
       })
       ws.on('message', data => { void bridge.accept(data as Buffer) })
@@ -120,18 +112,18 @@ it('keeps a running session alive when a breakpoint update is rejected', async (
   await waitFor(() => events.some(event => event.type === 'ended'))
 }, 60_000)
 
-it('reports an invalid target once and stays retryable', async () => {
+it('reports a missing workspace file once and starts a valid file on retry', async () => {
   const { root } = workspaceWith('console.log("ok")\n')
   const { send, events } = await connect(root)
 
-  send({ type: 'start', program: '../outside.js', cwd: '' })
-  await waitFor(() => errors(events))
-  await waitFor(() => ended(events))
+  send({ type: 'start', program: 'deleted.js', cwd: '' })
+  await waitFor(() => errors(events).length > 0 && ended(events) !== undefined)
   expect(errors(events)).toHaveLength(1)
-  expect(String(errors(events)[0]?.message)).toContain('工作区')
+  expect(errors(events)[0]?.message).toBe('工作区内找不到调试文件：deleted.js')
 
   // Retrying with a valid target must work immediately after the rejection.
+  const retryFrom = events.length
   send({ type: 'start', program: 'target.js', cwd: '' })
-  await waitFor(() => events.some(event => event.type === 'state' && event.state === 'running' || event.type === 'ended'))
+  await waitFor(() => events.slice(retryFrom).some(event => event.type === 'ended' && event.code === 0))
   expect(errors(events)).toHaveLength(1)
 }, 60_000)

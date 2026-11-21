@@ -61,15 +61,13 @@ export function createWorkspaceWatcher(options: WorkspaceWatcherOptions): Worksp
 
   const backend: WatchBackend = {
     add(absolute) { tracked.add(absolute); void instance.add(absolute) },
-    // chokidar's unwatch() only drops the closer for the directory itself; the per-child file
-    // closers it created keep the handle alive. Rebuilding from the surviving set releases them,
-    // which is what "collapsing releases the watch" has to mean.
+    // Measured with chokidar 4.0.3 in this exact configuration (depth 0, directory added on
+    // its own): after unwatch() a write to a direct child produces no event, so no rebuild is
+    // needed. The stale-closer behaviour only appears for recursive watchers, which this host
+    // never uses.
     unwatch(absolute) {
       tracked.delete(absolute)
-      void instance.close()
-      instance = attach(chokidar.watch([...tracked], {
-        ignoreInitial: true, followSymlinks: false, depth: 0, ignored: options.ignored, awaitWriteFinish: WAIT,
-      }))
+      void instance.unwatch(absolute)
     },
   }
 

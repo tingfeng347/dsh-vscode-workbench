@@ -21,6 +21,8 @@ import { DshPanelPage } from './DshPanelPage.tsx'
 import { DshBrowserPage } from './DshBrowserPage.tsx'
 import { createLeaf, dropPosition, MAX_PANES, paneCount, normalizeLayout, removeGroup, setRatio, splitAt, type PaneNode, type SplitDirection, type SplitPosition } from './panes.ts'
 import { moveTabToGroup, swapActiveTab } from './tabs.ts'
+import { RESTORE_STEP_MS, shouldPauseRestore, splitRestore } from './restore.ts'
+import { getWatchExpanded, mergeWatchPaths, setWatchExpanded } from './watch-paths.ts'
 import type { NativeBrowser, BrowserSnapshot } from './browser.ts'
 import { dshPanelLabel } from './dshPanels.ts'
 import { ActivityBar, normalizeActivityLayout, normalizeActivityOrder, type ActivityView } from './ActivityBar.tsx'
@@ -446,8 +448,39 @@ function Explorer(props: { sessionId: string; cwd?: string; selected?: string; o
   const [selection, setSelection] = useState<TreeSelection>({ selected: new Set() })
   const [selectionEntries, setSelectionEntries] = useState<Map<string, FileEntry>>(new Map())
   const [pendingDelete, setPendingDelete] = useState<FileEntry[]>()
-  useEffect(() => { if (props.cwd) { try { setExpanded(new Set(JSON.parse(localStorage.getItem(`dvw:tree:${props.cwd}`) ?? '[]') as string[])) } catch { setExpanded(new Set()) } } }, [props.cwd])
+  // A saved tree can hold dozens of directories; expanding them all at once starts that many
+  // directory reads before anything is on screen. Replay them shallowest-first, two at a time.
+  const restoreTimer = useRef<ReturnType<typeof setTimeout>>()
+  const restoreQueue = useRef<string[][]>([])
+  const lastUserToggle = useRef<number>()
+  useEffect(() => {
+    if (!props.cwd) return
+    clearTimeout(restoreTimer.current)
+    let saved: string[] = []
+    try { saved = JSON.parse(localStorage.getItem(`dvw:tree:${props.cwd}`) ?? '[]') as string[] } catch { saved = [] }
+    const batches = splitRestore(saved)
+    setExpanded(new Set(batches[0] ?? []))
+    restoreQueue.current = batches.slice(1)
+    const step = () => {
+      const next = restoreQueue.current[0]
+      if (next === undefined) return
+      if (shouldPauseRestore(lastUserToggle.current, Date.now())) {
+        restoreTimer.current = setTimeout(step, RESTORE_STEP_MS)
+        return
+      }
+      restoreQueue.current.shift()
+      setExpanded(current => new Set([...current, ...next]))
+      restoreTimer.current = setTimeout(step, RESTORE_STEP_MS)
+    }
+    restoreTimer.current = setTimeout(step, RESTORE_STEP_MS)
+    return () => clearTimeout(restoreTimer.current)
+  }, [props.cwd])
   useEffect(() => { if (props.cwd) localStorage.setItem(`dvw:tree:${props.cwd}`, JSON.stringify([...expanded])) }, [props.cwd, expanded])
+  // The host only watches what the user can see; this is that set, minus the root it always keeps.
+  useEffect(() => {
+    setWatchExpanded(['', ...expanded])
+    window.dispatchEvent(new CustomEvent('dvw-watch-paths'))
+  }, [expanded, props.cwd])
   useEffect(() => {
     setSelection({ selected: new Set() })
     setSelectionEntries(new Map())
@@ -663,7 +696,7 @@ function Explorer(props: { sessionId: string; cwd?: string; selected?: string; o
   return <>
     <div className="dvw-side-head">资源管理器<div className="dvw-toolbar"><input ref={picker} className="dvw-file-picker" type="file" accept="*/*" multiple onChange={event => { if (event.currentTarget.files) void upload(destination, event.currentTarget.files); event.currentTarget.value = '' }}/><button className="dvw-icon" title={`上传文件到 ${destination || '工作区根目录'}`} onClick={() => picker.current?.click()}><Icon name="cloud-upload"/></button><button className="dvw-icon" title="新建文件" onClick={() => startCreating('file')}><Icon name="new-file"/></button><button className="dvw-icon" title="新建文件夹" onClick={() => startCreating('directory')}><Icon name="new-folder"/></button><button className="dvw-icon" title="刷新" onClick={() => { window.dispatchEvent(new Event('dvw-files-changed')) }}><Icon name="refresh"/></button></div></div>
     <div className="dvw-tree" role="tree" aria-multiselectable="true" tabIndex={0} title="Ctrl/⌘ 点击多选，Shift 点击连续选择" data-dvw-upload-directory="" data-drop-target={dropTarget} onKeyDown={treeKeyDown} onDragEnter={treeDrag} onDragOver={treeDrag} onDragLeave={event => { setDropTarget(false); if (!(event.relatedTarget instanceof Node && event.currentTarget.contains(event.relatedTarget))) clearMoveTarget() }} onDrop={event => { if (draggedEntry !== undefined) { void dropEntry(event, props.sessionId, ''); return } drop(event) }}>
-      <Tree sessionId={props.sessionId} root={props.cwd ?? ''} path="" depth={0} expanded={expanded} selected={props.selected} selectedPaths={selection.selected} selectedEntries={selectedEntries} statuses={statuses} onToggle={path => setExpanded(current => { const next = new Set(current); next.has(path) ? next.delete(path) : next.add(path); return next })} onSelect={selectRow} onContextSelect={contextSelectRow} onDelete={requestDelete} onRenamed={renamedSelection} onOpen={path => { lastEntry.current = { path, directory: false }; props.onOpen(path) }} onAddToDsh={props.onAddToDsh} onChange={() => window.dispatchEvent(new Event('dvw-files-changed'))} onUpload={(directory, files) => void upload(directory, files)} creating={creating} onCreatingChange={value => setCreating(current => current && ({ ...current, value, error: undefined }))} onCreatingCancel={() => setCreating(undefined)} onCreatingSubmit={() => void submitCreating()}/>
+      <Tree sessionId={props.sessionId} root={props.cwd ?? ''} path="" depth={0} expanded={expanded} selected={props.selected} selectedPaths={selection.selected} selectedEntries={selectedEntries} statuses={statuses} onToggle={path => { lastUserToggle.current = Date.now(); setExpanded(current => { const next = new Set(current); next.has(path) ? next.delete(path) : next.add(path); return next }) }} onSelect={selectRow} onContextSelect={contextSelectRow} onDelete={requestDelete} onRenamed={renamedSelection} onOpen={path => { lastEntry.current = { path, directory: false }; props.onOpen(path) }} onAddToDsh={props.onAddToDsh} onChange={() => window.dispatchEvent(new Event('dvw-files-changed'))} onUpload={(directory, files) => void upload(directory, files)} creating={creating} onCreatingChange={value => setCreating(current => current && ({ ...current, value, error: undefined }))} onCreatingCancel={() => setCreating(undefined)} onCreatingSubmit={() => void submitCreating()}/>
     </div>
     {pendingDelete !== undefined && <div className="dvw-confirm-backdrop" role="presentation"><section className="dvw-confirm" role="alertdialog" aria-modal="true" aria-labelledby="dvw-delete-title" aria-describedby="dvw-delete-message"><h2 id="dvw-delete-title">删除{pendingDelete.length > 1 ? ` ${pendingDelete.length} 个项目` : pendingDelete[0]?.kind === 'directory' ? '文件夹' : '文件'}</h2><p id="dvw-delete-message">{pendingDelete.length === 1 ? `是否删除“${pendingDelete[0]?.name}”？` : `是否删除已选择的 ${pendingDelete.length} 个项目？`}</p><p className="dvw-confirm-note">此操作无法撤销。</p><footer><button autoFocus onClick={() => setPendingDelete(undefined)}>取消</button><button className="dvw-danger-button" onClick={() => void remove()}>删除</button></footer></section></div>}
   </>
@@ -1502,15 +1535,30 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     if (url === undefined) return
     const ws = new WebSocket(url)
     let closed = false
+    // Everything currently visible: the root, the expanded directories and the open files.
+    let watchVersion = 0
+    let firstReadyPending = true
+    const sendWatch = () => {
+      // Test doubles and older shells may expose a socket without send(); never assume it.
+      if (closed || ws.readyState !== WebSocket.OPEN || typeof ws.send !== 'function') return
+      const open = groupsRef.current.flatMap(group => group.tabs).filter(tab => !tab.path.startsWith('diff:')).map(tab => tab.path)
+      ws.send(JSON.stringify({ type: 'watch', version: ++watchVersion, paths: mergeWatchPaths(getWatchExpanded(), open) }))
+    }
     const refresh = (paths?: string[]) => {
       if (closed) return
       refreshChangedTabs(paths)
     }
-    ws.onopen = () => refresh()
-    ws.onmessage = event => {
-      try { const value = JSON.parse(String(event.data)) as { paths?: string[] }; if (Array.isArray(value.paths) && value.paths.every(path => typeof path === 'string')) refresh(value.paths) } catch { /* Ignore invalid notifications. */ }
+    ws.onopen = () => {
+      refresh()
+      window.addEventListener('dvw-watch-paths', sendWatch)
+      // onopen refreshes everything once; the first ready reply would only repeat that work.
+      firstReadyPending = true
+      sendWatch()
     }
-    return () => { closed = true; ws.close() }
+    ws.onmessage = event => {
+      try { const value = JSON.parse(String(event.data)) as { type?: string; paths?: string[]; added?: string[] }; if (value.type === 'files.ready') { if (!firstReadyPending && Array.isArray(value.added) && value.added.length > 0) refresh(value.added); firstReadyPending = false; return } if (Array.isArray(value.paths) && value.paths.every(path => typeof path === 'string')) refresh(value.paths) } catch { /* Ignore invalid notifications. */ }
+    }
+    return () => { closed = true; window.removeEventListener('dvw-watch-paths', sendWatch); ws.close() }
   }, [snapshot.visible, sessionId, workspace, refreshChangedTabs])
   useEffect(() => {
     if (!snapshot.visible || sessionId === undefined || workspace === undefined) return

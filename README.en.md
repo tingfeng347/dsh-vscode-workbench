@@ -24,21 +24,50 @@
   <a href="https://deepseekplugin.org/en/plugins/tingfeng347-dsh-vscode-workbench"><img src="https://img.shields.io/badge/DeepseekPlugin-Listed-2563eb?style=flat" alt="Listed on DeepseekPlugin"></a>
 </p>
 
-## Highlights
+## Installation
 
-- **One local workbench**: explorer, Monaco editor, search, Git, terminal, and DSH conversation in one VS Code-style interface.
-- **Complete file experience**: open text, Markdown, images, PDF, Word, Excel, and PowerPoint files directly; the tree supports drag-and-drop uploads and common file operations.
-- **Reliable and live**: atomic saves and revision checks prevent silent overwrites, while WebSocket updates flag external workspace changes.
-- **Visual Git workflow**: status, staging, commits, branches, diffs, commit files, a swimlane commit graph, and AI-generated commit messages from the current changes.
-- **Persistent workspace context**: restore tabs, tree, views, panels, and widths per workspace; terminals support multiple sessions, splits, and rename.
-- **Two ways to open**: fill the window as before, or float the workbench over DSH with dragging, eight-way resizing, and real fullscreen.
-- **Built for DSH**: reuse the DSH conversation surface on the right and manage theme and layout from the Workbench page in DSH settings.
+The plugin requires DeepSeek Harness `>=0.2.1-rc.1` at install time. The current test baseline is `0.2.2-rc.5` (Cordis `4.1.0`).
+
+```bash
+npm i -g @deepseek-ai/dsh@0.2.2-rc.5
+dsh plugin --profile web add dsh-vscode-workbench
+```
+
+Installing from the DSH Plugins page or a marketplace enables the plugin automatically. After a CLI install, add `dsh-vscode-workbench` to `dsh.profile.bundles` in `~/.dsh/profiles/web/package.json` and restart `dsh web`. After it starts, open VS Code Workbench from the DSH sidebar. The plugin enables the official terminal and built-in browser. See [Installation](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.en.md) for upgrades and Harness compatibility failures.
+
+## Features
+
+| Area | What you can do |
+| --- | --- |
+| Explorer | Create, rename, move, and delete files or folders. Upload by dropping files into the tree, drag files out to download, and select multiple entries to delete or copy relative or absolute paths. Open a file in a system app or reveal its location. |
+| Editing and split panes | Use Monaco with syntax highlighting and Chinese menus. Drag a tab to an editor edge to split the view, or into another pane to move or swap files. The workbench restores tabs and layout per workspace, flags external file changes, and uses revision checks and atomic saves. |
+| Language intelligence | Enable built-in TypeScript and JavaScript workspace indexing or configure language servers for Python, Go, Rust, C / C++, and more under DSH Settings → Workbench → Language Intelligence. Completion, definitions, references, signature help, and diagnostics depend on the language service you enable. The settings show toolchain and server status separately. |
+| Documents and web pages | Switch between Markdown source and preview, and navigate with the outline. Preview images, PDFs, and Excel workbooks in tabs. LibreOffice converts Word and PowerPoint files to PDF for preview. Without LibreOffice, `.docx` can still preview in the browser. Web links and local HTML open in the built-in or system browser selected in settings. |
+| Terminal and DSH chat | Use the official Harness terminal with multiple sessions, renaming, and splits. Add a selected file or folder from Explorer, or selected code from the editor, to DSH chat. Open generated file links for the current session in the workbench. |
+| Workspaces and layout | Use the activity bar to open or create workspaces and create or switch sessions. Reorder activity buttons by dragging and resize the sidebars and terminal. Choose light, dark, pure white, or eye-care colors, or follow the DSH theme. Editor font size is configurable. |
+
+Select Floating window under DSH Settings → Workbench → Window. Drag the title bar to move the window, drag an edge to resize it, or use the title bar button to enter fullscreen. The workbench remembers the position and size, which can be reset in settings.
+
+## Workspace search and replace
+
+Open Search in the sidebar and click the arrow beside the search box, or press `Ctrl+Shift+H` (`⌘⇧H` also works on macOS). Results are grouped by file. Select a match to reveal it in the editor.
+
+- Use case-sensitive, whole-word, or regular-expression search. Open the search details menu to set include and exclude globs such as `src/**` and `**/*.test.ts`.
+- Enter replacement text to preview deletions and additions. Replacement supports regex capture groups such as `$1` and a Preserve Case option. Replace one match, all matches in a file, or every result. File-wide and workspace-wide replacements ask for confirmation.
+- An empty replacement field shows regular match highlighting. Clicking Replace with an empty field deletes the match. Save unsaved changes in target files first. If there are more than 2,000 matches, narrow the search before replacing in bulk.
 
 ## Git workflow
 
-- Open **Git Tools** from Source Control to browse commit or file history, compare branches, tags, commits, or the working tree, manage stashes, sync branches, and resolve merge conflicts.
-- In **Settings → Workbench → Git**, choose a diff style. VS Code opens inline by default. IDEA / PyCharm opens side by side with linked scrolling. Both styles let you switch layouts, navigate changes, and collapse unchanged lines.
-- Click a line in the editor or diff view to see its author, date, short hash, and commit subject at the end of the line. Git line attribution is on by default and can be turned off in the same settings section.
+- **Source Control** supports staging, unstaging, discarding changes, committing, amending, and committing followed by push or sync. AI can draft a commit message from the changes using the current DSH chat model or a model selected in settings. Choose the language and level of detail in settings, or stop generation and keep the draft.
+- **The commit graph** expands to show changed files. Open a diff or preview an image or document from history. Hover over a commit for author, time, change statistics, and a copyable hash. The card links to GitHub when a known remote-tracking branch contains the commit. Drag the divider between Changes and Graph to resize, or double-click to reset it.
+- Choose the **VS Code or IDEA / PyCharm diff style** under DSH Settings → Workbench → Git. Diff views support change navigation and folding of unchanged lines. The workbench remembers the inline or side-by-side selection. In the side-by-side ribbon view, the right pane follows the left in the same frame, and guides extend into both panes. Blue means modified, green added, and red deleted. Click a line in a file or diff to see its commit attribution.
+- Open Source Control → **Git Tools** to filter commit or file history, compare branches, tags, commits, or tracked working tree files, cherry-pick or revert commits, and manage stashes, local branches, and tags. Fetch, fast-forward pull, push, merge, and rebase from the sync view. In the conflict view, inspect all three versions, take a side, or edit and stage the merged result.
+
+## AI change review
+
+In DSH Settings → Workbench → AI Change Review, choose to review all changes or only the latest task. Review is off by default. Once enabled, review individual blocks in Monaco, review a file from the editor toolbar, or act on all pending files above the DSH chat input. Auto-follow can reveal new changes once you stop interacting.
+
+Accepting keeps changes already written by the AI. Rejecting attempts to restore the affected content and reports conflicts. Review covers edits made by DSH file tools. See [AI change review](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/ai-review.md) for details in Chinese.
 
 ## Demo
 
@@ -77,24 +106,13 @@
   <br><em>Open a workspace, switch sessions, or create a new workspace</em>
 </p>
 
-## Installation
-
-Plugin 0.2.17 supports DeepSeek Harness `0.2.1-rc.1` and newer (default baseline `0.2.2-rc.5`, Cordis `4.1.0`). Anything below `0.2.1-rc.1` is rejected by the install gate:
-
-```bash
-npm i -g @deepseek-ai/dsh@0.2.2-rc.5
-dsh plugin --profile web add dsh-vscode-workbench
-```
-
-Installing from the DSH Plugins page or a marketplace enables the plugin automatically. After a CLI install, add `dsh-vscode-workbench` to `dsh.profile.bundles` in `~/.dsh/profiles/web/package.json` and restart `dsh web`. Terminals use the official Harness service, and the bundled Browser is enabled automatically; no additional terminal or sidebar plugin is needed. See [Installation](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.en.md) for upgrades and Harness compatibility failures.
-
 ## Shortcuts
 
 | Shortcut | Action |
 | --- | --- |
 | `Ctrl+Shift+E` | Open Explorer |
 | `Ctrl+Shift+F` / `⌘⇧F` | Search the workspace |
-| `Ctrl+Shift+H` / `⌘⇧H` | Replace a match, a file’s matches, or all workspace results |
+| `Ctrl+Shift+H` / `⌘⇧H` | Open workspace replace |
 | `Ctrl+Shift+G` | Open Source Control |
 | `Ctrl/Cmd+Click` | Toggle one Explorer item |
 | `Shift+Click` | Select the visible range from the anchor |
@@ -103,10 +121,14 @@ Installing from the DSH Plugins page or a marketplace enables the plugin automat
 | `Ctrl/Cmd+C` | Copy selected relative paths, one per line |
 | `Delete` / `Backspace` | Delete selected Explorer items |
 | `Esc` | Clear the selection or close the delete confirmation |
-| `Ctrl+S` | Save the active file |
+| `Ctrl+S` / `⌘S` | Save the active file |
 | `Ctrl+Alt+B` | Toggle the DSH conversation panel |
-| `Ctrl+\`` | Show or hide the terminal |
-| `Ctrl+Shift+\`` | Create a terminal |
+| `` Ctrl+` `` | Show or hide the terminal |
+| `` Ctrl+Shift+` `` | Create a terminal |
+| `Ctrl+T` / `⌘T` | Open a built-in browser tab |
+| `Ctrl/Cmd+Alt+K` | Add the current file or selected code to DSH chat from the editor |
+| `Ctrl/Cmd+Enter` | Commit from the commit message field |
+| `F11` / `Ctrl+Command+F` | Toggle floating-window fullscreen (second shortcut on macOS) |
 
 ## Security
 
@@ -127,13 +149,10 @@ Requires Node.js `^22.19 || >=24`, pnpm 11.7 and system Git. The workbench no lo
 
 - [Architecture](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/ARCHITECTURE.en.md): mounting, DSH services, and Harness compatibility.
 - [Installation](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.en.md): CLI and marketplace installs, terminal prerequisites, upgrades, and troubleshooting.
-- [Changelog](https://github.com/tingfeng347/dsh-vscode-workbench/releases): release notes.
+- [Explorer multi-select](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/explorer-multiselect.md) · [Monaco localization](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/localization.md) (Chinese)
+- [Changelog](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/CHANGELOG.md) (Chinese) · [GitHub releases](https://github.com/tingfeng347/dsh-vscode-workbench/releases)
 - [Release checklist](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/RELEASE-CHECKLIST.md): validation and packaging steps.
 
 ## License
 
 [MIT](LICENSE)
-
-Web links and HTML files open in the browser selected under Settings → Workbench → Default browser (built-in or system). Use Cmd+T on macOS or Ctrl+T to open another official browser page. Terminals retain the bottom layout, session list, rename and split controls. Old workbench terminal processes cannot migrate to the official controller; create new terminals after updating.
-
-Set Settings → Workbench → Window → Open mode to Floating window to keep the workbench as a layer over DSH, with the conversation and sidebar still visible around it: drag the title bar to move, drag an edge to resize, and double-click the title bar to maximize. The position and size are remembered, and Reset position and size restores the default. It reuses DSH's existing native window; it is not a second OS window.

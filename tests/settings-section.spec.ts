@@ -27,6 +27,18 @@ describe('workbench settings section', () => {
     expect(workbench).toContain('active={browserId===tab.id&&!dshTabActive&&!switcherOpen&&snapshot.visible}')
   })
 
+  it('offers a code minimap switch backed by a persisted preference', () => {
+    const panel = read('src/client/SettingsPanel.tsx')
+    const workbench = read('src/client/Workbench.tsx')
+    expect(panel).toContain('代码缩略图')
+    expect(panel).toContain('<Switch label="代码缩略图" checked={props.minimap} onChange={props.setMinimap}/>')
+    expect(panel).toContain('差异视图不受影响')
+    expect(workbench).toContain("storedValue('dvw:editor-minimap')")
+    expect(workbench).toContain("localStorage.setItem('dvw:editor-minimap'")
+    expect(workbench).toContain('minimap={minimap} setMinimap={setMinimap}')
+    expect(workbench).toContain('minimap={minimap} line={activeTab.line}')
+  })
+
   it("reuses DSH's pill controls for buttons and choices", () => {
     const panel = read('src/client/SettingsPanel.tsx')
     const styles = read('src/client/styles.ts')

@@ -294,6 +294,30 @@ it('uses one persisted switch for line blame in both the file editor and Git dif
   expect(state.editor?.blame).toBeUndefined()
 })
 
+it('turns the code minimap off from settings and keeps it off after a reload', async () => {
+  await setup()
+  await vi.waitFor(() => expect(state.editor).toBeDefined())
+  // The switch defaults to on, matching VS Code.
+  expect(state.editor?.minimap).toBe(true)
+  const settings = document.createElement('div')
+  document.body.append(settings)
+  await act(async () => settingsHost.set(settings))
+  const toggle = settings.querySelector<HTMLButtonElement>('button[aria-label="代码缩略图"]')!
+  expect(toggle.getAttribute('aria-checked')).toBe('true')
+  await act(async () => toggle.click())
+  // The open editor follows the switch without reopening the tab.
+  expect(state.editor?.minimap).toBe(false)
+  expect(localStorage.getItem('dvw:editor-minimap')).toBe('off')
+  // A fresh mount reads the persisted preference instead of the default.
+  await act(async () => root!.unmount())
+  state.editor = undefined
+  await mount()
+  // Read through a function so TypeScript does not keep the `undefined` narrowing.
+  const reloadedEditor = () => state.editor
+  await vi.waitFor(() => expect(reloadedEditor()).toBeDefined())
+  expect(reloadedEditor()?.minimap).toBe(false)
+})
+
 it('shows an empty staged commit as a centered recovery dialog and can stage everything', async () => {
   localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
   await setup(false, { paths: ['a.txt'], active: 'a.txt' }, [], [{

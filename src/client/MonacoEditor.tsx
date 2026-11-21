@@ -28,6 +28,31 @@ export const WORKBENCH_EDITOR_CHROME = {
   scrollbar: { verticalScrollbarSize: 10, horizontalScrollbarSize: 10 },
 } as const
 
+/**
+ * Monaco minimap chrome. `size: 'proportional'` keeps the thumbnail a fraction of the available
+ * width and `maxColumn` caps how many columns are rendered, so the map never outgrows the text
+ * column. `WORKBENCH_EDITOR_CHROME` keeps the minimap off, which leaves the diff editors narrow;
+ * the code editor opts in through `minimapOptions`.
+ */
+export const WORKBENCH_MINIMAP_OPTIONS = {
+  side: 'right',
+  size: 'proportional',
+  showSlider: 'mouseover',
+  renderCharacters: true,
+  maxColumn: 120,
+  scale: 1,
+} as const
+
+/** The minimap switch defaults to on, like VS Code; both the create and the update path share it. */
+export function minimapEnabled(props: { minimap?: boolean }): boolean {
+  return props.minimap ?? true
+}
+
+/** Resolve the minimap options for an explicit on/off choice without mutating the constant. */
+export function minimapOptions(enabled: boolean): import('monaco-editor').editor.IEditorOptions['minimap'] {
+  return { ...WORKBENCH_MINIMAP_OPTIONS, enabled }
+}
+
 /** macOS reports Control-click as a secondary click, so Monaco only navigates with Cmd-click there. */
 export function isMacPlatform(userAgent: string = navigator.userAgent): boolean {
   return /Macintosh|Mac OS X/.test(userAgent)
@@ -73,6 +98,12 @@ const DARK_COLORS = {
   'editorIndentGuide.activeBackground1': '#4a4b4c',
   'editorWhitespace.foreground': '#3b3b3b',
   'editorGutter.background': '#121314',
+  // The minimap inherits `editor.background` on its own, but the slider keeps the scrollbar palette.
+  'minimap.background': '#121314',
+  'minimapSlider.background': '#79797940',
+  'minimapSlider.hoverBackground': '#64646473',
+  'minimapSlider.activeBackground': '#bfbfbf59',
+  'minimap.selectionHighlight': '#264f78',
   'editorWidget.background': '#202122',
   'editorWidget.border': '#2a2b2c',
   'editorSuggestWidget.background': '#202122',
@@ -110,6 +141,11 @@ const EYE_COLORS = {
   'editorHoverWidget.background': '#f7ebc8',
   'editorHoverWidget.border': '#e0cf9f',
   'editorGutter.background': '#f7ebc8',
+  'minimap.background': '#f7ebc8',
+  'minimapSlider.background': '#92856a55',
+  'minimapSlider.hoverBackground': '#92856a88',
+  'minimapSlider.activeBackground': '#5c4a2a66',
+  'minimap.selectionHighlight': '#e6d294',
   'diffEditor.insertedTextBackground': '#b7d7a8aa',
   'diffEditor.removedTextBackground': '#e8b4ad88',
   'diffEditor.border': '#e0cf9f',
@@ -525,7 +561,7 @@ export interface MonacoReviewProps {
   onReject(id: string): void
 }
 
-export function MonacoEditor(props: { uri: string; value: string; theme: MonacoColorScheme; line?: number; column?: number; fontSize?: number; highlight?: string; focusOnReveal?: boolean; review?: MonacoReviewProps; blame?: { sessionId: string; path: string; revision: string; dirty: boolean }; breakpoints?: number[]; pausedLine?: number; onToggleBreakpoint?(line: number): void; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
+export function MonacoEditor(props: { uri: string; value: string; theme: MonacoColorScheme; line?: number; column?: number; fontSize?: number; minimap?: boolean; highlight?: string; focusOnReveal?: boolean; review?: MonacoReviewProps; blame?: { sessionId: string; path: string; revision: string; dirty: boolean }; breakpoints?: number[]; pausedLine?: number; onToggleBreakpoint?(line: number): void; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
   const root = useRef<HTMLDivElement>(null)
   const editor = useRef<import('monaco-editor').editor.IStandaloneCodeEditor>()
   const lineBlame = useRef<ReturnType<typeof createGitLineBlame>>()
@@ -741,7 +777,7 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
     void loadMonaco().then((monaco) => {
       if (disposed || root.current === null) return
       const props = latest.current
-      const instance = monaco.editor.create(root.current, { model: null, automaticLayout: true, theme: monacoThemeFor(props.theme), fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off' })
+const instance = monaco.editor.create(root.current, { model: null, automaticLayout: true, theme: monacoThemeFor(props.theme), fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off', minimap: minimapOptions(minimapEnabled(props)) })
       // Breakpoints live in the line-decorations strip so the layout does not shift, and a click
       // there toggles one exactly like VS Code's gutter.
       instance.onMouseDown(event => {
@@ -835,6 +871,7 @@ export function MonacoEditor(props: { uri: string; value: string; theme: MonacoC
   }, [props.uri, props.value, props.fontSize, props.review, props.review?.activeId, props.review?.changes])
   useEffect(() => { if (window.monaco !== undefined) window.monaco.editor.setTheme(monacoThemeFor(props.theme)) }, [props.theme])
   useEffect(() => { editor.current?.updateOptions({ fontSize: props.fontSize ?? 14 }) }, [props.fontSize])
+  useEffect(() => { editor.current?.updateOptions({ minimap: minimapOptions(minimapEnabled(props)) }) }, [props.minimap])
   useEffect(() => {
     const instance = editor.current; const monaco = window.monaco; const model = instance?.getModel()
     if (instance === undefined || monaco === undefined || model === null || model === undefined) return

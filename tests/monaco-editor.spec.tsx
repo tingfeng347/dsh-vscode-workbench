@@ -21,6 +21,8 @@ const fake = {
   widgets: [] as FakeWidget[],
   onMouseDown: undefined as undefined | ((event: { target: { position?: { lineNumber: number }; type?: number }; event?: {leftButton: boolean} }) => void),
   blameWidget: undefined as editor.IOverlayWidget | undefined,
+  createOptions: undefined as undefined | { minimap?: { enabled?: boolean } },
+  updatedOptions: [] as Array<{ minimap?: { enabled?: boolean } }>,
   editor: undefined as undefined | {
     model: FakeModel | null
     scroll: number
@@ -48,8 +50,9 @@ const monaco = {
     defineTheme() {}, setTheme() {}, createModel,
     getModel: (uri: { toString(): string }) => fake.models.get(uri.toString()) ?? null,
     getModels: () => [...fake.models.values()],
-    create() {
+    create(_dom: HTMLElement, options?: Record<string, unknown>) {
       fake.created++
+      fake.createOptions = options as { minimap?: { enabled?: boolean } } | undefined
       const editor = {
         model: null as FakeModel | null, scroll: 0, focusCount: 0, selection: undefined as unknown,
         getModel: () => editor.model,
@@ -72,7 +75,8 @@ const monaco = {
         onDidChangeModelContent: () => ({ dispose() {} }),
         onMouseDown(callback: typeof fake.onMouseDown) { fake.onMouseDown = callback },
         getAction: () => null,
-        addCommand() {}, addAction() { return { dispose() {} } }, updateOptions() {},
+        addCommand() {}, addAction() { return { dispose() {} } },
+        updateOptions(next: Record<string, unknown> = {}) { fake.updatedOptions.push(next as { minimap?: { enabled?: boolean } }) },
         getTargetAtClientPoint: () => ({ position: { lineNumber: 17, column: 10 } }), setPosition() {},
         getLayoutInfo: () => ({width:600,height:400,contentLeft:40,contentWidth:550,verticalScrollbarWidth:10,horizontalScrollbarHeight:10}),
         getScrollTop: () => editor.scroll,
@@ -97,11 +101,22 @@ beforeAll(() => {
   const loader = Object.assign((_ids: string[], done: () => void) => done(), { config() {} })
   Object.assign(window, { require: loader, monaco })
 })
-afterEach(async () => { await act(async () => root?.unmount()); root = undefined; host = undefined; fake.models.clear(); fake.created = 0; fake.reviewDecorations = []; fake.zones = []; fake.widgets = []; fake.onMouseDown = undefined; actions.length = 0; vi.restoreAllMocks() })
+afterEach(async () => { await act(async () => root?.unmount()); root = undefined; host = undefined; fake.models.clear(); fake.created = 0; fake.reviewDecorations = []; fake.zones = []; fake.widgets = []; fake.onMouseDown = undefined; fake.createOptions = undefined; fake.updatedOptions = []; actions.length = 0; vi.restoreAllMocks() })
 async function render(props: Partial<Parameters<typeof MonacoEditor>[0]> & { uri: string; value: string }) {
   if (root === undefined) { host = document.createElement('div'); root = createRoot(host) }
   await act(async () => { root!.render(<MonacoEditor theme="dark" onChange={() => {}} onSave={() => {}} {...props}/>) })
 }
+
+it('shows the code minimap by default and follows the setting', async () => {
+  await render({ uri: '/w/a.ts', value: 'a' })
+  // The first Monaco load resolves across microtasks, so wait for the editor to exist.
+  await vi.waitFor(() => expect(fake.created).toBe(1))
+  expect(fake.createOptions).toMatchObject({ minimap: { enabled: true, side: 'right', maxColumn: 120 } })
+  await render({ uri: '/w/a.ts', value: 'a', minimap: false })
+  await vi.waitFor(() => expect(fake.updatedOptions.some(options => options.minimap?.enabled === false)).toBe(true))
+  // The setting updates the existing instance instead of rebuilding Monaco.
+  expect(fake.created).toBe(1)
+})
 
 it('reuses one editor across tabs and restores each tab scroll position', async () => {
   await render({ uri: '/w/a.ts', value: 'a' })

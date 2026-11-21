@@ -28,6 +28,8 @@ export interface WorkbenchSettingsProps {
   setGitLineBlame(value: boolean): void
   fontSize: number
   setFontSize(value: number): void
+  minimap: boolean
+  setMinimap(value: boolean): void
   primarySideVisible: boolean
   setPrimarySideVisible(value: boolean): void
   chatVisible: boolean
@@ -245,6 +247,9 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
       </Row>
       <Row title="编辑器字号" description="影响 Monaco 编辑器、差异视图和 Markdown 源码。">
         <DebouncedRange label="编辑器字号" min={11} max={20} unit="px" value={props.fontSize} onChange={props.setFontSize}/>
+      </Row>
+      <Row title="代码缩略图" description="在编辑器右侧显示整份文件的缩略图，点击或拖动滑块可快速定位。关闭后只保留滚动条，差异视图不受影响。">
+        <Switch label="代码缩略图" checked={props.minimap} onChange={props.setMinimap}/>
       </Row>
     </section>
 

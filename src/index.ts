@@ -427,7 +427,6 @@ export function apply(ctx: HostContext): void {
         let legacy: ReturnType<typeof chokidar.watch> | undefined
         let paths = new Set<string>(); let timer: ReturnType<typeof setTimeout> | undefined
         let appliedVersion = -1
-        let ready = false
         let pendingManifest: { version: number; paths: string[] } | undefined
         const send = (payload: unknown) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload)) }
         const flush = (changed: string) => {
@@ -445,23 +444,18 @@ export function apply(ctx: HostContext): void {
           // The reply is sent only after the watch is armed, so the client's re-read cannot race it.
           void watcher.apply({ version, paths: list }).then(result => {
             send({ type: 'files.ready', version: result.version, added: result.added, paths: result.watching, skipped: result.skipped })
-          }).catch(error => {
-            send({ type: 'files.watch-error', message: String(error) })
-          })
+          }).catch(error => { send({ type: 'files.watch-error', message: String(error) }) })
         }
         // Exclusions come from the workspace's .gitignore plus the built-in dependency/build trees.
         void workspaceWatchIgnores(workspace).then(extra => {
           if (ws.readyState !== WebSocket.OPEN) return
-          ready = true
           watcher = createWorkspaceWatcher({ workspace, ignored: watchIgnore(workspace, extra), onChange: flush })
           if (pendingManifest !== undefined) {
             const queued = pendingManifest
             pendingManifest = undefined
             applyWatch(queued.version, queued.paths)
           }
-        }).catch(error => {
-          send({ type: 'files.watch-error', message: String(error) })
-        })
+}).catch(error => { send({ type: 'files.watch-error', message: String(error) }) })
         // A client that never sends a manifest still expects notifications for the whole tree.
         const legacyTimer = setTimeout(() => {
           if (appliedVersion >= 0) return

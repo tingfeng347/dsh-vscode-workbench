@@ -1569,6 +1569,8 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     let watchVersion = 0
     // The explorer owns the expanded set; the tabs own the open files. Both feed one manifest.
     let expandedDetail: string[] = getWatchExpanded()
+    // onopen refreshes everything once; the first ready reply would only repeat that work.
+    let firstReadyPending = true
     const sendWatch = () => {
       // Test doubles and older shells may expose a socket without send(); never assume it.
       if (closed || ws.readyState !== WebSocket.OPEN || typeof ws.send !== 'function') return
@@ -1599,12 +1601,14 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
       // A later open means notifications were missed; re-read what is visible.
       if (watchRetry > 0) window.dispatchEvent(new CustomEvent('dvw-files-reload'))
       // Never reset the expanded set here: the explorer may be unmounted and unable to re-send it.
+      firstReadyPending = true
       syncWatch(getWatchExpanded())
     }
     ws.onmessage = event => {
       try { const value = JSON.parse(String(event.data)) as { type?: string; paths?: string[]; added?: string[] }; if (value.type === 'files.ready') {
         setWatchSkipped(Array.isArray((value as { skipped?: Array<{ path: string; reason: string }> }).skipped) ? (value as { skipped: Array<{ path: string; reason: string }> }).skipped : [])
-        if (Array.isArray(value.added) && value.added.length > 0) refresh(value.added)
+        if (!firstReadyPending && Array.isArray(value.added) && value.added.length > 0) refresh(value.added)
+        firstReadyPending = false
         return
       } if (Array.isArray(value.paths) && value.paths.every(path => typeof path === 'string')) refresh(value.paths) } catch { /* Ignore invalid notifications. */ }
     }

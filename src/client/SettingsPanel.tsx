@@ -1,7 +1,7 @@
 import type { GitDiffStyle } from './MonacoEditor.tsx'
 import { useEffect, useId, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { LspServerStatus } from './lsp.ts'
+import type { LspRuntimeStatus, LspServerStatus } from './lsp.ts'
 import type { ReviewMode } from './aiReview.ts'
 import { settingsHost } from './settingsHost.ts'
 import type { CommitModelCatalog, CommitModelOption, CommitModelSelection } from '../commit-message.ts'
@@ -61,10 +61,17 @@ export interface WorkbenchSettingsProps {
   lspServers: LspServerStatus[]
   lspBusy?: string
   lspError: string
+  lspRuntime: Record<string, LspRuntimeStatus | undefined>
+  restartLsp(id: string): void
+  pythonPath: string
+  setPythonPath(value: string): void
   changeLsp(id: string, action: 'install' | 'uninstall'): void
   refreshLsp(): void
 }
 
+const LSP_STATUS_TEXT: Record<LspRuntimeStatus['state'] | 'idle', string> = {
+  idle: '已安装，打开对应文件时自动启动', starting: '语言服务启动中', ready: '语言服务运行中', reconnecting: '语言服务正在重连', failed: '语言服务启动失败',
+}
 const THEMES = [['dsh', '跟随 DSH'], ['dark', '深色'], ['light', '浅色'], ['white', '纯白'], ['eyecare', '护眼']] as const
 const MARKDOWN_VIEWS = [['preview', '预览'], ['source', '源码']] as const
 const REVIEW_MODES = [['all', '审阅全部改动'], ['latest', '审阅最新改动'], ['none', '无需审阅']] as const
@@ -330,36 +337,46 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
 
     <section className="dvw-set-group">
       <h3 className="dvw-set-group-title">语言智能</h3>
-      <div className="dvw-set-row">
+      <p className="dvw-set-footnote">编辑代码无需安装语言服务。按需安装后，可以补全代码、跳转到定义、查找引用，并在编辑时查看错误提示。</p>
+      {!props.lspServers.some(server => server.id === 'typescript' && server.installed) && <div className="dvw-set-row">
         <div className="dvw-set-text">
-          <span className="dvw-set-title">TypeScript / JavaScript</span>
-          <span className="dvw-set-desc">内置 · {props.tsIntellisense
+          <span className="dvw-set-title">TypeScript / JavaScript（内置索引）</span>
+          <span className="dvw-set-desc">{props.tsIntellisense
             ? props.tsIndex.state === 'loading' ? '正在索引工作区…'
               : props.tsIndex.state === 'error' ? `索引失败：${props.tsIndex.error}`
                 : props.tsIndex.state === 'ready' ? `已索引 ${props.tsIndex.files} 个文件${props.tsIndex.truncated ? '（已达上限）' : ''}`
-                  : '已安装，转到定义、查找引用、Peek、补全、签名帮助'
-            : '点击安装'}</span>
+                  : '已启用，可在工作区中跳转到定义和查找引用'
+            : '启用后可在工作区中跳转到定义和查找引用'}</span>
         </div>
         <div className="dvw-set-control">
-          <button type="button" className="dvw-set-button" onClick={() => props.setTsIntellisense(!props.tsIntellisense)}>{props.tsIntellisense ? '卸载' : '安装'}</button>
+          <button type="button" className="dvw-set-button" onClick={() => props.setTsIntellisense(!props.tsIntellisense)}>{props.tsIntellisense ? '停用索引' : '启用索引'}</button>
         </div>
-      </div>
+      </div>}
       {props.lspServers.map(server => <div className="dvw-set-row" key={server.id}>
         <div className="dvw-set-text">
-          <span className="dvw-set-title">{server.name}</span>
+          <span className="dvw-set-title">{server.name}{server.id === 'typescript' ? '（项目语言服务）' : ''}</span>
           <span className="dvw-set-desc dvw-set-chips">
-            <span className="dvw-set-chip" data-installed={server.language === undefined || server.language.installed} data-action={server.language !== undefined && !server.language.installed}>{server.language === undefined ? '语言：无需安装' : server.language.installed ? '语言：已安装' : '安装语言'}</span>
-            <span className="dvw-set-chip" data-installed={server.installed}>{server.installed ? 'LSP：已安装' : 'LSP：未安装'}</span>
+            <span className="dvw-set-chip" data-installed={server.installed && (!props.lspRuntime[server.id] || props.lspRuntime[server.id]?.state === 'ready')} title={props.lspRuntime[server.id]?.message}>
+              {server.installed ? LSP_STATUS_TEXT[props.lspRuntime[server.id]?.state ?? 'idle']
+                : server.installable ? '语言服务未安装（可选）' : `未检测到 ${server.command ?? server.name}（可手动安装）`}
+            </span>
+            {server.language && !server.language.installed && <span className="dvw-set-hint">未检测到 {server.language.name} 环境</span>}
             {!server.installed && server.hint !== undefined && <span className="dvw-set-hint">{server.hint}</span>}
           </span>
         </div>
         <div className="dvw-set-control">
-          {server.language !== undefined && !server.language.installed
-            ? <button type="button" className="dvw-set-button" disabled title="先安装语言工具链，再安装 LSP">等待</button>
-            : server.installable && <button type="button" className="dvw-set-button" disabled={props.lspBusy === server.id} onClick={() => props.changeLsp(server.id, server.installed ? 'uninstall' : 'install')}>{props.lspBusy === server.id ? '处理中…' : server.installed ? '卸载 LSP' : '安装 LSP'}</button>}
+          {server.installable && <button type="button" className="dvw-set-button" disabled={props.lspBusy !== undefined} onClick={() => props.changeLsp(server.id, server.installed ? 'uninstall' : 'install')}>
+            {props.lspBusy === server.id ? (server.installed ? '正在卸载…' : '正在安装…') : (server.installed ? '卸载语言服务' : '安装语言服务')}
+          </button>}
+          {server.installed && props.lspRuntime[server.id] !== undefined && <button type="button" className="dvw-set-button" onClick={() => props.restartLsp(server.id)}>重启服务</button>}
         </div>
       </div>)}
-      <p className="dvw-set-footnote">每种语言使用该生态里最活跃的语言服务器；能自动安装的会装进本插件的私有目录，需要手动安装的会分别检查语言工具链和服务器本身。</p>
+      {props.lspServers.some(server => server.id === 'python' && server.installed) && <Row title="Python 解释器" description="当前工作区。留空时优先使用项目中的虚拟环境。">
+        <input key={props.pythonPath} className="dvw-input" aria-label="Python 解释器路径" defaultValue={props.pythonPath}
+          placeholder={props.lspServers.find(server => server.id === 'python')?.pythonPath ?? '输入 Python 解释器的完整路径'}
+          onBlur={event => props.setPythonPath(event.currentTarget.value)}
+          onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur() }} />
+      </Row>}
       {props.lspError !== '' && <p className="dvw-set-footnote dvw-set-error">{props.lspError}</p>}
     </section>
   </div>

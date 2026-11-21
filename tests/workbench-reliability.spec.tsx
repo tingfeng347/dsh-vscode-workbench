@@ -7,7 +7,7 @@ import type { MonacoDiffEditor, MonacoEditor } from '../src/client/MonacoEditor.
 import { settingsHost } from '../src/client/settingsHost.ts'
 import { WorkbenchController } from '../src/client/service.ts'
 import { disposeTypeScriptProject } from '../src/client/typescriptProject.ts'
-import type { GitChange } from '../src/types.ts'
+import type { FileEntry, GitChange } from '../src/types.ts'
 
 type EditorProps = Parameters<typeof MonacoEditor>[0]
 type DiffProps = Parameters<typeof MonacoDiffEditor>[0]
@@ -101,7 +101,7 @@ const defaultModelCatalog: FakeModelCatalog = {
   unavailable: [],
   defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' },
 }
-async function setup(binary = false, saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' }, changes: typeof reviewChanges = [], gitChanges: GitChange[] = [], modelCatalog: FakeModelCatalog = defaultModelCatalog) {
+async function setup(binary = false, saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' }, changes: typeof reviewChanges = [], gitChanges: GitChange[] = [], modelCatalog: FakeModelCatalog = defaultModelCatalog, files: FileEntry[] = []) {
   disk = 'disk'; revision = 'r1'; completeSave = undefined; state.editor = undefined
   projectSource = 'export const a = 1'; projectReads = 0; reviewChanges = changes
   localStorage.setItem('dvw:/tmp/audit', JSON.stringify(saved))
@@ -109,10 +109,11 @@ async function setup(binary = false, saved: Record<string, unknown> = { paths: [
   vi.stubGlobal('fetch', vi.fn(async (url: string, options: { body: string }) => {
     const method = url.split('/').at(-1)
     const body = JSON.parse(options.body) as Record<string, unknown>
-    const doc = () => ({ path: 'a.txt', content: binary ? '' : disk, revision, size: binary ? 0 : disk.length, binary, tooLarge: false })
+    const doc = () => ({ path: typeof body.path === 'string' ? body.path : 'a.txt', content: binary ? '' : disk, revision, size: binary ? 0 : disk.length, binary, tooLarge: false })
     let value: unknown
     if (method === 'workspace') value = { cwd: '/tmp/audit', name: 'audit' }
-    else if (method === 'fs.list' || method === 'lsp.status') value = []
+    else if (method === 'fs.list') value = files
+    else if (method === 'lsp.status') value = []
     else if (method === 'git.status') value = { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
     else if (method === 'git.action' && body.action === 'diff') value = { diff: '', original: 'before', modified: 'after' }
     else if (method === 'git.action') value = body.action === 'log' ? [] : { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
@@ -411,6 +412,30 @@ it('resizes the graph split by pointer and keyboard and restores it after collap
   } finally {
     height.mockRestore()
   }
+})
+
+it('switches between Terminal and Problems from the bottom panel header', async () => {
+  const service = await setup()
+  await act(async () => {
+    service.registerBottomPanel({ id: 'terminal', title: '终端', component: () => <div data-test-terminal>终端内容</div> })
+    service.toggleBottomPanel('terminal')
+  })
+  const header = document.querySelector('.dvw-bottom-head')!
+  const buttons = header.querySelectorAll('button')
+  const [terminal, problems, close] = buttons
+  expect(Array.from(buttons, button => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['终端', '问题', '关闭底部面板'])
+  expect(terminal!.getAttribute('aria-pressed')).toBe('true')
+  const terminalContent = document.querySelector('[data-test-terminal]')!
+  await act(async () => problems!.click())
+  expect(terminalContent.closest('[hidden]')).not.toBeNull()
+  expect(problems!.getAttribute('aria-pressed')).toBe('true')
+  expect(document.querySelector('.dvw-bottom-body')?.textContent).toContain('没有发现问题')
+  await act(async () => problems!.click())
+  expect(service.getSnapshot().bottomPanel).toBe('problems')
+  await act(async () => terminal!.click())
+  expect(document.querySelector('.dvw-bottom-body')?.textContent).toBe('终端内容')
+  await act(async () => close!.click())
+  expect(service.getSnapshot().bottomPanel).toBeUndefined()
 })
 
 it('puts branch controls in the status bar and commit metadata in the hover card', async () => {
@@ -734,4 +759,15 @@ it('reindexes retained TypeScript models after returning from hidden', async () 
 
   expect(projectReads).toBe(2)
   expect(model()?.getValue()).toBe('export const a = 2')
+})
+
+it('opens HTML source in a text editor through the Explorer menu', async () => {
+  await setup(false, { paths: [] }, [], [], defaultModelCatalog, [{ path: 'index.html', name: 'index.html', kind: 'file' }])
+  const row = document.querySelector('[data-tree-path="index.html"]')
+  expect(row).not.toBeNull()
+  await act(async () => row!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })))
+  const action = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.textContent === '打开 HTML 源码')
+  expect(action).toBeDefined()
+  await act(async () => action!.click())
+  expect(state.editor?.uri).toBe('file:///tmp/audit/index.html')
 })

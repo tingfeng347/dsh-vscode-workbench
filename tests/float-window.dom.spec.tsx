@@ -13,7 +13,6 @@ vi.mock('../src/client/MonacoEditor.tsx', () => ({
   retainEditorModels: () => {},
   loadMonaco: () => Promise.resolve({ editor: { registerEditorOpener: () => ({ dispose() {} }) } }),
 }))
-vi.mock('../src/client/DshConversationPanel.tsx', () => ({ DshConversationPanel: () => null, DshConversationTheme: () => null, DshReviewActions: () => null }))
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -31,12 +30,13 @@ afterEach(async () => {
   vi.unstubAllGlobals()
   Reflect.deleteProperty(document, 'fullscreenElement')
   Reflect.deleteProperty(document, 'exitFullscreen')
+  Reflect.deleteProperty(document.body, 'requestFullscreen')
   localStorage.clear()
   settingsHost.set(undefined)
   document.body.replaceChildren()
 })
 
-async function mount(): Promise<WorkbenchController> {
+async function mount(dshPanelId?: string, onOpenDshPanel?: (id: string) => void): Promise<WorkbenchController> {
   vi.stubGlobal('WebSocket', FakeSocket)
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     const method = url.split('/').at(-1)
@@ -56,7 +56,7 @@ async function mount(): Promise<WorkbenchController> {
   const node = document.createElement('div')
   document.body.append(node)
   root = createRoot(node)
-  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit"/>) })
+  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" dshPanelId={dshPanelId} onOpenDshPanel={onOpenDshPanel}/>) })
   return service
 }
 
@@ -66,7 +66,8 @@ function pointer(type: string, x: number, y: number): MouseEvent {
 
 it('renders the workbench as a floating layer with its own drag bar', async () => {
   localStorage.setItem('dvw:open-mode', 'floating')
-  await mount()
+  localStorage.setItem('dvw:activity-order-v2', JSON.stringify(['plugins', 'chat']))
+  await mount(undefined, vi.fn())
   const overlay = document.querySelector<HTMLElement>('.dvw-overlay')!
   expect(overlay.getAttribute('data-dvw-float')).toBe('true')
   expect(overlay.style.left).not.toBe('')
@@ -76,7 +77,53 @@ it('renders the workbench as a floating layer with its own drag bar', async () =
   expect(overlay.style.paddingTop).toBe('34px')
   expect(document.querySelector('.dvw-floatbar')).not.toBeNull()
   expect(document.querySelectorAll('.dvw-float-handle')).toHaveLength(8)
-  expect(document.querySelector('.dvw-chat')).toBeNull()
+  expect(document.querySelector('.dvw-chat')).not.toBeNull()
+  expect(document.querySelector('.dvw-chat-head')).toBeNull()
+  expect(document.querySelector('[data-act-id="plugins"]')).toBeNull()
+  expect(document.querySelector('.dvw-activity [data-act-id="chat"][title^="关闭 DSH 对话栏"]')).not.toBeNull()
+})
+
+it('keeps the native conversation and plugin page inside the moving window', async () => {
+  localStorage.setItem('dvw:open-mode', 'floating')
+  const conversation = document.createElement('div')
+  conversation.dataset.phase = 'ready'
+  conversation.innerHTML = '<div data-conversation-scroll></div>'
+  const panel = document.createElement('div')
+  panel.dataset.globalPanel = ''
+  panel.style.left = '8px'
+  document.body.append(conversation, panel)
+  const rect = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+    const overlay = this.closest<HTMLElement>('.dvw-overlay')
+    if (overlay && this.matches('.dvw-editor, .dvw-chat-body')) {
+      return new DOMRect(parseFloat(overlay.style.left) + 50, parseFloat(overlay.style.top) + 50, 350, 400)
+    }
+    return new DOMRect(0, 0, 800, 600)
+  })
+  try {
+    const service = await mount('plugins')
+    const overlay = document.querySelector<HTMLElement>('.dvw-overlay')!
+    const bar = document.querySelector<HTMLElement>('.dvw-floatbar')!
+    const check = async (surface: HTMLElement) => vi.waitFor(() => {
+      expect(surface.style.top).toBe(`${parseFloat(overlay.style.top) + 50}px`)
+      expect(surface.style.left).toBe(`${parseFloat(overlay.style.left) + 50}px`)
+    })
+    await check(panel)
+    await act(async () => {
+      bar.dispatchEvent(pointer('pointerdown', 200, 120))
+      window.dispatchEvent(pointer('pointermove', 220, 140))
+      window.dispatchEvent(pointer('pointerup', 220, 140))
+    })
+    await check(panel)
+    await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit"/>) })
+    expect(panel.style.left).toBe('8px')
+    expect(conversation.hasAttribute('data-dvw-conversation-panel')).toBe(true)
+    await check(conversation)
+    await act(async () => document.querySelector<HTMLButtonElement>('.dvw-activity [data-act-id="chat"][title^="关闭 DSH 对话栏"]')!.click())
+    expect(conversation.hasAttribute('data-dvw-conversation-panel')).toBe(false)
+    expect(conversation.style.left).toBe('')
+  } finally {
+    rect.mockRestore()
+  }
 })
 
 it('keeps the full-window layout untouched by default', async () => {
@@ -191,9 +238,9 @@ it('enters real fullscreen and leaves the DSH chrome behind', async () => {
   const overlay = document.querySelector<HTMLElement>('.dvw-overlay')!
   let current: Element | null = null
   Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => current })
-  const request = vi.fn(async () => { current = overlay; document.dispatchEvent(new Event('fullscreenchange')) })
+  const request = vi.fn(async () => { current = document.body; document.dispatchEvent(new Event('fullscreenchange')) })
   const exit = vi.fn(async () => { current = null; document.dispatchEvent(new Event('fullscreenchange')) })
-  Object.defineProperty(overlay, 'requestFullscreen', { configurable: true, value: request })
+  Object.defineProperty(document.body, 'requestFullscreen', { configurable: true, value: request })
   Object.defineProperty(document, 'exitFullscreen', { configurable: true, value: exit })
   await act(async () => {
     document.querySelector<HTMLButtonElement>('[aria-label="进入全屏"]')!.click()
@@ -210,7 +257,11 @@ it('enters real fullscreen and leaves the DSH chrome behind', async () => {
   })
   expect(exit).toHaveBeenCalledTimes(1)
   expect(overlay.hasAttribute('data-dvw-float-fullscreen')).toBe(false)
-  expect(document.querySelector('[aria-label="进入全屏"]')).not.toBeNull()
+  const enter = document.querySelector<HTMLButtonElement>('[aria-label="进入全屏"]')!
+  await act(async () => enter.click())
+  await act(async () => document.querySelector<HTMLButtonElement>('.dvw-floatbar [aria-label="返回 DSH"]')!.click())
+  expect(exit).toHaveBeenCalledTimes(2)
+  expect(document.querySelector('.dvw-overlay')).toBeNull()
 })
 
 it('falls back to filling the DSH window when the host rejects fullscreen', async () => {
@@ -218,7 +269,7 @@ it('falls back to filling the DSH window when the host rejects fullscreen', asyn
   await mount()
   const overlay = document.querySelector<HTMLElement>('.dvw-overlay')!
   Object.defineProperty(document, 'fullscreenElement', { configurable: true, get: () => null })
-  Object.defineProperty(overlay, 'requestFullscreen', { configurable: true, value: vi.fn(async () => { throw new Error('denied') }) })
+  Object.defineProperty(document.body, 'requestFullscreen', { configurable: true, value: vi.fn(async () => { throw new Error('denied') }) })
   await act(async () => {
     document.querySelector<HTMLButtonElement>('[aria-label="进入全屏"]')!.click()
     await Promise.resolve()

@@ -1,3 +1,4 @@
+import { editorLanguageForPath } from './lspLanguage.ts'
 import { api } from './api.ts'
 
 type Monaco = typeof import('monaco-editor')
@@ -8,16 +9,22 @@ export const TS_INTELLISENSE_KEY = 'dvw:lsp:typescript'
 export function tsIntellisenseEnabled(): boolean { try { return localStorage.getItem(TS_INTELLISENSE_KEY) === 'on' } catch { return false } }
 
 /** Model URI for a workspace file; must match MonacoEditor's `file:///<cwd>/<path>` tab URIs. */
-export function projectModelPath(cwd: string, path: string): string { return `file:///${`${cwd}/${path}`.replace(/\\/g, '/').replace(/^\/+/, '')}` }
+export function projectModelPath(cwd: string, path: string): string {
+  const absolute = `${cwd.replace(/[\\/]+$/, '')}/${path}`.replace(/\\/g, '/').replace(/^\/+/, '')
+  return `file:///${absolute.split('/').map((part, index) => index === 0 && /^[a-z]:$/i.test(part) ? part : encodeURIComponent(part)).join('/')}`
+}
 
 /** Workspace-relative path for a project model URI, or undefined when it lives outside `cwd`. */
 export function workspacePathFromModel(cwd: string, uri: string): string | undefined {
-  const prefix = projectModelPath(cwd, '')
-  const decoded = decodeURIComponent(uri)
-  const lower = (value: string) => value.toLowerCase()
-  if (!lower(decoded).startsWith(lower(prefix))) return undefined
-  const path = decoded.slice(prefix.length)
-  return path === '' ? undefined : path
+  if (uri.includes('?') || uri.includes('#')) return undefined
+  try {
+    const prefix = decodeURIComponent(projectModelPath(cwd, ''))
+    const decoded = decodeURIComponent(uri)
+    const windows = /^[a-z]:[\\/]/i.test(cwd)
+    if (!(windows ? decoded.toLowerCase().startsWith(prefix.toLowerCase()) : decoded.startsWith(prefix))) return undefined
+    const path = decoded.slice(prefix.length)
+    return path === '' || (windows && path.includes('\\')) || path.split('/').some(segment => segment === '..' || segment === '.') ? undefined : path
+  } catch { return undefined }
 }
 
 const COMPILER = (monaco: Monaco) => ({
@@ -31,11 +38,28 @@ const COMPILER = (monaco: Monaco) => ({
 
 let indexed: { cwd: string; uris: string[]; files: number; truncated: boolean } | undefined
 let request = 0
+let restoreDefaults: (() => void) | undefined
 
 /** Configure Monaco's TypeScript worker and load the workspace's TS/JS files so definitions, references, Peek and signature help resolve across files. */
 export async function indexTypeScriptProject(monaco: Monaco, sessionId: string, cwd: string): Promise<{ files: number; truncated: boolean }> {
   const ts = monaco.languages.typescript
-  for (const defaults of [ts.typescriptDefaults, ts.javascriptDefaults]) {
+  const languages = [ts.typescriptDefaults, ts.javascriptDefaults]
+  if (restoreDefaults === undefined) {
+    const previous = languages.map(defaults => ({
+      defaults,
+      compiler: defaults.getCompilerOptions?.(),
+      diagnostics: defaults.getDiagnosticsOptions?.(),
+      eager: defaults.getEagerModelSync?.(),
+    }))
+    restoreDefaults = () => {
+      for (const { defaults, compiler, diagnostics, eager } of previous) {
+        if (compiler !== undefined) defaults.setCompilerOptions(compiler)
+        if (diagnostics !== undefined) defaults.setDiagnosticsOptions(diagnostics)
+        if (eager !== undefined) defaults.setEagerModelSync(eager)
+      }
+    }
+  }
+  for (const defaults of languages) {
     defaults.setCompilerOptions(COMPILER(monaco))
     defaults.setEagerModelSync(true)
     // Unresolved package imports are expected without node_modules typings; keep only syntax errors.
@@ -50,7 +74,7 @@ export async function indexTypeScriptProject(monaco: Monaco, sessionId: string, 
     const uri = monaco.Uri.parse(projectModelPath(cwd, file.path))
     // Open tabs own their model and draft; never overwrite them with the disk copy.
     if (monaco.editor.getModel(uri) !== null) continue
-    monaco.editor.createModel(file.content, undefined, uri)
+    monaco.editor.createModel(file.content, editorLanguageForPath(file.path), uri)
     uris.push(uri.toString())
   }
   indexed = { cwd, uris, files: files.length, truncated }
@@ -67,6 +91,8 @@ export function typeScriptProjectStatus(cwd: string): { files: number; truncated
 export function disposeTypeScriptProject(monaco: Monaco): void {
   request++
   clearIndex(monaco)
+  restoreDefaults?.()
+  restoreDefaults = undefined
 }
 
 function clearIndex(monaco: Monaco): void {

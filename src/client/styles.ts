@@ -422,13 +422,18 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 /* Floating layout: the workbench stays inside the same native window but paints as a movable layer over DSH.
    Geometry and the top inset come from Workbench.tsx as inline styles; these rules only shape the shell. */
 .dvw-overlay[data-dvw-float=true]{position:fixed;inset:auto;z-index:100;padding-top:34px;border:1px solid var(--dvw-border);border-radius:10px;box-shadow:0 18px 48px rgba(0,0,0,.45)}
+[data-dvw-floating-surface]{right:auto!important;bottom:auto!important;z-index:106!important;margin:0!important;max-width:none!important;max-height:none!important;box-sizing:border-box!important;-webkit-app-region:no-drag}
+[data-dvw-floating-surface]::backdrop{background:transparent;pointer-events:none}
+.dvw-overlay[data-dvw-float=true][data-dvw-chat=true]{--dvw-float-chat-width:min(var(--dvw-chat-width),49%);grid-template-columns:48px min(var(--dvw-side-width),24%) minmax(0,1fr) var(--dvw-float-chat-width)}
+.dvw-overlay[data-dvw-float=true][data-dvw-chat=true]:not([data-dvw-primary-side=true]){grid-template-columns:48px 0 minmax(0,1fr) var(--dvw-float-chat-width)}
+.dvw-overlay[data-dvw-float=true][data-dvw-chat=true] .dvw-status{padding-right:calc(var(--dvw-float-chat-width) + 6px)}
+.dvw-overlay[data-dvw-float=true] .dvw-chat-resizer{position:absolute;top:0;bottom:0;left:-6px;right:auto}
+.dvw-overlay[data-dvw-float=true] .dvw-chat-body{height:100%;margin:0 3px}
 .dvw-overlay[data-dvw-float=true] .dvw-titlebar{display:none}
 .dvw-overlay[data-dvw-float-max=true]{border-radius:0;border-width:0 0 1px;box-shadow:none}
-/* Real fullscreen puts the floating layer in the top layer: it must cover the DSH
-   title bar, sidebar and conversation, not merely fill their container. */
-.dvw-overlay:fullscreen{position:fixed!important;inset:0!important;left:0!important;top:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;padding-top:34px!important;border:0!important;border-radius:0!important;box-shadow:none!important}
-.dvw-overlay:fullscreen::backdrop{background:var(--dvw-base)}
-.dvw-overlay:fullscreen .dvw-float-handle{display:none}
+/* The document goes fullscreen so DSH-owned pages and the overlay share a root. */
+.dvw-overlay[data-dvw-float-fullscreen=true]{position:fixed!important;inset:0!important;left:0!important;top:0!important;width:100vw!important;height:100vh!important;max-width:none!important;max-height:none!important;margin:0!important;padding-top:34px!important;border:0!important;border-radius:0!important;box-shadow:none!important}
+.dvw-overlay[data-dvw-float-fullscreen=true] .dvw-float-handle{display:none}
 .dvw-floatbar{position:absolute;z-index:7;top:0;right:0;left:0;height:34px;display:flex;align-items:center;gap:8px;padding:0 6px 0 10px;border-bottom:1px solid var(--dvw-border);background:var(--dvw-base);color:var(--dvw-text-2);cursor:grab;user-select:none;touch-action:none}
 .dvw-floatbar:active{cursor:grabbing}
 .dvw-floatbar-mark{flex:none;display:flex;color:var(--dvw-text-2)}

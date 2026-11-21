@@ -1156,39 +1156,47 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   useEffect(()=>writeOpenMode(openMode),[openMode])
   const overlayRef=useRef<HTMLDivElement>(null)
   const [floatFullscreen,setFloatFullscreen]=useState(false)
+  const ownsFullscreen=useRef(false)
   const [viewport,setViewport]=useState(viewportSize)
   const [floatRect,setFloatRect]=useState<FloatRect>(()=>readFloatRect(storedValue(FLOAT_RECT_KEY),viewportSize(),dshTitlebarHeight()))
   const [floatMax,setFloatMax]=useState(()=>readFloatMax(storedValue(FLOAT_MAX_KEY)))
   useEffect(()=>{
-    const sync=()=>setFloatFullscreen(document.fullscreenElement!==null&&document.fullscreenElement===overlayRef.current)
+    const sync=()=>{
+      const active=ownsFullscreen.current&&document.fullscreenElement===document.body
+      if(!active)ownsFullscreen.current=false
+      setFloatFullscreen(active)
+    }
     sync()
     document.addEventListener('fullscreenchange',sync)
-    return ()=>document.removeEventListener('fullscreenchange',sync)
+    return ()=>{
+      document.removeEventListener('fullscreenchange',sync)
+      if(ownsFullscreen.current&&document.fullscreenElement===document.body)void document.exitFullscreen?.().catch(()=>{})
+    }
   },[])
   useEffect(()=>{
     const reflow=()=>{
       setViewport(viewportSize())
       // The native title bar disappears while fullscreen, so remeasuring the inset
       // there would push the restored window under the traffic lights.
-      if(document.fullscreenElement===overlayRef.current)return
+      if(ownsFullscreen.current&&document.fullscreenElement===document.body)return
       setFloatRect(current=>clampFloatRect(current,viewportSize(),dshTitlebarHeight()))
     }
     window.addEventListener('resize',reflow)
     return ()=>window.removeEventListener('resize',reflow)
   },[])
   const toggleFloatFullscreen=useCallback(async()=>{
-    const overlay=overlayRef.current
-    if(overlay===null)return
+    if(overlayRef.current===null)return
     try{
-      if(typeof document.exitFullscreen==='function'&&document.fullscreenElement!==null){await document.exitFullscreen();return}
-      if(typeof overlay.requestFullscreen!=='function'){
-        // Hosts can refuse the Fullscreen API (permissions, kiosk policy). Keep the
-        // workbench usable by falling back to the old in-window maximized layer.
-        setFloatMax(true);persistFloatMax(true)
+      if(document.fullscreenElement){
+        if(ownsFullscreen.current&&document.fullscreenElement===document.body)await document.exitFullscreen()
         return
       }
-      await overlay.requestFullscreen()
+      // DSH owns the docked pages outside the workbench tree. Fullscreen the
+      // common ancestor so those pages remain interactive above the overlay.
+      ownsFullscreen.current=true
+      await document.body.requestFullscreen()
     }catch{
+      ownsFullscreen.current=false
       setFloatMax(true);persistFloatMax(true)
     }
   },[])
@@ -1401,9 +1409,9 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   // The host only mounts its conversation while no global panel is selected, so
   // showing a file must hand the centre back; clicking the tab re-selects it.
   useEffect(()=>{
-    if(dshTabActive||dshTabId===undefined||hostDshPanelId===undefined)return
+    if(dshTabActive||dshTabIdRef.current===undefined||hostDshPanelIdRef.current===undefined)return
     restoreConversationRef.current?.()
-  },[dshTabActive,dshTabId,hostDshPanelId])
+  },[dshTabActive])
   // Only a local activation (clicking the tab) asks DSH to select the panel
   // again. Host-driven changes must never bounce the centre back to the panel.
   useEffect(()=>{
@@ -1433,9 +1441,9 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     return ()=>window.removeEventListener('keydown',onKey,true)
   },[floating,snapshot.visible,toggleFloatFullscreen])
   useEffect(()=>{
-    if(openMode==='floating'||document.fullscreenElement===null||typeof document.exitFullscreen!=='function')return
-    void document.exitFullscreen().catch(()=>{})
-  },[openMode])
+    if((floating&&snapshot.visible)||!ownsFullscreen.current||document.fullscreenElement!==document.body)return
+    void document.exitFullscreen?.().catch(()=>{})
+  },[floating,snapshot.visible])
   // The conversation may still be attaching after the chat column opens, so retry for about a second.
   const addToDsh=useCallback((reference:string)=>{setChatVisible(true);let frames=0;const attempt=()=>{void insertIntoDshComposer(reference).then(done=>{if(done)return;if(++frames<60){requestAnimationFrame(attempt);return}alert('DSH 对话输入框当前不可用，请先选择会话或等待当前回复结束。')})};requestAnimationFrame(attempt)},[])
   const addEntryToDsh=useCallback((path:string,directory:boolean)=>addToDsh(dshReference(path,{directory})),[addToDsh])
@@ -1884,7 +1892,8 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   const showingDshPanel=dshTabId!==undefined&&dshTabActive
   const closeDshPanel=()=>{setDshTabActive(false);setDshTabId(undefined);onCloseDshPanel?.()}
   const openFromView=openPath
-  const chatShown=chatVisible&&!showingDshPanel&&!floating
+  const chatShown=chatVisible&&!showingDshPanel
+  const floatSurfacePaused=floating&&(settingsOpen||switcherOpen)
   const renderPaneChrome = (group: EditorGroup, tabs: Tab[], active: string | undefined, activeTab: Tab | undefined, focused: boolean, paneMarkdown: boolean, paneDiffMarkdown: boolean, markdownPreview: boolean) => {
     const setActive = (value?: string) => { focusGroup(group.id); setActiveIn(group.id, value) }
     const setTabs = (update: Tab[] | ((rows: Tab[]) => Tab[])) => setTabsIn(group.id, update)
@@ -2112,11 +2121,11 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
       <FloatBar name={workspace?.name} fullscreen={floatFullscreen} onPointerDown={event=>beginFloatGesture(event,'move')} onToggleFullscreen={()=>void toggleFloatFullscreen()} onClose={()=>service.hide()}/>
     </>}
     <WorkbenchTitlebar name={workspace?.name}/>
-    {dshTabId!==undefined&&<DshPanelPage panelId={dshTabId} active={showingDshPanel}/>}
-    <DshConversationPanel visible={chatShown} width={chatWidth} statusHeight={statusVisible?30:6}/>
+    {dshTabId!==undefined&&<DshPanelPage panelId={dshTabId} active={showingDshPanel&&!floatSurfacePaused} floating={floating}/>}
+    <DshConversationPanel visible={chatShown&&!floatSurfacePaused} width={chatWidth} statusHeight={statusVisible?30:6} floating={floating}/>
     <DshConversationTheme visible={chatShown} colorScheme={colorScheme} followDsh={false}/>
     <DshReviewActions visible={chatShown&&reviewEnabled} files={reviewFiles} count={reviewSnapshot.changes.length} disabled={reviewSnapshot.busy||reviewSnapshot.working} onOpen={path=>void openPath(path)} onAcceptAll={keepAllReview} onRejectAll={()=>void rejectAllReview()}/>
-    {chatShown&&<aside className="dvw-chat"><PanelResizer className="dvw-chat-resizer" label="拖动调整 DSH 对话栏宽度" size={chatWidth} min={DSH_CHAT_MIN_WIDTH} max={DSH_CHAT_MAX_WIDTH} defaultSize={DSH_CHAT_DEFAULT_WIDTH} direction={-1} hideBelow={200} onHide={()=>setChatVisible(false)} onResize={setChatWidth}/><header className="dvw-chat-head"><span><DshMark/> DSH</span><button className="dvw-icon" title="关闭 DSH 对话栏" onClick={()=>setChatVisible(false)}><Icon name="close"/></button></header><div className="dvw-chat-body"/></aside>}
+    {chatShown&&<aside className="dvw-chat"><PanelResizer className="dvw-chat-resizer" label="拖动调整 DSH 对话栏宽度" size={chatWidth} min={DSH_CHAT_MIN_WIDTH} max={DSH_CHAT_MAX_WIDTH} defaultSize={DSH_CHAT_DEFAULT_WIDTH} direction={-1} hideBelow={200} onHide={()=>setChatVisible(false)} onResize={setChatWidth}/>{!floating&&<header className="dvw-chat-head"><span><DshMark/> DSH</span><button className="dvw-icon" title="关闭 DSH 对话栏" onClick={()=>setChatVisible(false)}><Icon name="close"/></button></header>}<div className="dvw-chat-body"/></aside>}
     {switcherOpen&&<WorkspaceSwitcher choices={switcherChoices} activeSessionId={sessionId} unavailable={navigation?.available===false} busy={switcherBusy} error={switcherError} theme={colorScheme} onCreate={()=>void createWorkspace()} onNewSession={newSession} onSwitch={switchSession} onOpenWorkspace={enterWorkspace} onClose={()=>setSwitcherOpen(false)}/>}
     {settingsNode!==undefined&&createPortal(settingsPage,settingsNode)}
     {unsupportedTab!==undefined&&sessionId!==undefined&&<CenteredOpenWith key={unsupportedTab.path} sessionId={sessionId} path={unsupportedTab.path} label={unsupportedTab.label}/>}
@@ -2127,7 +2136,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
           {id:'git',label:'源代码管理',icon:<Icon name="source-control"/>,active:primarySideVisible&&snapshot.view==='git',onActivate:()=>selectView('git')},
           {id:'debug',label:snapshot.bottomPanel==='debug'?'隐藏调试面板（F5 启动调试）':'调试：断点 / 调用栈 / 变量（F5 启动）',icon:<Icon name="debug-alt"/>,active:snapshot.bottomPanel==='debug',onActivate:()=>service.toggleBottomPanel('debug')},
           {id:'terminal',label:terminalAvailable?(snapshot.bottomPanel==='terminal'?'隐藏终端':'显示终端'):'终端适配器未安装',icon:<Icon name="terminal"/>,active:snapshot.bottomPanel==='terminal',disabled:!terminalAvailable,onActivate:()=>toggleTerminal(service)},
-          ...(floating?[]:[{id:'chat',label:showingDshPanel?'返回 DSH 对话 (Ctrl+Alt+B)':chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)',icon:<DshMark size={22}/>,active:chatShown,onActivate:()=>{if(showingDshPanel)showConversation();else setChatVisible(value=>!value)}}]),
+          {id:'chat',label:showingDshPanel?'返回 DSH 对话 (Ctrl+Alt+B)':chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)',icon:<DshMark size={22}/>,active:chatShown,onActivate:()=>{if(showingDshPanel)showConversation();else setChatVisible(value=>!value)}},
         ]}
         fixed={[{id:'workspaces',label:'打开工作区 / 切换会话',icon:<Icon name="folder-opened"/>,active:false,onActivate:openSwitcher}]}
         bottom={[

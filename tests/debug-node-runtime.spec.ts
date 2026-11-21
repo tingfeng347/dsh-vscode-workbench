@@ -20,17 +20,50 @@ async function waitFor<T>(check: () => T | undefined, timeoutMs = 15_000): Promi
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const value = check()
-    if (value !== undefined) return value
+    // Boolean predicates return `false` until they hold; `!== undefined` would return instantly.
+    if (value) return value
     await new Promise(resolve => setTimeout(resolve, 50))
   }
   throw new Error('condition was not met in time')
 }
 
 const stopped = (events: DebugOutgoing[]) => events.find(event => event.type === 'state' && event.state === 'stopped')
+const ended = (events: DebugOutgoing[]) => events.filter(event => event.type === 'ended')
 const frames = (events: DebugOutgoing[]) => {
   const stack = [...events].reverse().find(event => event.type === 'stack')
   return stack?.type === 'stack' ? stack.frames : []
 }
+
+it('does not stop on a first-line breakpoint whose condition is false', async () => {
+  const { directory, path } = program('const value = 1\nconsole.log(value)\n')
+  const events: DebugOutgoing[] = []
+  const session = createDebugSession(message => events.push(message))
+  run(session, { type: 'start', adapterId: 'node', program: path, cwd: directory, breakpoints: { [path]: [{ line: 1, condition: 'false' }] } })
+  try {
+    await waitFor(() => ended(events).length > 0)
+    // The inspector's "Break on start" pause is not a conditional hit: it must be resumed.
+    expect(stopped(events)).toBeUndefined()
+  } finally {
+    session.dispose()
+  }
+}, 40_000)
+
+it('reports the real exit code exactly once when the script ends by itself', async () => {
+  const { directory, path } = program('process.exitCode = 7\n')
+  const events: DebugOutgoing[] = []
+  const session = createDebugSession(message => events.push(message))
+  run(session, { type: 'start', adapterId: 'node', program: path, cwd: directory })
+  try {
+    await waitFor(() => ended(events).length > 0)
+    // Two "ended" frames (one from the inspector, one from the process) confused the panel, and
+    // both claimed code 0 while the script asked for 7.
+    await new Promise(resolve => setTimeout(resolve, 300))
+    expect(ended(events)).toHaveLength(1)
+    expect(ended(events)[0]).toMatchObject({ type: 'ended', code: 7 })
+  } finally {
+    session.dispose()
+  }
+}, 40_000)
 
 it('stops on a breakpoint set on the first executable statement', async () => {
   const { directory, path } = program('const value = 1\nconsole.log(value)\n')

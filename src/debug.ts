@@ -241,6 +241,12 @@ class NodeDebugSession {
   private stopped = false
   /** The entry pause of `--inspect-brk` must be skipped unless the user asked to stop there. */
   private skipEntryPause = false
+  /** Set once the debuggee finished; stops the socket close from finishing the session again. */
+  private finished = false
+  /** Set after the single `ended` frame leaves, so a later exit cannot repeat it. */
+  private endedSent = false
+  /** True for attach mode, where no child process will ever report an exit code. */
+  private attached = false
   /** scope reference → CDP objectId, for both scope entries and expanded child objects. */
   private readonly objects = new Map<string, string>()
   private readonly scopeChains = new Map<string, CdpScope[]>()
@@ -277,13 +283,14 @@ class NodeDebugSession {
     })
     await this.connect(url)
     this.child?.removeAllListeners('exit')
-    this.child?.on('exit', code => { this.send({ type: 'state', state: 'ended' }); this.send({ type: 'ended', code: code ?? 0 }); this.cleanup() })
+    this.child?.on('exit', code => { this.finish(code ?? 0); this.cleanup() })
     this.skipEntryPause = !options.stopOnEntry
     await this.ready()
   }
 
   /** Attach to a runtime that is already listening on an inspector port. */
   async attach(port: number): Promise<void> {
+    this.attached = true
     this.send({ type: 'state', state: 'starting' })
     const response = await fetch(`http://127.0.0.1:${port}/json/list`)
     const targets = await response.json() as Array<{ webSocketDebuggerUrl?: string }>
@@ -296,7 +303,12 @@ class NodeDebugSession {
   private async connect(url: string): Promise<void> {
     const socket = this.socket = new WebSocket(url)
     socket.on('message', data => this.receive(JSON.parse(String(data)) as CdpMessage))
-    socket.on('close', () => { if (this.stopped) this.send({ type: 'state', state: 'ended' }); this.cleanup() })
+    socket.on('close', () => {
+      // A spawned runtime reports through its own exit event (the real code); only an attached
+      // target has nothing left to report once the inspector socket closes.
+      if (this.attached && !this.finished) this.finish(0)
+      this.cleanup()
+    })
     socket.on('error', error => this.send({ type: 'error', message: String(error).slice(0, 300) }))
     await new Promise<void>((resolve, reject) => {
       socket.once('open', () => resolve())
@@ -335,39 +347,39 @@ class NodeDebugSession {
       const params = message.params as { reason?: string; callFrames?: CdpFrame[] } | undefined
       if (this.skipEntryPause) {
         this.skipEntryPause = false
-        // `--inspect-brk` pauses before the first line; resuming past that would swallow a
-        // breakpoint the user set on the first executable statement.
-        if (!this.pausedOnBreakpoint(params)) {
+        // `--inspect-brk` pauses before the first line, which is not a breakpoint hit. Keeping that
+        // pause would swallow a breakpoint on the first statement — but only when it really applies:
+        // a `false` condition must resume exactly like V8 would.
+        const match = this.breakpointAtPause(params)
+        if (match === undefined) {
           void this.request('Debugger.resume').catch(() => undefined)
           return
         }
-      }
-      this.stopped = true
-      this.objects.clear()
-      this.scopeChains.clear()
-      this.frames = (params?.callFrames ?? []).map(frame => {
-        this.scopeChains.set(frame.callFrameId, frame.scopeChain ?? [])
-        const direct = frame.url === undefined || frame.url === '' ? undefined : this.urlToPath(frame.url)
-        const scriptId = frame.location.scriptId
-        return {
-          id: frame.callFrameId,
-          name: frame.functionName || '(anonymous)',
-          // Node reports the path on `Debugger.scriptParsed`, not on the call frame itself.
-          path: direct ?? (scriptId === undefined ? undefined : this.scripts.get(scriptId)),
-          line: frame.location.lineNumber + 1,
-          column: frame.location.columnNumber + 1,
+        const condition = match.condition
+        if (condition !== undefined && condition !== '') {
+          void this.conditionHolds(params, condition).then(holds => {
+            if (holds) this.handlePause(params)
+            else void this.request('Debugger.resume').catch(() => undefined)
+          })
+          return
         }
-      })
-      this.send({ type: 'state', state: 'stopped', reason: params?.reason ?? 'paused' })
-      this.send({ type: 'stack', frames: this.frames })
+      }
+      this.handlePause(params)
       return
     }
     if (message.method === 'Runtime.executionContextDestroyed') {
+      if (this.finished) return
+      this.finished = true
+      if (this.child === undefined) {
+        // Attached target: nothing will report an exit code, so close the session here.
+        this.finish(0)
+        this.cleanup()
+        return
+      }
       // The debuggee finished. Node keeps the process alive ("Waiting for the debugger to
-      // disconnect…") until the inspector socket closes, so the end event must come from here.
-      this.send({ type: 'state', state: 'ended' })
-      this.send({ type: 'ended', code: 0 })
-      this.cleanup()
+      // disconnect…") until the inspector socket closes; close it without killing the child so
+      // the process exits on its own and its exit event reports the real code exactly once.
+      this.cleanup({ keepChild: true })
       return
     }
     if (message.method === 'Debugger.resumed') { this.stopped = false; this.send({ type: 'state', state: 'running' }); return }
@@ -383,22 +395,64 @@ class NodeDebugSession {
     }
   }
 
+  /** Record the paused frames and report the stop; shared by real hits and a kept entry pause. */
+  private handlePause(params: { reason?: string; callFrames?: CdpFrame[] } | undefined): void {
+    this.stopped = true
+    this.objects.clear()
+    this.scopeChains.clear()
+    this.frames = (params?.callFrames ?? []).map(frame => {
+      this.scopeChains.set(frame.callFrameId, frame.scopeChain ?? [])
+      const direct = frame.url === undefined || frame.url === '' ? undefined : this.urlToPath(frame.url)
+      const scriptId = frame.location.scriptId
+      return {
+        id: frame.callFrameId,
+        name: frame.functionName || '(anonymous)',
+        // Node reports the path on `Debugger.scriptParsed`, not on the call frame itself.
+        path: direct ?? (scriptId === undefined ? undefined : this.scripts.get(scriptId)),
+        line: frame.location.lineNumber + 1,
+        column: frame.location.columnNumber + 1,
+      }
+    })
+    this.send({ type: 'state', state: 'stopped', reason: params?.reason ?? 'paused' })
+    this.send({ type: 'stack', frames: this.frames })
+  }
+
   private urlToPath(url: string): string | undefined {
     try { return url.startsWith('file:') ? fileURLToPath(url) : url } catch { return url }
   }
 
-  /** Whether the paused location itself carries a user breakpoint (used to keep the entry pause). */
-  private pausedOnBreakpoint(params: { callFrames?: CdpFrame[] } | undefined): boolean {
+  /** The user breakpoint that sits exactly on the paused location, if any. */
+  private breakpointAtPause(params: { callFrames?: CdpFrame[] } | undefined): DebugBreakpoint | undefined {
     const frame = params?.callFrames?.[0]
-    if (frame === undefined) return false
+    if (frame === undefined) return undefined
     const scriptId = frame.location.scriptId
     const path = frame.url !== undefined && frame.url !== '' ? this.urlToPath(frame.url) : (scriptId === undefined ? undefined : this.scripts.get(scriptId))
-    if (path === undefined) return false
+    if (path === undefined) return undefined
     const line = frame.location.lineNumber + 1
     for (const [key, list] of this.breakpoints) {
-      if (sameFile(key, path) && list.some(row => row.line === line)) return true
+      if (!sameFile(key, path)) continue
+      const row = list.find(item => item.line === line)
+      if (row !== undefined) return row
     }
-    return false
+    return undefined
+  }
+
+  /** Evaluate a breakpoint condition in the paused frame; a failing condition keeps the stop. */
+  private async conditionHolds(params: { callFrames?: CdpFrame[] } | undefined, condition: string): Promise<boolean> {
+    const callFrameId = params?.callFrames?.[0]?.callFrameId
+    if (callFrameId === undefined) return true
+    try {
+      const result = await this.request('Debugger.evaluateOnCallFrame', { callFrameId, expression: condition, returnByValue: true }) as { result?: { value?: unknown } }
+      return Boolean(result?.result?.value)
+    } catch { return true }
+  }
+
+  /** Send the end of the session once; a process exit must not follow an earlier one. */
+  private finish(code: number): void {
+    if (this.endedSent) return
+    this.endedSent = true
+    this.send({ type: 'state', state: 'ended' })
+    this.send({ type: 'ended', code })
   }
 
   private remoteText(value: CdpRemote): string {
@@ -518,7 +572,7 @@ class NodeDebugSession {
     }
   }
 
-  cleanup(): void {
+  cleanup(options: { keepChild?: boolean } = {}): void {
     this.stopped = false
     // Waiting requests must settle, or the serial command queue never reaches the next message.
     const waiting = [...this.pending.values()]
@@ -530,7 +584,12 @@ class NodeDebugSession {
     this.bound.clear()
     try { this.socket?.close() } catch { /* already closed */ }
     this.socket = undefined
-    if (this.child !== undefined) { killTree(this.child); this.child = undefined }
+    // `keepChild` is used when the debuggee finished on its own: killing it would destroy the
+    // exit code the process is about to report.
+    if (this.child !== undefined) {
+      if (options.keepChild !== true) killTree(this.child)
+      this.child = undefined
+    }
   }
 }
 
@@ -953,10 +1012,11 @@ export function createDebugBridge(options: DebugBridgeOptions): { accept(raw: st
     options.send(original === undefined ? message : { ...message, path: original })
   }, { adaptersRoot: options.adaptersRoot })
   let disposed = false
-  const reject = (message: string) => {
+  const reject = (message: string, launch = false) => {
     options.send({ type: 'error', message })
-    // A rejected start must leave the panel retryable instead of stuck on "启动中…".
-    options.send({ type: 'state', state: 'ended' })
+    // Only a failed launch has no session to fall back to. A rejected breakpoint update must not
+    // mark a session that is still running as ended.
+    if (launch) options.send({ type: 'state', state: 'ended' })
   }
   let chain: Promise<void> = Promise.resolve()
   return {
@@ -970,7 +1030,7 @@ export function createDebugBridge(options: DebugBridgeOptions): { accept(raw: st
           displayPaths.set(absolute, path)
           return absolute
         })
-        if (resolved === undefined) { reject('调试路径不在工作区内'); return }
+        if (resolved === undefined) { reject('调试路径不在工作区内', message.type === 'start' || message.type === 'run' || message.type === 'attach'); return }
         // The panel never knows the workspace directory; every launch runs in the session's.
         session.handle(resolved.type === 'start' || resolved.type === 'attach' || resolved.type === 'run' ? { ...resolved, cwd: options.workspace } : resolved)
       }).catch(() => undefined)

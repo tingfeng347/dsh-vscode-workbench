@@ -69,7 +69,8 @@ async function waitFor<T>(check: () => T | undefined, timeoutMs = 20_000): Promi
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     const value = check()
-    if (value !== undefined) return value
+    // Boolean predicates return `false` until they hold; `!== undefined` would return instantly.
+    if (value) return value
     await new Promise(resolve => setTimeout(resolve, 50))
   }
   throw new Error('condition was not met in time')
@@ -98,6 +99,25 @@ it('survives set-breakpoint → start → stop → start again on the same file'
   send({ type: 'start', program: 'target.js', cwd: '', breakpoints: { 'target.js': [{ line: 3 }] } })
   await waitFor(() => events.filter(event => event.type === 'state' && event.state === 'stopped').length >= 2)
   expect(errors(events)).toHaveLength(0)
+}, 60_000)
+
+it('keeps a running session alive when a breakpoint update is rejected', async () => {
+  const { root } = workspaceWith('setInterval(() => console.log("tick"), 100)\n')
+  const { send, events } = await connect(root)
+
+  send({ type: 'start', program: 'target.js', cwd: '' })
+  await waitFor(() => events.some(event => event.type === 'state' && event.state === 'running'))
+
+  // A breakpoint for a file outside the workspace fails that one update — not the live session.
+  send({ type: 'setBreakpoints', path: '../outside.js', breakpoints: [{ line: 1 }] })
+  await waitFor(() => errors(events).length > 0)
+  await new Promise(resolve => setTimeout(resolve, 300))
+  expect(events.filter(event => event.type === 'ended')).toHaveLength(0)
+  expect(events.some(event => event.type === 'state' && event.state === 'ended')).toBe(false)
+
+  // The session must still be controllable afterwards.
+  send({ type: 'stop' })
+  await waitFor(() => events.some(event => event.type === 'ended'))
 }, 60_000)
 
 it('reports an invalid target once and stays retryable', async () => {

@@ -20,6 +20,13 @@ export function DebugPanel({ controller, sessionId, activePath, onOpenFrame }: {
   const startDebug = () => controller.start(sessionId, active ?? '', '')
   const startRun = () => controller.run(sessionId, active ?? '', '')
   const paused = snapshot.state === 'stopped'
+  const conditionTarget = snapshot.conditionTarget
+  // Prefill with the selected breakpoint's condition, so clearing it is an obvious edit.
+  useEffect(() => {
+    if (conditionTarget === undefined) { setDraft(''); return }
+    const row = (snapshot.breakpoints[conditionTarget.path] ?? []).find(item => item.line === conditionTarget.line)
+    setDraft(row?.condition ?? '')
+  }, [conditionTarget?.path, conditionTarget?.line])
 
   const breakpoints = useMemo(() => activePath === undefined ? [] : controller.breakpointsFor(activePath), [controller, activePath, snapshot.breakpoints])
 
@@ -117,8 +124,8 @@ export function DebugPanel({ controller, sessionId, activePath, onOpenFrame }: {
       {snapshot.state === 'idle' && active !== undefined && <div className="dvw-debug-empty">就绪：点击「调试」或按 F5 启动 {active}；
         需要先在你关心的行号上点一下设断点。</div>}
       <div className="dvw-debug-foot">
-        <input value={draft} placeholder="条件断点表达式（对当前文件的断点生效）" onChange={event => setDraft(event.target.value)} />
-        <button onClick={() => { if (activePath !== undefined && draft.trim() !== '') { const line = snapshot.frames[0]?.line; if (line !== undefined && snapshot.frames[0]?.path !== undefined) controller.setCondition(activePath, line, draft) } }}>应用</button>
+        <input value={draft} placeholder={conditionTarget === undefined ? '先在行号上设断点，再填条件表达式' : `条件断点：第 ${conditionTarget.line} 行（留空后应用可清除）`} onChange={event => setDraft(event.target.value)} />
+        <button disabled={conditionTarget === undefined} onClick={() => { if (conditionTarget !== undefined) controller.setCondition(conditionTarget.path, conditionTarget.line, draft) }}>应用</button>
         <span className="dvw-debug-hint">{sessionId === '' ? '' : `会话 ${sessionId.slice(0, 8)}`}</span>
       </div>
     </div>

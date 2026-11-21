@@ -16,7 +16,7 @@ import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import { commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, type CommitModelCatalog, type CommitModelSelection, type DshChatModelCatalog } from './commit-message.ts'
 import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitPreviewFile, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, replaceSearchResults, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host.ts'
 import { installLsp, lspStatuses, resolveLsp, uninstallLsp, pipeLanguageServer } from './lsp.ts'
-import { createDebugSession, type DebugIncoming } from './debug.ts'
+import { createDebugSession, parseDebugMessage, resolveDebugPaths } from './debug.ts'
 import { officePdf, officePdfBuffer, officeStatus } from './office.ts'
 import { WorkspaceSite } from './site.ts'
 import type { SearchFileEdits, SearchRequest } from './types.ts'
@@ -42,6 +42,22 @@ interface DesktopOpener {
 }
 
 const NATIVE_OPEN_TIMEOUT_MS = 15000
+
+/** Deadlines for API calls that wait on an external process; everything else settles on its own. */
+const API_DEADLINES: Record<string, number> = {
+  'lsp.install': 10 * 60 * 1000,
+  'lsp.uninstall': 10 * 60 * 1000,
+}
+
+function withDeadline<T>(work: Promise<T>, ms: number, method: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new WorkbenchError('timeout', `${method} 超过 ${Math.round(ms / 1000)} 秒未返回`, 504)), ms)
+    work.then(
+      value => { clearTimeout(timer); resolve(value) },
+      cause => { clearTimeout(timer); reject(cause) },
+    )
+  })
+}
 
 function stringArrayField(body: Record<string, unknown>, key: string): string[] {
   const value = body[key]
@@ -200,9 +216,9 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
       if (site === undefined) throw new WorkbenchError('site-unavailable', 'HTML 预览服务不可用', 503)
       return { url: await site.url(sessionId, stringField(body, 'path')) }
     }
-    case 'workspace.open': return openWorkspaceFromPicker(dshDirectoryPicker, dshWorkspaceRegistry, AbortSignal.timeout(10 * 60 * 1000))
+    case 'workspace.open': return openWorkspaceFromPicker(dshDirectoryPicker, dshWorkspaceRegistry, signal ?? new AbortController().signal)
     case 'lsp.status': return cached('lsp.status', 15_000, () => lspStatuses())
-    case 'lsp.install': await installLsp(stringField(body, 'id')); probeCache.delete('lsp.status'); return lspStatuses()
+    case 'lsp.install': await installLsp(stringField(body, 'id'), signal); probeCache.delete('lsp.status'); return lspStatuses()
     case 'lsp.uninstall': await uninstallLsp(stringField(body, 'id')); probeCache.delete('lsp.status'); return lspStatuses()
     case 'search': return searchWorkspace(cwd, body as unknown as SearchRequest, signal)
     case 'search.replace':
@@ -333,22 +349,15 @@ export function apply(ctx: HostContext): void {
         res.once('close', () => { if (!res.writableEnded) controller.abort() })
         const path = new URL(req.url ?? '/', 'http://dsh.local').pathname
         const method = path.slice('/dsh-vscode/api/'.length)
-        const started = Date.now()
-        const trace = (stage: string) => { try { appendFileSync(joinPath(tmpdir(), 'dvw-api.log'), `${new Date().toISOString()} ${method} ${stage} +${Date.now() - started}ms\n`) } catch { /* logging must never break the API */ } }
-        trace(`enter method=${req.method} len=${req.headers['content-length'] ?? '-'} ended=${req.readableEnded}`)
-        const watchdog = setTimeout(() => trace('still-waiting-after-5s'), 5000)
         const body = await readBody(req)
-        trace('body')
-        // A handler that never settles would hold one of the browser's six connections forever and
-        // starve every later request, so each call gets a hard deadline.
-        const value = await Promise.race([
-          dispatch(ctx, method, body, controller.signal, site),
-          new Promise<never>((_, reject) => setTimeout(() => reject(new WorkbenchError('timeout', `${method} 超过 10 秒未返回`, 504)), 8_000)),
-        ])
-        trace('dispatch')
+        // Only calls that wait on something external get a deadline. A directory picker waits for
+        // the user and an LSP install waits for npm, so one shared 8 second cap used to 504 them
+        // while the work kept running in the background. Everything else is bounded inside itself.
+        const deadline = API_DEADLINES[method]
+        const value = deadline === undefined
+          ? await dispatch(ctx, method, body, controller.signal, site)
+          : await withDeadline(dispatch(ctx, method, body, controller.signal, site), deadline, method)
         send(res, 200, { ok: true, value })
-        clearTimeout(watchdog)
-        trace('sent')
       } catch (error) { sendError(res, error) }
     },
   }), 'dsh-vscode-workbench: API')
@@ -525,27 +534,31 @@ export function apply(ctx: HostContext): void {
       debugWss.handleUpgrade(req as IncomingMessage, socket as Duplex, head, ws => {
         const search = new URL(req.url ?? '/', 'http://dsh.local').searchParams
         const sessionId = search.get('sessionId')
+        // The bridge spawns and kills processes, so it only exists inside a real DSH session.
+        if (sessionId === null || sessionId === '') { ws.close(1008, 'sessionId is required'); return }
         let workspace: string
-        try { workspace = sessionId === null ? '' : cwdFor(ctx, sessionId) }
+        try { workspace = cwdFor(ctx, sessionId) }
         catch { ws.close(1008, 'session workspace unavailable'); return }
-        // The session owns a spawned runtime, so every message carries the workspace it may act in.
+        // The session owns a spawned runtime, so every message is resolved inside its workspace.
         // Adapters live outside the profile so a venv or adapter bundle never lands in the app dir.
         const adaptersRoot = process.env.DSH_WORKBENCH_ADAPTERS ?? joinPath(homedir(), '.dsh', 'workbench-adapters')
-        traceDebug(`debug-ws-connect session=${sessionId ?? '-'}`)
+        traceDebug(`debug-ws-connect session=${sessionId}`)
         const session = createDebugSession(message => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)) }, { adaptersRoot })
+        const reject = (message: string) => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'error', message })) }
+        // Frames are resolved in arrival order: an adapter must never see a relative path, and a
+        // path outside the workspace must never reach it at all.
+        let chain: Promise<void> = Promise.resolve()
         ws.on('message', data => {
-          let message: DebugIncoming
-          try { message = JSON.parse(String(data)) as DebugIncoming } catch { return }
-          if ((message.type === 'start' || message.type === 'attach') && workspace !== '') message.cwd = workspace
-          // The editor sends workspace-relative paths; every adapter wants an absolute program.
-          if ((message.type === 'start' || message.type === 'run') && workspace !== '' && !isAbsolute(message.program)) message.program = joinPath(workspace, message.program)
-          // The editor works in workspace-relative paths; every debug adapter matches absolute files.
-          const absolute = (path: string) => workspace === '' || isAbsolute(path) ? path : joinPath(workspace, path)
-          if (message.type === 'setBreakpoints') message.path = absolute(message.path)
-          if (message.type === 'start' && message.breakpoints !== undefined) {
-            message.breakpoints = Object.fromEntries(Object.entries(message.breakpoints).map(([path, list]) => [absolute(path), list]))
-          }
-          session.handle(message)
+          const raw = data as Buffer
+          chain = chain.then(async () => {
+            if (ws.readyState !== WebSocket.OPEN) return
+            const message = parseDebugMessage(raw)
+            if (message === undefined) { reject('调试消息格式无效'); return }
+            const resolved = await resolveDebugPaths(message, path => workspacePath(workspace, path).then(found => found.absolute))
+            if (resolved === undefined) { reject('调试路径不在工作区内'); return }
+            // The panel never knows the workspace directory; every launch runs in the session's.
+            session.handle(resolved.type === 'start' || resolved.type === 'attach' || resolved.type === 'run' ? { ...resolved, cwd: workspace } : resolved)
+          }).catch(() => undefined)
         })
         ws.on('close', () => session.dispose())
         ws.on('error', () => session.dispose())

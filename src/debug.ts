@@ -46,6 +46,127 @@ export type DebugOutgoing =
 
 const escapeRegex = (value: string) => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
+/** A silent adapter must not wedge the serial command queue, so every DAP/CDP call has a deadline. */
+const DAP_REQUEST_TIMEOUT_MS = 10_000
+const DAP_LAUNCH_TIMEOUT_MS = 30_000
+const CDP_REQUEST_TIMEOUT_MS = 10_000
+
+const isStringArray = (value: unknown): value is string[] =>
+  Array.isArray(value) && value.every(item => typeof item === 'string')
+
+const isBreakpointList = (value: unknown): value is DebugBreakpoint[] =>
+  Array.isArray(value) && value.every(row => {
+    if (typeof row !== 'object' || row === null) return false
+    const candidate = row as { line?: unknown; condition?: unknown }
+    return typeof candidate.line === 'number' && Number.isInteger(candidate.line) && candidate.line > 0
+      && (candidate.condition === undefined || typeof candidate.condition === 'string')
+  })
+
+const isBreakpointMap = (value: unknown): value is Record<string, DebugBreakpoint[]> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value)
+  && Object.values(value as Record<string, unknown>).every(isBreakpointList)
+
+/**
+ * The debug socket is a network boundary: the panel is the only intended client, but anything on
+ * the same origin can open it. Reject frames that do not match the documented message shapes
+ * instead of trusting a `JSON.parse` cast.
+ */
+export function parseDebugMessage(raw: string | Buffer): DebugIncoming | undefined {
+  let value: unknown
+  try { value = JSON.parse(String(raw)) } catch { return undefined }
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const message = value as Record<string, unknown>
+  const text = (field: string): string | undefined => {
+    const found = message[field]
+    return typeof found === 'string' && found !== '' ? found : undefined
+  }
+  const cwd = typeof message.cwd === 'string' ? message.cwd : ''
+  switch (message.type) {
+    case 'start': {
+      const program = text('program')
+      if (program === undefined) return undefined
+      if (message.adapterId !== undefined && text('adapterId') === undefined) return undefined
+      if (message.args !== undefined && !isStringArray(message.args)) return undefined
+      if (message.breakpoints !== undefined && !isBreakpointMap(message.breakpoints)) return undefined
+      return {
+        type: 'start', program, cwd, adapterId: text('adapterId'), args: message.args as string[] | undefined,
+        stopOnEntry: message.stopOnEntry === true, breakpoints: message.breakpoints as Record<string, DebugBreakpoint[]> | undefined,
+      }
+    }
+    case 'attach': {
+      const port = Number(message.port)
+      if (!Number.isInteger(port) || port <= 0 || port > 65535) return undefined
+      return { type: 'attach', target: 'node', port, cwd }
+    }
+    case 'run': {
+      const program = text('program')
+      if (program === undefined) return undefined
+      if (message.args !== undefined && !isStringArray(message.args)) return undefined
+      return { type: 'run', program, cwd, args: message.args as string[] | undefined }
+    }
+    case 'setBreakpoints': {
+      const path = text('path')
+      if (path === undefined || !isBreakpointList(message.breakpoints)) return undefined
+      return { type: 'setBreakpoints', path, breakpoints: message.breakpoints }
+    }
+    case 'setExceptionBreakpoints':
+      return message.mode === 'none' || message.mode === 'uncaught' || message.mode === 'all' ? { type: 'setExceptionBreakpoints', mode: message.mode } : undefined
+    case 'step':
+      return message.kind === 'next' || message.kind === 'in' || message.kind === 'out' ? { type: 'step', kind: message.kind } : undefined
+    case 'scopes': {
+      const frameId = text('frameId')
+      return frameId === undefined ? undefined : { type: 'scopes', frameId }
+    }
+    case 'variables': {
+      const reference = text('reference')
+      return reference === undefined ? undefined : { type: 'variables', reference }
+    }
+    case 'evaluate': {
+      const expression = text('expression')
+      if (expression === undefined) return undefined
+      return { type: 'evaluate', expression, frameId: text('frameId') }
+    }
+    case 'stack': {
+      const threadId = Number(message.threadId)
+      return { type: 'stack', threadId: Number.isInteger(threadId) && threadId > 0 ? threadId : 1 }
+    }
+    case 'adapters': return { type: 'adapters' }
+    case 'stop': return { type: 'stop' }
+    case 'resume': return { type: 'resume' }
+    case 'pause': return { type: 'pause' }
+    default: return undefined
+  }
+}
+
+/**
+ * Map the paths a panel sends onto the session workspace before an adapter sees them. Adapters
+ * take absolute paths; the editor speaks workspace-relative ones, and a breakpoint outside the
+ * workspace must never reach the runtime. Returns undefined when a path escapes the workspace.
+ */
+export async function resolveDebugPaths(
+  message: DebugIncoming,
+  resolve: (path: string) => Promise<string>,
+): Promise<DebugIncoming | undefined> {
+  try {
+    switch (message.type) {
+      case 'start': {
+        const program = await resolve(message.program)
+        const breakpoints: Record<string, DebugBreakpoint[]> = {}
+        for (const [path, list] of Object.entries(message.breakpoints ?? {})) {
+          breakpoints[await resolve(path)] = list
+        }
+        return { ...message, program, breakpoints }
+      }
+      case 'run':
+        return { ...message, program: await resolve(message.program) }
+      case 'setBreakpoints':
+        return { ...message, path: await resolve(message.path) }
+      default:
+        return message
+    }
+  } catch { return undefined }
+}
+
 /** Absolute path to a file URL, tolerating both separators on Windows. */
 export function toFileUrl(path: string): string {
   const normalised = path.replace(/\\/g, '/')
@@ -82,7 +203,7 @@ function killTree(child: ChildProcess): void {
 
 interface CdpMessage { id?: number; method?: string; params?: Record<string, unknown>; result?: Record<string, unknown>; error?: { message?: string } }
 interface CdpScope { type: string; object: { objectId?: string } }
-interface CdpFrame { callFrameId: string; functionName?: string; url?: string; location: { lineNumber: number; columnNumber: number }; scopeChain?: CdpScope[] }
+interface CdpFrame { callFrameId: string; functionName?: string; url?: string; location: { scriptId?: string; lineNumber: number; columnNumber: number }; scopeChain?: CdpScope[] }
 interface CdpRemote { type?: string; subtype?: string; value?: unknown; description?: string; objectId?: string }
 
 /** Wire-level trace for the debug adapters; diagnosis only, safe to remove. */
@@ -119,6 +240,8 @@ class NodeDebugSession {
   /** scope reference → CDP objectId, for both scope entries and expanded child objects. */
   private readonly objects = new Map<string, string>()
   private readonly scopeChains = new Map<string, CdpScope[]>()
+  /** scriptId → file path; Node omits `url` on call frames, so this is the only source of paths. */
+  private readonly scripts = new Map<string, string>()
 
   constructor(private readonly send: (message: DebugOutgoing) => void) {}
 
@@ -191,6 +314,14 @@ class NodeDebugSession {
       else waiter.resolve(message.result)
       return
     }
+    if (message.method === 'Debugger.scriptParsed') {
+      const params = message.params as { scriptId?: string; url?: string } | undefined
+      if (params?.scriptId !== undefined && params.url !== undefined && params.url !== '') {
+        const path = this.urlToPath(params.url)
+        if (path !== undefined) this.scripts.set(params.scriptId, path)
+      }
+      return
+    }
     if (message.method === 'Debugger.paused') {
       const params = message.params as { reason?: string; callFrames?: CdpFrame[] } | undefined
       if (this.skipEntryPause) {
@@ -203,10 +334,13 @@ class NodeDebugSession {
       this.scopeChains.clear()
       this.frames = (params?.callFrames ?? []).map(frame => {
         this.scopeChains.set(frame.callFrameId, frame.scopeChain ?? [])
+        const direct = frame.url === undefined || frame.url === '' ? undefined : this.urlToPath(frame.url)
+        const scriptId = frame.location.scriptId
         return {
           id: frame.callFrameId,
           name: frame.functionName || '(anonymous)',
-          path: frame.url === undefined || frame.url === '' ? undefined : this.urlToPath(frame.url),
+          // Node reports the path on `Debugger.scriptParsed`, not on the call frame itself.
+          path: direct ?? (scriptId === undefined ? undefined : this.scripts.get(scriptId)),
           line: frame.location.lineNumber + 1,
           column: frame.location.columnNumber + 1,
         }
@@ -237,12 +371,18 @@ class NodeDebugSession {
     return value.description ?? value.type ?? ''
   }
 
-  private request(method: string, params?: Record<string, unknown>): Promise<unknown> {
+  private request(method: string, params?: Record<string, unknown>, timeoutMs = CDP_REQUEST_TIMEOUT_MS): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const socket = this.socket
       if (socket === undefined || socket.readyState !== WebSocket.OPEN) { reject(new Error('调试会话尚未连接')); return }
       const id = this.nextId++
-      this.pending.set(id, { resolve, reject })
+      const timer = setTimeout(() => {
+        if (this.pending.delete(id)) reject(new Error(`${method} 超过 ${Math.round(timeoutMs / 1000)} 秒没有响应`))
+      }, timeoutMs)
+      this.pending.set(id, {
+        resolve: value => { clearTimeout(timer); resolve(value) },
+        reject: error => { clearTimeout(timer); reject(error) },
+      })
       socket.send(JSON.stringify({ id, method, params: params ?? {} }))
     })
   }
@@ -333,9 +473,13 @@ class NodeDebugSession {
 
   cleanup(): void {
     this.stopped = false
+    // Waiting requests must settle, or the serial command queue never reaches the next message.
+    const waiting = [...this.pending.values()]
     this.pending.clear()
+    for (const waiter of waiting) waiter.reject(new Error('调试会话已结束'))
     this.objects.clear()
     this.scopeChains.clear()
+    this.scripts.clear()
     try { this.socket?.close() } catch { /* already closed */ }
     this.socket = undefined
     if (this.child !== undefined) { killTree(this.child); this.child = undefined }
@@ -464,6 +608,12 @@ class DapBackend {
     child.stdout?.on('data', chunk => parse(chunk as Buffer))
     child.stderr?.on('data', chunk => this.send({ type: 'output', category: 'stderr', text: String(chunk) }))
     child.on('exit', code => { this.send({ type: 'state', state: 'ended' }); this.send({ type: 'ended', code: code ?? 0 }); this.cleanup() })
+    // A missing adapter binary never reaches 'exit'; without this the launch promise hangs.
+    child.on('error', error => {
+      this.send({ type: 'error', message: `调试适配器启动失败：${error.message}` })
+      this.send({ type: 'state', state: 'ended' })
+      this.cleanup()
+    })
 
     const initialized = new Promise<void>(resolve => { this.onInitialized = resolve })
     await this.request('initialize', {
@@ -481,19 +631,19 @@ class DapBackend {
       // Verified against GDB 15: pending breakpoints -> launch -> configurationDone stops on the
       // breakpoint; an automatic continue here runs the program straight past it.
       for (const [path, list] of this.breakpoints) await this.applyBreakpoints(path, list)
-      await this.request('launch', launchArgs).catch(() => undefined)
+      await this.request('launch', launchArgs, DAP_LAUNCH_TIMEOUT_MS).catch(() => undefined)
       const entryStop = new Promise<void>(resolve => { this.onStop = resolve })
-      await this.request('configurationDone', {}).catch(() => undefined)
+      await this.request('configurationDone', {}, DAP_LAUNCH_TIMEOUT_MS).catch(() => undefined)
       await Promise.race([entryStop, new Promise(resolve => setTimeout(resolve, 4000))])
       return
     }
 
     // Verified against debugpy: it needs launch first (breakpoints go to a server that does not
     // exist yet otherwise), and it answers launch only after configurationDone.
-    const launching = this.request('launch', launchArgs)
+    const launching = this.request('launch', launchArgs, DAP_LAUNCH_TIMEOUT_MS)
     for (const [path, list] of this.breakpoints) await this.applyBreakpoints(path, list)
     void launching.catch(() => undefined)
-    await this.request('configurationDone', {}).catch(() => undefined)
+    await this.request('configurationDone', {}, DAP_LAUNCH_TIMEOUT_MS).catch(() => undefined)
     this.send({ type: 'state', state: 'running' })
   }
 
@@ -563,12 +713,18 @@ class DapBackend {
     this.writeFrame(frameLsp({ type: 'response', request_seq: request.seq, success, command: request.command, ...(message === '' ? {} : { message }) }))
   }
 
-  private request(command: string, args: Record<string, unknown> = {}): Promise<DapResponse> {
+  private request(command: string, args: Record<string, unknown> = {}, timeoutMs = DAP_REQUEST_TIMEOUT_MS): Promise<DapResponse> {
     return new Promise((resolve, reject) => {
       const child = this.child
       if (child?.stdin === undefined || child.stdin === null) { reject(new Error('调试适配器未就绪')); return }
       const seq = this.seq++
-      this.pending.set(seq, { resolve, reject })
+      const timer = setTimeout(() => {
+        if (this.pending.delete(seq)) reject(new Error(`${command} 超过 ${Math.round(timeoutMs / 1000)} 秒没有响应`))
+      }, timeoutMs)
+      this.pending.set(seq, {
+        resolve: value => { clearTimeout(timer); resolve(value) },
+        reject: error => { clearTimeout(timer); reject(error) },
+      })
       dapLog(`-> ${seq} ${command} ${JSON.stringify(args).slice(0, 400)}`)
       this.writeFrame(frameLsp({ seq, type: 'request', command, arguments: args }))
     })
@@ -648,7 +804,10 @@ class DapBackend {
 
   cleanup(): void {
     this.stopped = false
+    // Waiting requests must settle, or the serial command queue never reaches the next message.
+    const waiting = [...this.pending.values()]
     this.pending.clear()
+    for (const waiter of waiting) waiter.reject(new Error('调试会话已结束'))
     if (this.child !== undefined) { killTree(this.child); this.child = undefined }
   }
 }
@@ -728,15 +887,21 @@ export function createDebugSession(send: (message: DebugOutgoing) => void, optio
   const adaptersRoot = options.adaptersRoot ?? ''
   let backend: NodeDebugSession | DapBackend | undefined
   let runner: RunSession | undefined
+  let disposed = false
   const fail = (error: unknown) => {
+    // A failed adapter must not keep a half-started process around, or the next start inherits it.
+    backend?.cleanup(); backend = undefined
     send({ type: 'error', message: error instanceof Error ? error.message : String(error) })
     send({ type: 'state', state: 'ended' })
   }
   let queue: Promise<void> = Promise.resolve()
   return {
     handle(message) {
+      if (disposed) return
       // Session setup is asynchronous; chaining keeps a later setBreakpoints from racing it.
       queue = queue.then(async () => {
+        // A queued command must never run after the socket closed: it could spawn a new process.
+        if (disposed) return
         try {
           switch (message.type) {
             case 'adapters': {
@@ -822,7 +987,13 @@ export function createDebugSession(send: (message: DebugOutgoing) => void, optio
         } catch (error) { fail(error) }
       })
     },
-    dispose() { backend?.cleanup(); backend = undefined },
+    dispose() {
+      disposed = true
+      // Closing the socket has to take every process with it, including a plain "run".
+      runner?.cleanup(); runner = undefined
+      backend?.cleanup(); backend = undefined
+      queue = Promise.resolve()
+    },
   }
 }
 

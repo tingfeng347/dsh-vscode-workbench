@@ -23,10 +23,43 @@ export interface DebugSnapshot {
   /** File whose breakpoints the editor gutter edits. */
   activePath?: string
   adapterId?: string
+  /** Breakpoint the condition field edits: the line the user last toggled in the gutter. */
+  conditionTarget?: { path: string; line: number }
   adapters: Array<{ id: string; label: string; languages: string[]; available: boolean; hint?: string }>
 }
 
 const EMPTY: DebugSnapshot = { state: 'idle', frames: [], scopes: [], variables: {}, console: [], breakpoints: {}, exceptionMode: 'uncaught', adapters: [] }
+
+export type DebugShortcutAction =
+  | { kind: 'resume' }
+  | { kind: 'stop' }
+  | { kind: 'start' }
+  | { kind: 'step'; step: 'next' | 'in' | 'out' }
+  | { kind: 'swallow' }
+
+/**
+ * F5/F10/F11 routing. Stepping only applies while paused, F11 belongs to the host otherwise
+ * (fullscreen), and a second F5 must never restart a running debuggee.
+ */
+export function debugShortcut(
+  code: string,
+  shiftKey: boolean,
+  snapshot: Pick<DebugSnapshot, 'state' | 'activePath' | 'sessionId' | 'adapterId'>,
+): DebugShortcutAction | undefined {
+  const paused = snapshot.state === 'stopped'
+  const busy = snapshot.state === 'running' || snapshot.state === 'starting'
+  if (code === 'F5' && !shiftKey) {
+    if (paused) return { kind: 'resume' }
+    // Swallow while busy: the host must not treat it as a fresh start either.
+    if (busy) return { kind: 'swallow' }
+    return snapshot.activePath === undefined ? undefined : { kind: 'start' }
+  }
+  if (code === 'F5' && shiftKey) return paused || busy ? { kind: 'stop' } : undefined
+  if (!paused) return undefined
+  if (code === 'F10' && !shiftKey) return { kind: 'step', step: 'next' }
+  if (code === 'F11') return { kind: 'step', step: shiftKey ? 'out' : 'in' }
+  return undefined
+}
 
 /** Which adapter claims a file, mirroring the host registry for the UI default. */
 export function guessAdapter(path: string | undefined): string {
@@ -90,9 +123,13 @@ export class DebugController {
 
   private receive(message: Record<string, unknown>): void {
     switch (message.type) {
-      case 'state':
-        this.update({ state: message.state as DebugState, reason: message.reason as string | undefined, ...(message.state === 'ended' ? { frames: [], scopes: [], variables: {}, frameId: undefined } : {}) })
+      case 'state': {
+        const state = message.state as DebugState
+        // Resuming or ending must drop the stack, otherwise the paused line stays highlighted.
+        const clear = state === 'ended' || state === 'running'
+        this.update({ state, reason: message.reason as string | undefined, ...(clear ? { frames: [], scopes: [], variables: {}, frameId: undefined } : {}) })
         break
+      }
       case 'stack': {
         const frames = (message.frames ?? []) as DebugFrame[]
         this.update({ frames, frameId: frames[0]?.id })
@@ -181,17 +218,21 @@ export class DebugController {
   toggleBreakpoint(sessionId: string, path: string, line: number): void {
     this.connect(sessionId)
     const current = this.snapshot.breakpoints[path] ?? []
-    const next = current.some(row => row.line === line)
+    const removing = current.some(row => row.line === line)
+    const next = removing
       ? current.filter(row => row.line !== line)
       : [...current, { line }].sort((left, right) => left.line - right.line)
-    this.update({ breakpoints: { ...this.snapshot.breakpoints, [path]: next } })
+    const target = removing ? (this.snapshot.conditionTarget?.path === path && this.snapshot.conditionTarget.line === line ? undefined : this.snapshot.conditionTarget) : { path, line }
+    this.update({ breakpoints: { ...this.snapshot.breakpoints, [path]: next }, conditionTarget: target })
     this.send({ type: 'setBreakpoints', path, breakpoints: next })
   }
 
+  /** Conditions are edited per breakpoint, so they can be set long before the first hit. */
   setCondition(path: string, line: number, condition: string): void {
     const current = this.snapshot.breakpoints[path] ?? []
-    const next = current.map(row => row.line === line ? { ...row, condition: condition.trim() === '' ? undefined : condition.trim() } : row)
-    this.update({ breakpoints: { ...this.snapshot.breakpoints, [path]: next } })
+    const text = condition.trim()
+    const next = current.map(row => row.line === line ? { ...row, condition: text === '' ? undefined : text } : row)
+    this.update({ breakpoints: { ...this.snapshot.breakpoints, [path]: next }, conditionTarget: { path, line } })
     this.send({ type: 'setBreakpoints', path, breakpoints: next })
   }
 

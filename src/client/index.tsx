@@ -17,7 +17,7 @@ import type { VscodeWorkbench } from './service.ts'
 import { WorkbenchController } from './service.ts'
 import { TerminalPanel } from './TerminalPanel.tsx'
 import { DebugPanel } from './DebugPanel.tsx'
-import { debugController } from './debug.ts'
+import { debugController, debugShortcut } from './debug.ts'
 import { Workbench } from './Workbench.tsx'
 import { WorkbenchSettingsSection } from './SettingsPanel.tsx'
 import { SETTINGS_SECTION_ID } from './dshSettings.ts'
@@ -75,19 +75,25 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => installDshChangedFilesOpenInterceptor(ctx.sidebarRight, () => service.getSnapshot().visible, () => service.show('explorer')), 'dsh-vscode-workbench: changed file links')
   ctx.effect(() => { const dispose = ctx.reflect.provide('vscodeWorkbench', service); return () => { void dispose() } }, 'dsh-vscode-workbench: service')
   ctx.effect(() => service.registerBottomPanel({ id: 'terminal', title: '终端', component: props => <TerminalPanel key={props.sessionId} {...props} workspace={terminals.get(props.sessionId)}/> }), 'dsh-vscode-workbench: terminal panel')
-  ctx.effect(() => service.registerBottomPanel({ id: 'debug', title: '调试', component: props => <DebugPanel controller={debugController} sessionId={props.sessionId ?? ''} activePath={debugController.getSnapshot().activePath} onOpenFrame={(path) => window.dispatchEvent(new CustomEvent('dvw-open-workspace-path', { detail: path }))}/> }), 'dsh-vscode-workbench: debug panel')
-  // F5/F10/F11 belong to the debugger while it owns a session; they must not reach the host app.
+  ctx.effect(() => service.registerBottomPanel({ id: 'debug', title: '调试', component: props => <DebugPanel controller={debugController} sessionId={props.sessionId ?? ''} activePath={debugController.getSnapshot().activePath} onOpenFrame={(path, line) => window.dispatchEvent(new CustomEvent('dvw-open-workspace-path', { detail: { path, line } }))}/> }), 'dsh-vscode-workbench: debug panel')
+  // F5/F10/F11 belong to the debugger only while it can act on them; otherwise the host keeps its
+  // own bindings, so F11 still toggles fullscreen when nothing is paused.
   ctx.effect(() => {
     const onKey = (event: KeyboardEvent) => {
       if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return
       if (!service.getSnapshot().visible) return
-      const state = debugController.getSnapshot().state
-      const handle = (action: () => void) => { event.preventDefault(); event.stopImmediatePropagation(); action() }
-      if (event.code === 'F5' && !event.shiftKey) { const activePath = debugController.getSnapshot().activePath; if (state !== 'stopped' && activePath === undefined) return; handle(() => state === 'stopped' ? debugController.resume() : debugController.start(debugController.getSnapshot().sessionId ?? '', activePath ?? '', '', debugController.getSnapshot().adapterId)); return }
-      if (event.code === 'F5' && event.shiftKey) { handle(() => debugController.stop()); return }
-      if (event.code === 'F10') { handle(() => debugController.step('next')); return }
-      if (event.code === 'F11' && !event.shiftKey) { handle(() => debugController.step('in')); return }
-      if (event.code === 'F11' && event.shiftKey) { handle(() => debugController.step('out')) }
+      const snapshot = debugController.getSnapshot()
+      const action = debugShortcut(event.code, event.shiftKey, snapshot)
+      if (action === undefined) return
+      event.preventDefault(); event.stopImmediatePropagation()
+      switch (action.kind) {
+        case 'resume': debugController.resume(); return
+        case 'stop': debugController.stop(); return
+        case 'start': debugController.start(snapshot.sessionId ?? '', snapshot.activePath ?? '', '', snapshot.adapterId); return
+        case 'step': debugController.step(action.step); return
+        // A second F5 while running is swallowed so neither the debugger nor the host restarts it.
+        case 'swallow': return
+      }
     }
     window.addEventListener('keydown', onKey, true)
     return () => window.removeEventListener('keydown', onKey, true)

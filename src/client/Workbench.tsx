@@ -103,6 +103,19 @@ function storedValue(key: string): string | null {
   try { return localStorage.getItem(key) } catch { return null }
 }
 
+/**
+ * Debug adapters report absolute paths; tabs, the editor and the explorer all speak
+ * workspace-relative ones. Paths outside the workspace are returned unchanged so the caller can
+ * still report them instead of silently opening the wrong file.
+ */
+export function relativeToWorkspace(cwd: string | undefined, path: string): string {
+  if (cwd === undefined || cwd === '') return path
+  const target = path.replace(/\\/g, '/')
+  const base = cwd.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+  if (!target.toLowerCase().startsWith(`${base}/`)) return path
+  return target.slice(base.length + 1)
+}
+
 function readStoredCommitModel(): CommitModelSelection | undefined {
   const saved = storedValue('dvw:commit-model')
   if (saved === null) return undefined
@@ -1736,12 +1749,13 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
       const detail=(event as CustomEvent<string|{sessionId?:string;path?:string;line?:number}>).detail
       if(typeof detail==='string'){void open(detail);return}
       if(detail?.sessionId!==undefined&&detail.sessionId!==sessionId)return
-      if(typeof detail?.path==='string'&&detail.path!=='')void open(detail.path,detail.line)
+      // Debug adapters report absolute paths; tabs and the explorer speak workspace-relative ones.
+      if(typeof detail?.path==='string'&&detail.path!=='')void open(relativeToWorkspace(workspace?.cwd,detail.path),detail.line)
     }
     window.addEventListener('dvw-open-workspace-path',listener)
     window.addEventListener('dvw-open-generated-file',listener)
     return()=>{window.removeEventListener('dvw-open-workspace-path',listener);window.removeEventListener('dvw-open-generated-file',listener)}
-  },[sessionId])
+  },[sessionId,workspace?.cwd])
   const savingTabs = useRef(new Set<string>())
   const cancelTabLoads = useCallback((path: string) => {
     const suffix = `\0${path}`

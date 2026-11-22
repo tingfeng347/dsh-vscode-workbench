@@ -34,23 +34,21 @@ export function singleActiveActivity(active: readonly string[], preferred?: stri
   return preferred !== undefined && active.includes(preferred) ? preferred : active[0]
 }
 
-/** Keep a saved layout, while making sure newly added actions are still visible. */
+/** Restore the saved order within each group, placing footer actions together at the bottom. */
 export function normalizeActivityLayout(order: readonly string[], fixed: readonly string[], views: readonly string[], bottom: readonly string[]): string[] {
-  const known = [...fixed, ...views, ...bottom]
+  const known = [...fixed, ...views]
   const saved = [...new Set(order.filter(id => known.includes(id)))]
   return [
     ...fixed.filter(id => !saved.includes(id)),
     ...saved,
     ...views.filter(id => !saved.includes(id)),
-    ...bottom.filter(id => !saved.includes(id)),
+    ...normalizeActivityOrder(order, bottom),
   ]
 }
 
 /**
- * VS Code-style activity bar: every action can be dragged into a new slot. `fixed` and `bottom` only provide
- * the default slots for newly added actions; after that the saved order wins. Actions in the trailing bottom
- * group stay at the foot until another action is placed below them. Reordering is computed from pointer
- * position so it keeps working when the DOM shifts under a fast drag.
+ * Activity actions can be reordered within their group. The footer stays anchored as the main group changes.
+ * Reordering is computed from pointer position so it keeps working when the DOM shifts under a fast drag.
  */
 export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderChange, onHiddenChange }: {
   views: ActivityView[]
@@ -75,7 +73,6 @@ export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderC
   const orderRef = useRef(order)
   const visibleRef = useRef<ActivityView[]>([])
   previewRef.current = preview
-  orderRef.current = order
 
   useEffect(() => {
     if (menu === undefined) return
@@ -105,13 +102,12 @@ export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderC
   const visibleViews = views.filter(view => !hidden.includes(view.id))
   const visible = [...fixed, ...visibleViews, ...bottom]
   visibleRef.current = visible
-  const currentOrder = normalizeActivityLayout(preview ?? order, fixed.map(view => view.id), visibleViews.map(view => view.id), bottom.map(view => view.id))
-  const ordered = currentOrder.flatMap(id => visible.filter(view => view.id === id))
-  const bottomIds = new Set(bottom.map(view => view.id))
-  let bottomStart = ordered.length
-  while (bottomStart > 0 && bottomIds.has(ordered[bottomStart - 1]!.id)) bottomStart -= 1
-  const main = ordered.slice(0, bottomStart)
-  const footer = ordered.slice(bottomStart)
+  const bottomIds = bottom.map(view => view.id)
+  const normalizedOrder = normalizeActivityLayout(order, fixed.map(view => view.id), views.map(view => view.id), bottomIds)
+  orderRef.current = normalizedOrder
+  const ordered = (preview ?? normalizedOrder).flatMap(id => visible.filter(view => view.id === id))
+  const main = ordered.filter(view => !bottomIds.includes(view.id))
+  const footer = ordered.filter(view => bottomIds.includes(view.id))
   const activeId = singleActiveActivity(visible.filter(view => view.active).map(view => view.id), lastActivated)
   const toggled = (id: string) => onHiddenChange(toggleActivityHidden(hidden, id))
   const target = menu?.target === undefined ? undefined : views.find(view => view.id === menu.target)
@@ -129,7 +125,9 @@ export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderC
     setGhost({ x: clientX, y: clientY })
     const base = previewRef.current ?? orderRef.current
     const visibleIds = new Set(visibleRef.current.map(view => view.id))
-    const slots = base.filter(id => visibleIds.has(id) && id !== state.id)
+    const inFooter = bottomIds.includes(state.id)
+    const slots = base.filter(id => visibleIds.has(id) && id !== state.id && bottomIds.includes(id) === inFooter)
+    if (slots.length === 0) return
     let index = 0
     for (const id of slots) {
       const element = nodes.current.get(id)
@@ -137,7 +135,8 @@ export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderC
       const rect = element.getBoundingClientRect()
       if (clientY > rect.top + rect.height / 2) index += 1
     }
-    const next = moveActivity(base, state.id, slots[index])
+    const before = slots[index] ?? (inFooter ? undefined : base.find(id => bottomIds.includes(id)))
+    const next = moveActivity(base, state.id, before)
     if (next.join('|') === base.join('|')) return
     capturePositions()
     previewRef.current = next
@@ -197,7 +196,7 @@ export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderC
 
   return <>
     <nav className="dvw-activity" onContextMenu={event => { event.preventDefault(); setMenu({ x: event.clientX, y: event.clientY }) }}>
-      {main.length === 0 && footer.length === 0 ? <span className="dvw-activity-empty" aria-hidden="true"/> : main.map(renderView)}
+      {main.length > 0 && <div className="dvw-activity-main">{main.map(renderView)}</div>}
       {footer.length > 0 && <div className="dvw-activity-bottom">{footer.map(renderView)}</div>}
     </nav>
     {draggingId !== undefined && ghost !== undefined && <div className="dvw-activity-ghost" style={{ left: ghost.x, top: ghost.y }} aria-hidden="true">{visible.find(view => view.id === draggingId)?.icon}</div>}

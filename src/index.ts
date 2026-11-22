@@ -1,7 +1,7 @@
 /** DSH host plugin for the VS Code workbench. */
 import { inspectReview, rejectReview, reviewFeed, reviewPath } from './review.ts'
 import { createReadStream } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile, realpath, stat } from 'node:fs/promises'
 import type { IncomingMessage } from 'node:http'
 import { isAbsolute, relative, sep } from 'node:path'
 import type { Duplex } from 'node:stream'
@@ -12,7 +12,8 @@ import type { HostContext } from './context.ts'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import { commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, type CommitModelCatalog, type CommitModelSelection, type DshChatModelCatalog } from './commit-message.ts'
 import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitPreviewFile, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, replaceSearchResults, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host.ts'
-import { installLsp, lspStatuses, resolveLsp, uninstallLsp, pipeLanguageServer } from './lsp.ts'
+import { attachLanguageServerSocket, installLsp, lspStatuses, uninstallLsp } from './lsp.ts'
+import { generateInlineCompletion, INLINE_PREFIX_LIMIT, INLINE_SUFFIX_LIMIT, INLINE_TIMEOUT_MS, isInlineCompletionPath } from './inline-completion.ts'
 import { officePdf, officePdfBuffer, officeStatus } from './office.ts'
 import { WorkspaceSite } from './site.ts'
 import type { SearchFileEdits, SearchRequest } from './types.ts'
@@ -179,9 +180,9 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
       return { url: await site.url(sessionId, stringField(body, 'path')) }
     }
     case 'workspace.open': return openWorkspaceFromPicker(dshDirectoryPicker, dshWorkspaceRegistry, AbortSignal.timeout(10 * 60 * 1000))
-    case 'lsp.status': return lspStatuses()
-    case 'lsp.install': await installLsp(stringField(body, 'id')); return lspStatuses()
-    case 'lsp.uninstall': await uninstallLsp(stringField(body, 'id')); return lspStatuses()
+    case 'lsp.status': return lspStatuses(cwd)
+    case 'lsp.install': await installLsp(stringField(body, 'id')); return lspStatuses(cwd)
+    case 'lsp.uninstall': await uninstallLsp(stringField(body, 'id')); return lspStatuses(cwd)
     case 'search': return searchWorkspace(cwd, body as unknown as SearchRequest, signal)
     case 'search.replace':
       if (cwd !== stringField(body, 'cwd')) throw new WorkbenchError('workspace-changed', '工作区已切换，请重新搜索', 409)
@@ -190,6 +191,34 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     case 'git.blameRange': return gitBlameRange(cwd, body.source, body.startLine, body.endLine, signal)
     case 'git.blameLine': return gitBlameLine(cwd, body.source, body.line, signal)
     case 'git.action': return gitAction(cwd, stringField(body, 'action'), typeof body.path === 'string' ? body.path : undefined, typeof body.value === 'string' ? body.value : undefined)
+    case 'editor.inlineCompletion': {
+      const path = stringField(body, 'path')
+      const language = stringField(body, 'language')
+      const prefix = stringField(body, 'prefix')
+      const suffix = stringField(body, 'suffix')
+      if (path.length === 0 || path.length > 4096 || !/^[\w+#.-]{1,64}$/.test(language) ||
+          prefix.length > INLINE_PREFIX_LIMIT || suffix.length > INLINE_SUFFIX_LIMIT ||
+          prefix.includes('\0') || suffix.includes('\0')) {
+        throw new WorkbenchError('bad-request', '代码补全的上下文无效或超出长度限制。')
+      }
+      if (!isInlineCompletionPath(path)) return { text: '' }
+      const target = await workspacePath(cwd, path)
+      if (!isInlineCompletionPath(relative(target.root, await realpath(target.absolute)))) return { text: '' }
+      const selection = body.provider !== undefined || body.model !== undefined
+        ? normalizeCommitModelSelection(body.provider, body.model)
+        : currentChatCommitModel(ctx, sessionId)
+      if (selection === undefined) throw new WorkbenchError('model-unavailable', '请在工作台设置中选择可用的补全模型。', 409)
+      const llm: LlmRuntime | undefined = ctx.get('llm')
+      if (llm === undefined) throw new WorkbenchError('llm-unavailable', 'DSH 的模型服务当前不可用。', 503)
+      const timeout = AbortSignal.timeout(INLINE_TIMEOUT_MS)
+      const callSignal = signal === undefined ? timeout : AbortSignal.any([signal, timeout])
+      try {
+        return { text: await generateInlineCompletion(llm, selection, { path, language, prefix, suffix }, callSignal) }
+      } catch {
+        if (timeout.aborted) throw new WorkbenchError('completion-timeout', 'AI 代码补全超时。', 504)
+        throw new WorkbenchError('completion-failed', '补全模型调用失败，请在工作台设置中确认模型可用。', 502)
+      }
+    }
     case 'git.commitMessage': {
       const hasExplicitSelection = body.provider !== undefined || body.model !== undefined
       const selection = hasExplicitSelection
@@ -399,7 +428,7 @@ export function apply(ctx: HostContext): void {
     },
   }), 'dsh-vscode-workbench: file watcher')
 
-  const lspWss = new WebSocketServer({ noServer: true })
+  const lspWss = new WebSocketServer({ noServer: true, maxPayload: 32 * 1024 * 1024 })
   ctx.effect(() => ctx.webServer.registerUpgrade({
     path: '/dsh-vscode/ws/lsp', handler(req, socket, head) {
       if (ctx.connection.requestRejection(req) !== undefined) { socket.destroy(); return }
@@ -410,26 +439,10 @@ export function apply(ctx: HostContext): void {
         let workspace: string
         try { workspace = cwdFor(ctx, sessionId) }
         catch { ws.close(1008, 'session workspace unavailable'); return }
-        void (async () => {
-          try {
-            const server = await resolveLsp(serverId)
-            const child = spawn(server.command, server.args, { cwd: workspace, stdio: ['pipe', 'pipe', 'pipe'], shell: server.shell, windowsHide: true })
-            const bridge = pipeLanguageServer(child, {
-              onMessage: message => { if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(message)) },
-              onStderr: text => console.warn('[dsh-vscode-workbench] lsp:', text.trim().slice(0, 500)),
-              onExit: code => { if (ws.readyState === WebSocket.OPEN) ws.close(1000, `server exited ${code ?? ''}`.trim()) },
-            })
-            ws.on('message', data => bridge.write(String(data)))
-            ws.on('close', () => bridge.kill())
-            ws.on('error', () => bridge.kill())
-            child.on('error', error => { if (ws.readyState === WebSocket.OPEN) ws.close(1011, String(error).slice(0, 120)) })
-          } catch (error) {
-            ws.close(1008, (error instanceof Error ? error.message : 'language server unavailable').slice(0, 120))
-          }
-        })()
+        void attachLanguageServerSocket(ws, workspace, serverId)
       })
     },
   }), 'dsh-vscode-workbench: language server bridge')
-  ctx.effect(() => () => { lspWss.close() }, 'dsh-vscode-workbench: language server teardown')
+  ctx.effect(() => () => { for (const ws of lspWss.clients) ws.terminate(); lspWss.close() }, 'dsh-vscode-workbench: language server teardown')
   ctx.effect(() => () => { wss.close() }, 'dsh-vscode-workbench: watcher teardown')
 }

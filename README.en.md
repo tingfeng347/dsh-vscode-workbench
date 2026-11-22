@@ -41,8 +41,9 @@ Installing from the DSH Plugins page or a marketplace enables the plugin automat
 | --- | --- |
 | Explorer | Create, rename, move, and delete files or folders. Upload by dropping files into the tree, drag files out to download, and select multiple entries to delete or copy relative or absolute paths. Open a file in a system app or reveal its location. |
 | Editing and split panes | Use Monaco with syntax highlighting and Chinese menus. Drag a tab to an editor edge to split the view, or into another pane to move or swap files. The workbench restores tabs and layout per workspace, flags external file changes, and uses revision checks and atomic saves. |
-| Language intelligence | Enable built-in TypeScript and JavaScript workspace indexing or configure language servers for Python, Go, Rust, C / C++, and more under DSH Settings → Workbench → Language Intelligence. Completion, definitions, references, signature help, and diagnostics depend on the language service you enable. The settings show toolchain and server status separately. |
-| Documents and web pages | Switch between Markdown source and preview, and navigate with the outline. Preview images, PDFs, and Excel workbooks in tabs. LibreOffice converts Word and PowerPoint files to PDF for preview. Without LibreOffice, `.docx` can still preview in the browser. Web links and local HTML open in the built-in or system browser selected in settings. |
+| Language intelligence | Install a language server for TypeScript / JavaScript, Vue, or Python, or find manual setup instructions for C / C++, Go, Rust, and Java under DSH Settings → Workbench → Language Intelligence. Servers start when you open a matching file. Check their status or restart them in settings. Completion, auto imports, definition and reference previews, quick fixes, cross-file rename previews, formatting, and Problems depend on server capabilities. |
+| AI code completion | Choose Off, Manual, or Automatic under DSH Settings → Workbench → AI Code Completion. Off is the default. Follow the DSH chat model or pick a separate model. The model receives code around the cursor in the active file, including unsaved edits. |
+| Documents and web pages | Switch between Markdown source and preview, and navigate with the outline. Preview images, PDFs, and Excel workbooks in tabs. LibreOffice converts Word and PowerPoint files to PDF for preview. Without LibreOffice, `.docx` can still preview in the browser. Web links and local HTML open in the built-in or system browser selected in settings. Use the Explorer context menu to edit HTML source. |
 | Terminal and DSH chat | Use the official Harness terminal with multiple sessions, renaming, and splits. Add a selected file or folder from Explorer, or selected code from the editor, to DSH chat. Open generated file links for the current session in the workbench. |
 | Workspaces and layout | Use the activity bar to open or create workspaces and create or switch sessions. Reorder activity buttons by dragging and resize the sidebars and terminal. Choose light, dark, pure white, or eye-care colors, or follow the DSH theme. Editor font size is configurable. |
 
@@ -127,6 +128,8 @@ Accepting keeps changes already written by the AI. Rejecting attempts to restore
 | `` Ctrl+Shift+` `` | Create a terminal |
 | `Ctrl+T` / `⌘T` | Open a built-in browser tab |
 | `Ctrl/Cmd+Alt+K` | Add the current file or selected code to DSH chat from the editor |
+| `Alt/Option+\` | Trigger AI code completion when enabled |
+| `Tab` / `Esc` | Accept or dismiss an AI inline suggestion |
 | `Ctrl/Cmd+Enter` | Commit from the commit message field |
 | `F11` / `Ctrl+Command+F` | Toggle floating-window fullscreen (second shortcut on macOS) |
 

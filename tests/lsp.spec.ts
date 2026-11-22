@@ -1,23 +1,19 @@
-import { describe, expect, it } from 'vitest'
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises'
+import { describe, expect, it, vi } from 'vitest'
+import { chmod, link, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
-import { LSP_SERVERS, findExecutable, frameLsp, lspFrameParser, lspRoot, lspSearchDirs, lspStatuses } from '../src/lsp.ts'
+import { LSP_SERVERS, findExecutable, frameLsp, lspFrameParser, lspRoot, lspSearchDirs, lspStatuses, resolveLsp } from '../src/lsp.ts'
 
 describe('Language server catalog', () => {
   it('covers the common languages with one server each', () => {
-    const languages = LSP_SERVERS.flatMap(server => server.languages)
-    for (const language of ['python', 'go', 'rust', 'cpp', 'java', 'csharp', 'lua', 'php', 'shell', 'yaml', 'json', 'css', 'html', 'dockerfile']) {
-      expect(languages).toContain(language)
-    }
-    expect(new Set(LSP_SERVERS.map(server => server.id)).size).toBe(LSP_SERVERS.length)
+    expect(LSP_SERVERS.map(server => server.id).sort()).toEqual(['cpp', 'go', 'java', 'python', 'rust', 'typescript', 'vue'])
     expect(lspRoot()).toMatch(/dsh-vscode-workbench[\\/]lsp$/)
   })
 
   it('installs npm servers privately and documents manual ones', () => {
     const pyright = LSP_SERVERS.find(server => server.id === 'python')!
     expect(pyright.install).toMatchObject({ kind: 'npm', package: 'pyright', bin: 'pyright-langserver' })
-    for (const id of ['go', 'rust', 'cpp', 'java', 'csharp', 'lua']) {
+    for (const id of ['go', 'rust', 'java', 'cpp']) {
       const server = LSP_SERVERS.find(candidate => candidate.id === id)!
       expect(server.install.kind).toBe('system')
       if (server.install.kind === 'system') {
@@ -61,7 +57,44 @@ describe('Language server detection', () => {
       await writeFile(plain, '')
       if (process.platform !== 'win32') await chmod(plain, 0o644)
       expect(await findExecutable('not-executable', [root])).toBeUndefined()
+      await mkdir(join(root, process.platform === 'win32' ? 'directory.exe' : 'directory'))
+      expect(await findExecutable('directory', [root])).toBeUndefined()
     } finally {
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it('starts Pyright from its actual npm package entry point without relying on PATH wrappers', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dvw-lsp-python-'))
+    vi.stubEnv(process.platform === 'win32' ? 'USERPROFILE' : 'HOME', root)
+    try {
+      const directory = join(lspRoot(), 'python', 'node_modules', 'pyright')
+      await mkdir(join(directory, 'bin'), { recursive: true })
+      const entry = join(directory, 'bin', 'pyright-langserver')
+      await writeFile(join(directory, 'package.json'), JSON.stringify({ bin: { 'pyright-langserver': './bin/pyright-langserver' } }))
+      await writeFile(entry, '#!/usr/bin/env node\n')
+      expect(await resolveLsp('python')).toMatchObject({ command: process.execPath, args: [entry, '--stdio'], shell: false })
+      expect((await lspStatuses()).find(status => status.id === 'python')?.installed).toBe(true)
+    } finally {
+      vi.unstubAllEnvs()
+      await rm(root, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(process.platform === 'win32')('distinguishes the active Rust Analyzer component from a rustup shim', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'dvw-lsp-rust-'))
+    vi.stubEnv('PATH', root)
+    try {
+      const rustup = join(root, 'rustup')
+      const actual = join(root, 'toolchain', 'rust-analyzer')
+      await mkdir(join(root, 'toolchain'))
+      await writeFile(rustup, '#!/bin/sh\n[ -x "$PWD/toolchain/rust-analyzer" ] || exit 1\nprintf "%s\n" "$PWD/toolchain/rust-analyzer"\n', { mode: 0o755 })
+      await link(rustup, join(root, 'rust-analyzer'))
+      await expect(resolveLsp('rust', root)).rejects.toMatchObject({ code: 'lsp-missing' })
+      await writeFile(actual, '#!/bin/sh\n', { mode: 0o755 })
+      expect(await resolveLsp('rust', root)).toMatchObject({ command: await realpath(actual) })
+    } finally {
+      vi.unstubAllEnvs()
       await rm(root, { recursive: true, force: true })
     }
   })
@@ -72,10 +105,8 @@ describe('Language server detection', () => {
     expect(go.command).toBe('gopls')
     expect(go.language).toEqual({ name: 'Go', installed: expect.any(Boolean) })
     expect(typeof go.installed).toBe('boolean')
-    // Python's server is installed by the plugin, but the interpreter gate still comes first.
     expect(statuses.find(status => status.id === 'python')!.language).toEqual({ name: 'Python', installed: expect.any(Boolean) })
-    // Data formats have no toolchain stage at all.
-    expect(statuses.find(status => status.id === 'yaml')!.language).toBeUndefined()
+    expect(statuses.find(status => status.id === 'typescript')!.language).toBeUndefined()
   })
 })
 

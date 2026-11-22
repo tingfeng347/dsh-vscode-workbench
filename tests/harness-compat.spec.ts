@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import { evaluatePluginCompatibility } from '@deepseek-ai/dsh-app-boot'
 import { readFile } from 'node:fs/promises'
 import { apply as applyConnection, type HostConnectionService } from '@deepseek-ai/dsh-client-connection'
@@ -63,6 +64,9 @@ describe('Harness 0.2 host integration', () => {
       listModels: async (provider: string) => provider === 'deepseek-official'
         ? [{ provider, id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash' }]
         : [{ provider, id: 'team-coder-v1', name: 'Team Coder' }],
+      stream: vi.fn(async function* (_options: GenerateOptions) {
+        yield { type: 'text-delta', index: 0, text: '  return value' }
+      }),
     }
     const sessionController = {
       canOpenWorkspacePath: () => true,
@@ -157,6 +161,19 @@ describe('Harness 0.2 host integration', () => {
     expect((await workspace('missing')).status).toBe(404)
     expect((await fetch(`${base}/dsh-vscode/api/workspace`, { method: 'POST', headers: { ...headers, origin: 'https://evil.example' }, body: '{}' })).status).toBe(403)
     directory = process.cwd()
+    const complete = (body: Record<string, unknown>) => fetch(`${base}/dsh-vscode/api/editor.inlineCompletion`, {
+      method: 'POST', headers, body: JSON.stringify({ sessionId: 'main', path: 'package.json', language: 'typescript', prefix: 'unsaved draft', suffix: '\n}', ...body }),
+    })
+    expect(await (await complete({})).json()).toEqual({ ok: true, value: { text: '  return value' } })
+    expect(llm.stream).toHaveBeenLastCalledWith(expect.objectContaining({ provider: 'deepseek-official', model: 'deepseek-v4-pro' }))
+    const prompt = llm.stream.mock.calls.at(-1)?.[0].messages[0]?.content[0]
+    expect(prompt).toMatchObject({ type: 'text', text: JSON.stringify({ path: 'package.json', language: 'typescript', prefix: 'unsaved draft', suffix: '\n}' }) })
+    expect((await complete({ provider: 'gateway', model: 'team-coder-v1' })).status).toBe(200)
+    expect(llm.stream).toHaveBeenLastCalledWith(expect.objectContaining({ provider: 'gateway', model: 'team-coder-v1' }))
+    expect(await (await complete({ path: '.env.local' })).json()).toEqual({ ok: true, value: { text: '' } })
+    expect((await complete({ path: '../package.json' })).status).toBe(403)
+    expect((await complete({ prefix: 'x'.repeat(6001) })).status).toBe(400)
+    expect(llm.stream).toHaveBeenCalledTimes(2)
     const applications = await fetch(`${base}/dsh-vscode/api/fs.applications`, {
       method: 'POST', headers, body: JSON.stringify({ sessionId: 'main', path: 'package.json' }),
     })

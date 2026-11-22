@@ -7,7 +7,7 @@ import type { MonacoDiffEditor, MonacoEditor } from '../src/client/MonacoEditor.
 import { settingsHost } from '../src/client/settingsHost.ts'
 import { WorkbenchController } from '../src/client/service.ts'
 import { disposeTypeScriptProject } from '../src/client/typescriptProject.ts'
-import type { GitChange } from '../src/types.ts'
+import type { FileEntry, GitChange } from '../src/types.ts'
 
 type EditorProps = Parameters<typeof MonacoEditor>[0]
 type DiffProps = Parameters<typeof MonacoDiffEditor>[0]
@@ -101,7 +101,7 @@ const defaultModelCatalog: FakeModelCatalog = {
   unavailable: [],
   defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' },
 }
-async function setup(binary = false, saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' }, changes: typeof reviewChanges = [], gitChanges: GitChange[] = [], modelCatalog: FakeModelCatalog = defaultModelCatalog) {
+async function setup(binary = false, saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' }, changes: typeof reviewChanges = [], gitChanges: GitChange[] = [], modelCatalog: FakeModelCatalog = defaultModelCatalog, files: FileEntry[] = []) {
   disk = 'disk'; revision = 'r1'; completeSave = undefined; state.editor = undefined
   projectSource = 'export const a = 1'; projectReads = 0; reviewChanges = changes
   localStorage.setItem('dvw:/tmp/audit', JSON.stringify(saved))
@@ -109,10 +109,11 @@ async function setup(binary = false, saved: Record<string, unknown> = { paths: [
   vi.stubGlobal('fetch', vi.fn(async (url: string, options: { body: string }) => {
     const method = url.split('/').at(-1)
     const body = JSON.parse(options.body) as Record<string, unknown>
-    const doc = () => ({ path: 'a.txt', content: binary ? '' : disk, revision, size: binary ? 0 : disk.length, binary, tooLarge: false })
+    const doc = () => ({ path: typeof body.path === 'string' ? body.path : 'a.txt', content: binary ? '' : disk, revision, size: binary ? 0 : disk.length, binary, tooLarge: false })
     let value: unknown
     if (method === 'workspace') value = { cwd: '/tmp/audit', name: 'audit' }
-    else if (method === 'fs.list' || method === 'lsp.status') value = []
+    else if (method === 'fs.list') value = files
+    else if (method === 'lsp.status') value = []
     else if (method === 'git.status') value = { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
     else if (method === 'git.action' && body.action === 'diff') value = { diff: '', original: 'before', modified: 'after' }
     else if (method === 'git.action') value = body.action === 'log' ? [] : { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
@@ -389,6 +390,30 @@ it('resizes the graph split by pointer and keyboard and restores it after collap
   }
 })
 
+it('switches between Terminal and Problems from the bottom panel header', async () => {
+  const service = await setup()
+  await act(async () => {
+    service.registerBottomPanel({ id: 'terminal', title: '终端', component: () => <div data-test-terminal>终端内容</div> })
+    service.toggleBottomPanel('terminal')
+  })
+  const header = document.querySelector('.dvw-bottom-head')!
+  const buttons = header.querySelectorAll('button')
+  const [terminal, problems, close] = buttons
+  expect(Array.from(buttons, button => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['终端', '问题', '关闭底部面板'])
+  expect(terminal!.getAttribute('aria-pressed')).toBe('true')
+  const terminalContent = document.querySelector('[data-test-terminal]')!
+  await act(async () => problems!.click())
+  expect(terminalContent.closest('[hidden]')).not.toBeNull()
+  expect(problems!.getAttribute('aria-pressed')).toBe('true')
+  expect(document.querySelector('.dvw-bottom-body')?.textContent).toContain('没有发现问题')
+  await act(async () => problems!.click())
+  expect(service.getSnapshot().bottomPanel).toBe('problems')
+  await act(async () => terminal!.click())
+  expect(document.querySelector('.dvw-bottom-body')?.textContent).toBe('终端内容')
+  await act(async () => close!.click())
+  expect(service.getSnapshot().bottomPanel).toBeUndefined()
+})
+
 it('puts branch controls in the status bar and commit metadata in the hover card', async () => {
   localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({visible:true, view:'git'}))
   await setup(false, {}, [], [{path:'src/a.txt', index:'?', worktree:'?', staged:false, untracked:true}])
@@ -459,6 +484,37 @@ it('uses an explicitly configured commit model instead of the active chat model'
       model: 'deepseek-pro',
     })
   })
+})
+
+it('uses the same model catalog with independent AI completion settings', async () => {
+  const service = await setup()
+  expect(state.editor?.aiCompletion).toBeUndefined()
+  const settings = document.createElement('div')
+  document.body.append(settings)
+  await act(async () => settingsHost.set(settings))
+  const selector = (label: string) => settings.querySelector<HTMLButtonElement>(`button[aria-label^="${label}："]`)
+  const pick = async (label: string, value: string) => {
+    const button = await vi.waitFor(() => {
+      expect(selector(label)).not.toBeNull()
+      return selector(label)!
+    })
+    await act(async () => button.click())
+    const option = [...settings.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]')]
+      .find(item => item.textContent?.trim() === value)!
+    await act(async () => option.click())
+  }
+  await pick('AI 代码补全触发方式', '自动补全')
+  await pick('AI 代码补全模型', 'DeepSeek-V4-Pro')
+  expect(selector('提交信息生成模型')?.textContent).toContain('跟随 DSH 聊天模型')
+  expect(localStorage.getItem('dvw:commit-model')).toBeNull()
+  expect(localStorage.getItem('dvw:inline-completion-mode')).toBe('auto')
+  await act(async () => settingsHost.set(undefined))
+  expect(state.editor?.aiCompletion).toEqual({
+    mode: 'auto', sessionId: 's', cwd: '/tmp/audit', model: { provider: 'deepseek-official', model: 'deepseek-pro' },
+  })
+  await act(async () => root!.unmount())
+  await mount(service)
+  expect(state.editor?.aiCompletion?.model?.model).toBe('deepseek-pro')
 })
 
 it('keeps a saved generation model when its provider is temporarily unavailable', async () => {
@@ -710,4 +766,15 @@ it('reindexes retained TypeScript models after returning from hidden', async () 
 
   expect(projectReads).toBe(2)
   expect(model()?.getValue()).toBe('export const a = 2')
+})
+
+it('opens HTML source in a text editor through the Explorer menu', async () => {
+  await setup(false, { paths: [] }, [], [], defaultModelCatalog, [{ path: 'index.html', name: 'index.html', kind: 'file' }])
+  const row = document.querySelector('[data-tree-path="index.html"]')
+  expect(row).not.toBeNull()
+  await act(async () => row!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })))
+  const action = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.textContent === '打开 HTML 源码')
+  expect(action).toBeDefined()
+  await act(async () => action!.click())
+  expect(state.editor?.uri).toBe('file:///tmp/audit/index.html')
 })

@@ -39,6 +39,7 @@ function createModel(value: string, _language: unknown, uri: FakeModel['uri']): 
   fake.models.set(uri.toString(), model); return model
 }
 const monaco = {
+  languages: { getLanguages: () => [], register() {}, onLanguage() {} },
   Uri: { parse: (value: string) => ({ scheme: value.split(':')[0]!, toString: () => value }) },
   Range: class { constructor(public startLineNumber: number, public startColumn: number, public endLineNumber: number, public endColumn: number) {} },
   KeyMod: { CtrlCmd: 1 }, KeyCode: { KeyS: 2 },

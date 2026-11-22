@@ -113,16 +113,19 @@ describe('Activity bar pointer dragging', () => {
     await act(async () => { root.unmount() })
   })
 
-  it('drags a bottom action above the middle views', async () => {
+  it('restores both footer actions as a group and constrains dragging to each group', async () => {
     const onOrderChange = vi.fn()
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
     const bottom = ['home', 'settings'].map(id => ({ id, label: id, icon: null, active: false, onActivate() {} }))
     await act(async () => {
-      root.render(<ActivityBar views={views} fixed={[]} bottom={bottom} order={['explorer', 'search', 'git', 'home', 'settings']} hidden={[]} onOrderChange={onOrderChange} onHiddenChange={() => {}}/>)
+      root.render(<ActivityBar views={views} fixed={[]} bottom={bottom} order={['explorer', 'home', 'search', 'settings', 'git']} hidden={[]} onOrderChange={onOrderChange} onHiddenChange={() => {}}/>)
     })
     const buttons = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-act-id]'))
+    expect(buttons.map(button => button.dataset.actId)).toEqual(['explorer', 'search', 'git', 'home', 'settings'])
+    expect(Array.from(container.querySelectorAll<HTMLElement>('.dvw-activity-bottom [data-act-id]')).map(button => button.dataset.actId))
+      .toEqual(['home', 'settings'])
     layout(buttons)
     const pointer = (type: string, y: number) => new MouseEvent(type, { bubbles: true, button: 0, clientX: 5, clientY: y })
     await act(async () => {
@@ -130,7 +133,19 @@ describe('Activity bar pointer dragging', () => {
       buttons[3]!.dispatchEvent(pointer('pointermove', 10))
       window.dispatchEvent(pointer('pointerup', 10))
     })
-    expect(onOrderChange).toHaveBeenCalledWith(['home', 'explorer', 'search', 'git', 'settings'])
+    expect(onOrderChange).not.toHaveBeenCalled()
+    await act(async () => {
+      buttons[0]!.dispatchEvent(pointer('pointerdown', 5))
+      window.dispatchEvent(pointer('pointermove', 240))
+      window.dispatchEvent(pointer('pointerup', 240))
+    })
+    expect(onOrderChange).toHaveBeenLastCalledWith(['search', 'git', 'explorer', 'home', 'settings'])
+    await act(async () => {
+      buttons[4]!.dispatchEvent(pointer('pointerdown', 200))
+      window.dispatchEvent(pointer('pointermove', 152))
+      window.dispatchEvent(pointer('pointerup', 152))
+    })
+    expect(onOrderChange).toHaveBeenLastCalledWith(['explorer', 'search', 'git', 'settings', 'home'])
     await act(async () => { root.unmount() })
   })
 

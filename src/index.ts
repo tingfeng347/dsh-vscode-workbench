@@ -20,7 +20,7 @@ import { createDebugBridge } from './debug.ts'
 import { generateInlineCompletion, INLINE_PREFIX_LIMIT, INLINE_SUFFIX_LIMIT, INLINE_TIMEOUT_MS, isInlineCompletionPath } from './inline-completion.ts'
 import { officePdf, officePdfBuffer, officeStatus } from './office.ts'
 import { WorkspaceSite } from './site.ts'
-import type { SearchFileEdits, SearchRequest } from './types.ts'
+import type { GitStatus, SearchFileEdits, SearchRequest } from './types.ts'
 import { watchIgnore, workspaceWatchIgnores } from './watch-ignore.ts'
 import { isStaleManifest } from './workspace-watch.ts'
 import { createWorkspaceWatcher } from './workspace-watch-host.ts'
@@ -106,15 +106,18 @@ async function loadChatModelCatalog(
   }
 }
 
-/** Probes that spawn processes: serving a recent answer keeps startup from queueing behind them. */
-const probeCache = new Map<string, { at: number; value: unknown }>()
+// The Explorer and Source Control can ask at the same time. Share pending reads only so
+// a later refresh sees saves, external Git commands, and other changes to the repository.
+const pendingGitStatuses = new Map<string, Promise<GitStatus>>()
 
-async function cached<T>(key: string, ttl: number, produce: () => Promise<T> | T): Promise<T> {
-  const hit = probeCache.get(key)
-  if (hit !== undefined && Date.now() - hit.at < ttl) return hit.value as T
-  const value = await produce()
-  probeCache.set(key, { at: Date.now(), value })
-  return value
+function readGitStatus(cwd: string): Promise<GitStatus> {
+  const pending = pendingGitStatuses.get(cwd)
+  if (pending !== undefined) return pending
+  const request = gitStatus(cwd).finally(() => {
+    if (pendingGitStatuses.get(cwd) === request) pendingGitStatuses.delete(cwd)
+  })
+  pendingGitStatuses.set(cwd, request)
+  return request
 }
 
 /** Evidence marker: if the new client bundle runs, it opens the debug socket on mount. */
@@ -225,10 +228,17 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     case 'search.replace':
       if (cwd !== stringField(body, 'cwd')) throw new WorkbenchError('workspace-changed', '工作区已切换，请重新搜索', 409)
       return replaceSearchResults(cwd, body.files as SearchFileEdits[])
-    case 'git.status': return cached(`git.status:${cwd}`, 3_000, () => gitStatus(cwd))
+    case 'git.status': return readGitStatus(cwd)
     case 'git.blameRange': return gitBlameRange(cwd, body.source, body.startLine, body.endLine, signal)
     case 'git.blameLine': return gitBlameLine(cwd, body.source, body.line, signal)
-    case 'git.action': probeCache.delete(`git.status:${cwd}`); return gitAction(cwd, stringField(body, 'action'), typeof body.path === 'string' ? body.path : undefined, typeof body.value === 'string' ? body.value : undefined)
+    case 'git.action': {
+      pendingGitStatuses.delete(cwd)
+      try {
+        return await gitAction(cwd, stringField(body, 'action'), typeof body.path === 'string' ? body.path : undefined, typeof body.value === 'string' ? body.value : undefined)
+      } finally {
+        pendingGitStatuses.delete(cwd)
+      }
+    }
     case 'editor.inlineCompletion': {
       const path = stringField(body, 'path')
       const language = stringField(body, 'language')

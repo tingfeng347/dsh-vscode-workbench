@@ -21,6 +21,7 @@ The install gate compares `engines.dsh` or the `@deepseek-ai/dsh*` peerDependenc
 
 | Plugin version | Required Harness |
 | --- | --- |
+| 0.3.0 | `0.2.1-rc.1` and newer (default baseline `0.2.2-rc.5`, Cordis `4.1.0`) |
 | 0.2.18 | `0.2.1-rc.1` and newer (default baseline `0.2.2-rc.5`, Cordis `4.1.0`) |
 | 0.2.17 | `0.2.1-rc.1` and newer (default baseline `0.2.2-rc.5`, Cordis `4.1.0`) |
 | 0.2.16 / 0.2.15 | `0.2.1-rc.1` and newer (default baseline `0.2.2-rc.3`, Cordis `4.1.0`) |

@@ -11,6 +11,7 @@ import type { EditorSelection } from './dshComposer.ts'
 import { isIndexedModel, projectModelPath } from './typescriptProject.ts'
 import { isLspPreviewModel } from './lspWorkspace.ts'
 import { completeMonacoChineseMessages, localizeMonacoActions } from './monacoLocale.ts'
+import { registerInlineCompletion, type InlineCompletionSettings } from './inlineCompletion.ts'
 
 type Monaco = typeof import('monaco-editor')
 declare global { interface Window { require?: { <T>(ids: string[], done: (module: T) => void, error?: (cause: unknown) => void): void; config(value: unknown): void }; monaco?: Monaco } }
@@ -575,7 +576,8 @@ export interface MonacoReviewProps {
   onReject(id: string): void
 }
 
-export function MonacoEditor(props: { uri: string; value: string; readOnly?: boolean; theme: MonacoColorScheme; line?: number; column?: number; fontSize?: number; minimap?: boolean; highlight?: string; focusOnReveal?: boolean; review?: MonacoReviewProps; blame?: { sessionId: string; path: string; revision: string; dirty: boolean }; breakpoints?: number[]; pausedLine?: number; onToggleBreakpoint?(line: number): void; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
+export function MonacoEditor(props: { uri: string; value: string; readOnly?: boolean; theme: MonacoColorScheme; line?: number; column?: number; fontSize?: number; minimap?: boolean; highlight?: string; focusOnReveal?: boolean; review?: MonacoReviewProps; blame?: { sessionId: string; path: string; revision: string; dirty: boolean }; breakpoints?: number[]; pausedLine?: number; onToggleBreakpoint?(line: number): void; aiCompletion?: InlineCompletionSettings; onCompletionError?(message: string): void; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
+  const inlineCompletion = useRef<{ dispose(): void }>()
   const root = useRef<HTMLDivElement>(null)
   const editor = useRef<import('monaco-editor').editor.IStandaloneCodeEditor>()
   const lineBlame = useRef<ReturnType<typeof createGitLineBlame>>()
@@ -791,7 +793,7 @@ export function MonacoEditor(props: { uri: string; value: string; readOnly?: boo
     void loadMonaco().then((monaco) => {
       if (disposed || root.current === null) return
       const props = latest.current
-      const instance = monaco.editor.create(root.current, { model: null, automaticLayout: true, readOnly: props.readOnly, 'semanticHighlighting.enabled': true, theme: monacoThemeFor(props.theme), fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, wordWrap: 'off', minimap: minimapOptions(minimapEnabled(props)) })
+      const instance = monaco.editor.create(root.current, { model: null, automaticLayout: true, readOnly: props.readOnly, 'semanticHighlighting.enabled': true, theme: monacoThemeFor(props.theme), fontSize: props.fontSize ?? 14, ...WORKBENCH_EDITOR_CHROME, inlineSuggest: { enabled: false }, wordWrap: 'off', minimap: minimapOptions(minimapEnabled(props)) })
       // Breakpoints live in the line-decorations strip so the layout does not shift, and a click
       // there toggles one exactly like VS Code's gutter.
       instance.onMouseDown(event => {
@@ -857,6 +859,7 @@ export function MonacoEditor(props: { uri: string; value: string; readOnly?: boo
     }).catch(error => setError(error instanceof Error ? error.message : String(error)))
     return () => {
       disposed = true
+      inlineCompletion.current?.dispose(); inlineCompletion.current = undefined
       cleanupListeners.current?.(); cleanupListeners.current = undefined
       lineBlame.current?.reset(); lineBlame.current = undefined
       const instance = editor.current
@@ -871,6 +874,20 @@ export function MonacoEditor(props: { uri: string; value: string; readOnly?: boo
       instance?.dispose(); editor.current = undefined
     }
   }, [])
+  useEffect(() => {
+    const settings = props.aiCompletion
+    if (settings === undefined || props.readOnly) return
+    let active = true
+    void loadMonaco().then(monaco => {
+      if (!active || editor.current === undefined) return
+      inlineCompletion.current = registerInlineCompletion(monaco, editor.current, settings, message => latest.current.onCompletionError?.(message))
+    }).catch(() => { if (active && editor.current !== undefined) latest.current.onCompletionError?.('无法初始化 AI 代码补全。') })
+    return () => {
+      active = false
+      inlineCompletion.current?.dispose()
+      inlineCompletion.current = undefined
+    }
+  }, [props.aiCompletion, props.readOnly])
   useEffect(() => lineBlame.current?.reset(), [props.uri, props.blame?.sessionId, props.blame?.revision, props.blame?.dirty, props.value])
   useEffect(() => {
     const instance = editor.current; const monaco = window.monaco

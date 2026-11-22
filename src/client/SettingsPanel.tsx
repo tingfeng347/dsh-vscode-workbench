@@ -5,6 +5,7 @@ import type { LspRuntimeStatus, LspServerStatus } from './lsp.ts'
 import type { ReviewMode } from './aiReview.ts'
 import { settingsHost } from './settingsHost.ts'
 import type { CommitModelCatalog, CommitModelOption, CommitModelSelection } from '../commit-message.ts'
+import type { InlineCompletionMode } from '../inline-completion.ts'
 
 type WorkbenchTheme = 'dsh' | 'dark' | 'light' | 'white' | 'eyecare'
 type MarkdownView = 'preview' | 'source'
@@ -55,6 +56,11 @@ export interface WorkbenchSettingsProps {
   commitModelUnavailable: CommitModelCatalog['unavailable']
   commitModelError: string
   refreshCommitModels(): void
+  chatModel?: CommitModelSelection
+  inlineCompletionMode: InlineCompletionMode
+  setInlineCompletionMode(value: InlineCompletionMode): void
+  inlineCompletionModel?: CommitModelSelection
+  setInlineCompletionModel(value: CommitModelSelection | undefined): void
   tsIntellisense: boolean
   setTsIntellisense(value: boolean): void
   tsIndex: TsIndex
@@ -79,6 +85,7 @@ const DEFAULT_BROWSERS = [['builtin', '内置浏览器'], ['system', '系统浏�
 const OPEN_MODES = [['current', '当前窗口'], ['floating', '浮动窗口']] as const
 const COMMIT_DETAILS = [['concise', '简洁'], ['standard', '标准'], ['detailed', '详细']] as const
 const COMMIT_LANGUAGES = [['auto', '跟随最近提交'], ['zh', '中文'], ['en', 'English']] as const
+const INLINE_COMPLETION_MODES = [['off', '关闭'], ['manual', '仅手动触发'], ['auto', '自动补全']] as const
 const FOLLOW_CHAT_MODEL = 'follow-chat'
 
 function modelKey(model: CommitModelSelection): string {
@@ -227,25 +234,46 @@ function DebouncedRange(props: { value: number; min: number; max: number; unit: 
   return <Range {...props} value={draft} onChange={setDraft}/>
 }
 
+function ModelSelector({ label, selection, onChange, catalog }: {
+  label: string
+  selection?: CommitModelSelection
+  onChange(value: CommitModelSelection | undefined): void
+  catalog: Pick<WorkbenchSettingsProps, 'commitModels' | 'chatModel' | 'commitModelStatus' | 'commitModelUnavailable' | 'refreshCommitModels'>
+}) {
+  const { commitModels: models, chatModel, commitModelStatus: status, commitModelUnavailable: unavailable, refreshCommitModels: refresh } = catalog
+  const followedModel = models.find(model => model.provider === chatModel?.provider && model.model === chatModel?.model)
+  // Several providers can expose the same display name; disambiguate those with the provider name.
+  const modelNameCount = new Map<string, number>()
+  for (const model of models) modelNameCount.set(model.name, (modelNameCount.get(model.name) ?? 0) + 1)
+  const options: Array<readonly [string, string]> = [
+    [FOLLOW_CHAT_MODEL, followedModel === undefined ? '跟随 DSH 聊天模型' : `跟随 DSH 聊天模型（${followedModel.name}）`],
+    ...models.map(model => [modelKey(model), (modelNameCount.get(model.name) ?? 0) > 1 ? `${model.name} · ${model.providerName}` : model.name] as const),
+  ]
+  const badges: Partial<Record<string, ModelBadge>> = Object.fromEntries(models.flatMap(model => model.badge === undefined ? [] : [[modelKey(model), model.badge]]))
+  if (followedModel?.badge !== undefined) badges[FOLLOW_CHAT_MODEL] = followedModel.badge
+  if (selection !== undefined && !models.some(model => modelKey(model) === modelKey(selection))) {
+    options.unshift([modelKey(selection), `${selection.model}（暂不可用）`])
+  }
+  if (status === 'error') return <button type="button" className="dvw-set-button" onClick={refresh}>重新读取模型</button>
+  if (status !== 'ready') return <span role="status" aria-live="polite"><button type="button" className="dvw-set-button" disabled>正在读取模型…</button></span>
+  return <><Selector label={label} value={selection === undefined ? FOLLOW_CHAT_MODEL : modelKey(selection)}
+    options={options} badges={badges} onChange={key => {
+      if (key === FOLLOW_CHAT_MODEL) { onChange(undefined); return }
+      const item = models.find(model => modelKey(model) === key)
+      if (item !== undefined) onChange({ provider: item.provider, model: item.model })
+    }}/>
+    {(unavailable.length > 0 || models.length === 0) && <button type="button" className="dvw-set-button" onClick={refresh}>刷新</button>}
+  </>
+}
+
 /** The page registered as `dsh-vscode-workbench` in DSH's settings navigation. */
 export function WorkbenchSettings(props: WorkbenchSettingsProps) {
   const { refreshLsp } = props
   useEffect(() => { refreshLsp() }, [refreshLsp])
-  const followedModel=props.commitModels.find(model=>model.provider===props.commitModel?.provider&&model.model===props.commitModel?.model)
-  // Several providers can expose the same display name; disambiguate those with the provider name.
-  const modelNameCount=new Map<string,number>()
-  for (const model of props.commitModels) modelNameCount.set(model.name,(modelNameCount.get(model.name)??0)+1)
-  const commitModelOptions: Array<readonly [string, string]> = [
-    [FOLLOW_CHAT_MODEL, followedModel===undefined?'跟随 DSH 聊天模型':`跟随 DSH 聊天模型（${followedModel.name}）`],
-    ...props.commitModels.map(model => [modelKey(model), (modelNameCount.get(model.name)??0)>1?`${model.name} · ${model.providerName}`:model.name] as const),
-  ]
-  const commitModelBadges: Partial<Record<string, ModelBadge>> = Object.fromEntries(props.commitModels.flatMap(model => model.badge === undefined ? [] : [[modelKey(model), model.badge]]))
-  if (followedModel?.badge!==undefined) commitModelBadges[FOLLOW_CHAT_MODEL]=followedModel.badge
-  const selectedModel=props.commitModel
-  if (props.commitModelConfigured&&selectedModel!==undefined&&!props.commitModels.some(model=>model.provider===selectedModel.provider&&model.model===selectedModel.model)) {
-    const unavailable=props.commitModelUnavailable.find(provider=>provider.provider===selectedModel.provider)
-    if (unavailable!==undefined) commitModelOptions.unshift([modelKey(selectedModel), `${selectedModel.model}（暂不可用）`])
-  }
+  const modelNotices = <>
+    {props.commitModelUnavailable.map(provider => <p className="dvw-set-footnote" role="status" aria-live="polite" key={provider.provider}>无法读取 {provider.providerName}：{provider.message}</p>)}
+    {props.commitModelError !== '' && <p className="dvw-set-footnote dvw-set-error" role="alert">读取 DSH 模型失败：{props.commitModelError}</p>}
+  </>
   return <div className="dvw-set-page">
     <section className="dvw-set-group">
       <h3 className="dvw-set-group-title">外观</h3>
@@ -319,20 +347,19 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
         <Selector label="提交信息语言" value={props.commitLanguage} options={COMMIT_LANGUAGES} onChange={props.setCommitLanguage}/>
       </Row>
       <Row title="生成模型" description="未手动选择时跟随 DSH 聊天当前使用的模型，不需要先与 AI 对话即可生成提交信息。">
-        {props.commitModelStatus==='ready'&&commitModelOptions.length>0
-          ? <><Selector
-                label="提交信息生成模型"
-                value={props.commitModelConfigured&&props.commitModel!==undefined?modelKey(props.commitModel):FOLLOW_CHAT_MODEL}
-                options={commitModelOptions}
-                badges={commitModelBadges}
-                onChange={key=>{if(key===FOLLOW_CHAT_MODEL){props.setCommitModel(undefined);return}const item=props.commitModels.find(model=>modelKey(model)===key);if(item!==undefined)props.setCommitModel({provider:item.provider,model:item.model})}}
-              />{props.commitModelUnavailable.length>0&&<button type="button" className="dvw-set-button" onClick={props.refreshCommitModels}>刷新</button>}</>
-          : props.commitModelStatus==='error'
-            ? <button type="button" className="dvw-set-button" onClick={props.refreshCommitModels}>重新读取模型</button>
-            : <span role="status" aria-live="polite"><button type="button" className="dvw-set-button" disabled={props.commitModelStatus!=='ready'} onClick={props.commitModelStatus==='ready'?props.refreshCommitModels:undefined}>{props.commitModelStatus==='ready'?'没有可用模型':'正在读取模型…'}</button></span>}
+        <ModelSelector label="提交信息生成模型" selection={props.commitModelConfigured ? props.commitModel : undefined} onChange={props.setCommitModel} catalog={props}/>
       </Row>
-      {props.commitModelUnavailable.map(provider=><p className="dvw-set-footnote" role="status" aria-live="polite" key={provider.provider}>无法读取 {provider.providerName}：{provider.message}</p>)}
-      {props.commitModelError!==''&&<p className="dvw-set-footnote dvw-set-error" role="alert">读取 DSH 模型失败：{props.commitModelError}</p>}
+      {modelNotices}
+    </section>
+
+    <section className="dvw-set-group">
+      <h3 className="dvw-set-group-title">AI 代码补全</h3>
+      <Row title="触发方式" description="编辑器内按 Alt/Option + \ 手动触发，自动模式也会在输入停顿后显示灰字。按 Tab 接受，按 Esc 隐藏。">
+        <Selector label="AI 代码补全触发方式" value={props.inlineCompletionMode} options={INLINE_COMPLETION_MODES} onChange={props.setInlineCompletionMode}/>
+      </Row>
+      <Row title="补全模型" description="补全时会向所选的 DSH 模型发送当前文件的相对路径和光标附近的代码，包括未保存的内容。">
+        <ModelSelector label="AI 代码补全模型" selection={props.inlineCompletionModel} onChange={props.setInlineCompletionModel} catalog={props}/>
+      </Row>
     </section>
 
     <section className="dvw-set-group">

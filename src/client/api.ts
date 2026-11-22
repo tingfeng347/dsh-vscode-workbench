@@ -13,7 +13,7 @@ export function sessionRetryDelay(error: unknown, attempt: number): number | und
   return undefined
 }
 
-function wait(ms: number, signal?: AbortSignal): Promise<void> {
+export function waitForDelay(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     const abort = () => { clearTimeout(timer); reject(signal?.reason ?? new Error('aborted')) }
     const timer = setTimeout(() => { signal?.removeEventListener('abort', abort); resolve() }, ms)
@@ -55,8 +55,9 @@ async function request<T>(method: string, body: Record<string, unknown>, signal?
   return readApiResponse<T>(response, method, STARTUP_READS.has(method) || (method === 'git.action' && body.action === 'log'))
 }
 
-export async function api<T>(method: string, body: Record<string, unknown>, signal?: AbortSignal): Promise<T> {
-  return withSessionRetry(() => request<T>(method, body, signal), signal)
+export async function api<T>(method: string, body: Record<string, unknown>, signal?: AbortSignal, options?: { retry?: boolean }): Promise<T> {
+  const send = () => request<T>(method, body, signal)
+  return options?.retry === false ? send() : withSessionRetry(send, signal)
 }
 
 /** Retry an operation while DSH is still publishing the selected session. */
@@ -66,7 +67,7 @@ export async function withSessionRetry<T>(operation: () => Promise<T>, signal?: 
     catch (error) {
       const delay = sessionRetryDelay(error, attempt)
       if (delay === undefined) throw error
-      await wait(delay, signal)
+      await waitForDelay(delay, signal)
     }
   }
 }

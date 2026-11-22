@@ -1,7 +1,7 @@
 /** DSH host plugin for the VS Code workbench. */
 import { inspectReview, rejectReview, reviewFeed, reviewPath } from './review.ts'
 import { createReadStream } from 'node:fs'
-import { readFile, stat } from 'node:fs/promises'
+import { readFile, realpath, stat } from 'node:fs/promises'
 import { appendFileSync, lstatSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import type { IncomingMessage } from 'node:http'
@@ -17,6 +17,7 @@ import { commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage,
 import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitPreviewFile, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, replaceSearchResults, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host.ts'
 import { attachLanguageServerSocket, installLsp, lspStatuses, uninstallLsp } from './lsp.ts'
 import { createDebugBridge } from './debug.ts'
+import { generateInlineCompletion, INLINE_PREFIX_LIMIT, INLINE_SUFFIX_LIMIT, INLINE_TIMEOUT_MS, isInlineCompletionPath } from './inline-completion.ts'
 import { officePdf, officePdfBuffer, officeStatus } from './office.ts'
 import { WorkspaceSite } from './site.ts'
 import type { SearchFileEdits, SearchRequest } from './types.ts'
@@ -228,6 +229,34 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     case 'git.blameRange': return gitBlameRange(cwd, body.source, body.startLine, body.endLine, signal)
     case 'git.blameLine': return gitBlameLine(cwd, body.source, body.line, signal)
     case 'git.action': probeCache.delete(`git.status:${cwd}`); return gitAction(cwd, stringField(body, 'action'), typeof body.path === 'string' ? body.path : undefined, typeof body.value === 'string' ? body.value : undefined)
+    case 'editor.inlineCompletion': {
+      const path = stringField(body, 'path')
+      const language = stringField(body, 'language')
+      const prefix = stringField(body, 'prefix')
+      const suffix = stringField(body, 'suffix')
+      if (path.length === 0 || path.length > 4096 || !/^[\w+#.-]{1,64}$/.test(language) ||
+          prefix.length > INLINE_PREFIX_LIMIT || suffix.length > INLINE_SUFFIX_LIMIT ||
+          prefix.includes('\0') || suffix.includes('\0')) {
+        throw new WorkbenchError('bad-request', '代码补全的上下文无效或超出长度限制。')
+      }
+      if (!isInlineCompletionPath(path)) return { text: '' }
+      const target = await workspacePath(cwd, path)
+      if (!isInlineCompletionPath(relative(target.root, await realpath(target.absolute)))) return { text: '' }
+      const selection = body.provider !== undefined || body.model !== undefined
+        ? normalizeCommitModelSelection(body.provider, body.model)
+        : currentChatCommitModel(ctx, sessionId)
+      if (selection === undefined) throw new WorkbenchError('model-unavailable', '请在工作台设置中选择可用的补全模型。', 409)
+      const llm: LlmRuntime | undefined = ctx.get('llm')
+      if (llm === undefined) throw new WorkbenchError('llm-unavailable', 'DSH 的模型服务当前不可用。', 503)
+      const timeout = AbortSignal.timeout(INLINE_TIMEOUT_MS)
+      const callSignal = signal === undefined ? timeout : AbortSignal.any([signal, timeout])
+      try {
+        return { text: await generateInlineCompletion(llm, selection, { path, language, prefix, suffix }, callSignal) }
+      } catch {
+        if (timeout.aborted) throw new WorkbenchError('completion-timeout', 'AI 代码补全超时。', 504)
+        throw new WorkbenchError('completion-failed', '补全模型调用失败，请在工作台设置中确认模型可用。', 502)
+      }
+    }
     case 'git.commitMessage': {
       const hasExplicitSelection = body.provider !== undefined || body.model !== undefined
       const selection = hasExplicitSelection

@@ -523,6 +523,37 @@ it('uses an explicitly configured commit model instead of the active chat model'
   })
 })
 
+it('uses the same model catalog with independent AI completion settings', async () => {
+  const service = await setup()
+  expect(state.editor?.aiCompletion).toBeUndefined()
+  const settings = document.createElement('div')
+  document.body.append(settings)
+  await act(async () => settingsHost.set(settings))
+  const selector = (label: string) => settings.querySelector<HTMLButtonElement>(`button[aria-label^="${label}："]`)
+  const pick = async (label: string, value: string) => {
+    const button = await vi.waitFor(() => {
+      expect(selector(label)).not.toBeNull()
+      return selector(label)!
+    })
+    await act(async () => button.click())
+    const option = [...settings.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]')]
+      .find(item => item.textContent?.trim() === value)!
+    await act(async () => option.click())
+  }
+  await pick('AI 代码补全触发方式', '自动补全')
+  await pick('AI 代码补全模型', 'DeepSeek-V4-Pro')
+  expect(selector('提交信息生成模型')?.textContent).toContain('跟随 DSH 聊天模型')
+  expect(localStorage.getItem('dvw:commit-model')).toBeNull()
+  expect(localStorage.getItem('dvw:inline-completion-mode')).toBe('auto')
+  await act(async () => settingsHost.set(undefined))
+  expect(state.editor?.aiCompletion).toEqual({
+    mode: 'auto', sessionId: 's', cwd: '/tmp/audit', model: { provider: 'deepseek-official', model: 'deepseek-pro' },
+  })
+  await act(async () => root!.unmount())
+  await mount(service)
+  expect(state.editor?.aiCompletion?.model?.model).toBe('deepseek-pro')
+})
+
 it('keeps a saved generation model when its provider is temporarily unavailable', async () => {
   const saved = { provider: 'deepseek-official', model: 'deepseek-pro' }
   localStorage.setItem('dvw:commit-model', JSON.stringify(saved))

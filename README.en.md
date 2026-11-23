@@ -5,7 +5,7 @@
 <p align="center"><a href="README.md">中文</a> · English</p>
 
 <p align="center"><strong>DSH VS Code Workbench</strong><br>
-  A VS Code-style workspace for DeepSeek Harness with editing, search, Git, a terminal, and document and web previews.</p>
+  A VS Code-style workspace for DeepSeek Harness with editing, search, Git, remote SSH development, a terminal, and document and web previews.</p>
 
 <p align="center">
   <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/v/dsh-vscode-workbench/latest?logo=npm&label=npm" alt="npm version"></a>
@@ -26,10 +26,10 @@
 
 ## Installation
 
-The plugin requires DeepSeek Harness `>=0.2.1-rc.1` at install time. The default test baseline is `0.2.3-alpha.2` (Cordis `4.2.0-alpha.1`).
+The plugin requires DeepSeek Harness `>=0.2.1-rc.1` at install time. The default test baseline is `0.2.2-rc.5` (Cordis `4.1.0`), with route-authentication support verified for Harness `0.2.3`.
 
 ```bash
-npm i -g @deepseek-ai/dsh@0.2.3-alpha.2
+npm i -g @deepseek-ai/dsh@0.2.2-rc.5
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
@@ -41,9 +41,10 @@ Installing from the DSH Plugins page or a marketplace enables the plugin automat
 | --- | --- |
 | Files and editing | Create, rename, move, delete, and drag files, with multi-selection, split panes, Monaco editing, and per-workspace layout restoration. Saves use revision checks and atomic writes. |
 | Workspace search and replace | Search with case, whole-word, regular-expression, and include or exclude path options. Preview and replace one match, one file, or all results. |
-| Git workflow | Stage, commit, amend, push, and sync from Source Control. Compare staged files with `HEAD`, browse the automatically refreshed commit graph, resolve conflicts, use Git Tools, choose VS Code or IDEA / PyCharm diff styles, and view line attribution. |
+| Git and file review | Stage, commit, amend, push, and sync from Source Control. Compare staged files with `HEAD` and browse the automatically refreshed commit graph. Change blocks in split diffs can add a file reference with the affected lines to the DSH conversation. IDEA / PyCharm split diffs are the default, with VS Code inline diffs available as an alternative. |
 | Language intelligence and debugging | Install and restart language servers for completion, definitions, references, fixes, formatting, and Problems. The Debug panel supports breakpoints, stepping, call stacks, and variables. |
 | AI assistance | Use Off, Manual, or Automatic code completion. Review all or the latest AI changes by block, file, or batch, with optional auto-follow. |
+| Remote SSH development | Connect through `~/.ssh/config` or enter a host manually, using the local OpenSSH client, ssh-agent, keys, or a one-time password. Edit remote files, search and replace, stage and commit remote Git changes, compare diffs, and open a remote terminal. |
 | Documents and web pages | Preview Markdown, images, PDFs, Excel, Word, and PowerPoint in tabs, and open web links or local HTML in the built-in or system browser. |
 | Terminal and DSH chat | Use the official Harness terminal with multiple sessions, renaming, and splits. Add files or editor selections to DSH chat and open generated file links from the current session. |
 | Workspaces, layout, and window | Manage workspaces and sessions, arrange the activity bar, sidebars, chat, terminal, themes, and font size. Floating windows support dragging, resizing, fullscreen, and remembered geometry. |
@@ -113,7 +114,7 @@ Installing from the DSH Plugins page or a marketplace enables the plugin automat
 
 ## Security
 
-All plugin routes require Harness authentication. The host accepts only paths relative to the active DSH session workspace and rejects traversal and symlink escape. Saves use revision checks and atomic replacement. Git and ripgrep run with argument arrays rather than shell-concatenated commands. Terminals use the official Harness controller, connection authentication and execution environment. Credential filtering belongs to the official subprocess provider.
+All plugin routes require Harness authentication. The host accepts only paths relative to the active DSH session workspace and rejects traversal and symlink escape. Saves use revision checks and atomic replacement. Git and ripgrep run with argument arrays rather than shell-concatenated commands. Remote SSH uses the local OpenSSH client, keeps passwords only in connection memory, and validates every remote path with `realpath` against the canonical workspace root. Terminals use the official Harness controller, connection authentication and execution environment. Credential filtering belongs to the official subprocess provider.
 
 ## Development
 

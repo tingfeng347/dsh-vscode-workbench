@@ -26,7 +26,7 @@
 
 ## Installation
 
-The plugin requires DeepSeek Harness `>=0.2.1-rc.1` at install time. The current test baseline is `0.2.2-rc.5` (Cordis `4.1.0`).
+The plugin requires DeepSeek Harness `>=0.2.1-rc.1` at install time. The default test baseline is `0.2.2-rc.5` (Cordis `4.1.0`). The main branch also adapts to Harness `0.2.3-alpha.2` route authentication and verifies the workbench entry, Explorer, Search, Source Control, terminal, debugger, and route authentication. These fixes are not yet included in the `0.3.0` npm package.
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.5
@@ -60,7 +60,7 @@ Open Search in the sidebar and click the arrow beside the search box, or press `
 
 ## Git workflow
 
-- **Source Control** supports staging, unstaging, discarding changes, committing, amending, and committing followed by push or sync. AI can draft a commit message from the changes using the current DSH chat model or a model selected in settings. Choose the language and level of detail in settings, or stop generation and keep the draft.
+- **Source Control** supports staging, unstaging, discarding changes, committing, amending, and committing followed by push or sync. Click a staged file to compare `HEAD` with its staged content. Commits and amended commits refresh the commit graph before the operation finishes, so the new commit is visible when the action completes. AI can draft a commit message from the changes using the current DSH chat model or a model selected in settings. Choose the language and level of detail in settings, or stop generation and keep the draft.
 - **The commit graph** expands to show changed files. Open a diff or preview an image or document from history. Hover over a commit for author, time, change statistics, and a copyable hash. The card links to GitHub when a known remote-tracking branch contains the commit. Drag the divider between Changes and Graph to resize, or double-click to reset it.
 - Choose the **VS Code or IDEA / PyCharm diff style** under DSH Settings → Workbench → Git. Diff views support change navigation and folding of unchanged lines. The workbench remembers the inline or side-by-side selection. In the side-by-side ribbon view, the right pane follows the left in the same frame, and guides extend into both panes. Blue means modified, green added, and red deleted. Click a line in a file or diff to see its commit attribution.
 - Open Source Control → **Git Tools** to filter commit or file history, compare branches, tags, commits, or tracked working tree files, cherry-pick or revert commits, and manage stashes, local branches, and tags. Fetch, fast-forward pull, push, merge, and rebase from the sync view. In the conflict view, inspect all three versions, take a side, or edit and stage the merged result.

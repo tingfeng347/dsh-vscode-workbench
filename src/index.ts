@@ -332,6 +332,7 @@ export function apply(ctx: HostContext): void {
         res.end(content)
       } catch (error) { sendError(res, error) }
     },
+    auth: 'required',
   }), 'dsh-vscode-workbench: preview runtime')
   ctx.effect(() => ctx.webServer.register({
     kind: 'exact', path: '/dsh-vscode/codicons/codicon.ttf', handler: async (req, res) => {
@@ -342,6 +343,7 @@ export function apply(ctx: HostContext): void {
         res.end(await readFile(asset.path))
       } catch (error) { sendError(res, error) }
     },
+    auth: 'required',
   }), 'dsh-vscode-workbench: Codicon font')
 
   ctx.effect(() => ctx.webServer.register({
@@ -353,6 +355,7 @@ export function apply(ctx: HostContext): void {
         res.end(await readFile(asset.path))
       } catch (error) { sendError(res, error) }
     },
+    auth: 'required',
   }), 'dsh-vscode-workbench: SheetJS asset')
 
   ctx.effect(() => ctx.webServer.register({
@@ -365,6 +368,7 @@ export function apply(ctx: HostContext): void {
         res.end(await readFile(asset.path))
       } catch (error) { sendError(res, error) }
     },
+    auth: 'required',
   }), 'dsh-vscode-workbench: file icons')
 
   ctx.effect(() => ctx.webServer.register({
@@ -376,6 +380,7 @@ export function apply(ctx: HostContext): void {
         res.end(await readFile(asset.path))
       } catch (error) { sendError(res, error) }
     },
+    auth: 'required',
   }), 'dsh-vscode-workbench: PDF.js worker')
 
   ctx.effect(() => ctx.webServer.register({
@@ -399,6 +404,7 @@ export function apply(ctx: HostContext): void {
         send(res, 200, { ok: true, value })
       } catch (error) { sendError(res, error) }
     },
+    auth: 'required',
   }), 'dsh-vscode-workbench: API')
 
   ctx.effect(() => ctx.webServer.register({
@@ -412,14 +418,17 @@ export function apply(ctx: HostContext): void {
         send(res, 201, { ok: true, value: await uploadFile(cwdFor(ctx, sessionId), directory, name, await readBinaryBody(req)) })
       } catch (error) { sendError(res, error) }
     },
+    auth: 'required',
   }), 'dsh-vscode-workbench: file upload')
 
   ctx.effect(() => ctx.webServer.register({
-    kind:'prefix',path:'/dsh-vscode/file',handler:async(req,res)=>{if(!authorize(req,res,ctx.connection))return;try{const url=new URL(req.url??'/','http://dsh.local');const sessionId=url.searchParams.get('sessionId');const path=url.searchParams.get('path');const commit=url.searchParams.get('commit');if(sessionId===null||path===null)throw new WorkbenchError('bad-request','sessionId and path are required');const cwd=cwdFor(ctx,sessionId);if(commit===null){const asset=await workspacePreviewFile(cwd,path);res.writeHead(200,{'content-type':asset.type,'x-content-type-options':'nosniff','cache-control':'no-store'});res.end(await readFile(asset.path))}else{const asset=await gitPreviewFile(cwd,commit,path);res.writeHead(200,{'content-type':asset.type,'x-content-type-options':'nosniff','cache-control':'no-store'});res.end(asset.data)}}catch(error){sendError(res,error)}}
+    kind:'prefix',path:'/dsh-vscode/file',handler:async(req,res)=>{if(!authorize(req,res,ctx.connection))return;try{const url=new URL(req.url??'/','http://dsh.local');const sessionId=url.searchParams.get('sessionId');const path=url.searchParams.get('path');const commit=url.searchParams.get('commit');if(sessionId===null||path===null)throw new WorkbenchError('bad-request','sessionId and path are required');const cwd=cwdFor(ctx,sessionId);if(commit===null){const asset=await workspacePreviewFile(cwd,path);res.writeHead(200,{'content-type':asset.type,'x-content-type-options':'nosniff','cache-control':'no-store'});res.end(await readFile(asset.path))}else{const asset=await gitPreviewFile(cwd,commit,path);res.writeHead(200,{'content-type':asset.type,'x-content-type-options':'nosniff','cache-control':'no-store'});res.end(asset.data)}}catch(error){sendError(res,error)}},
+    auth: 'required',
   }), 'dsh-vscode-workbench: file preview')
 
   ctx.effect(() => ctx.webServer.register({
-    kind:'exact',path:'/dsh-vscode/download',handler:async(req,res)=>{if(!authorize(req,res,ctx.connection))return;try{const url=new URL(req.url??'/','http://dsh.local');const sessionId=url.searchParams.get('sessionId');const path=url.searchParams.get('path');if(sessionId===null||path===null)throw new WorkbenchError('bad-request','sessionId and path are required');const file=await workspaceDownloadFile(cwdFor(ctx,sessionId),path);res.writeHead(200,{'content-type':'application/octet-stream','content-length':file.size,'content-disposition':`attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`,'x-content-type-options':'nosniff','cache-control':'no-store'});createReadStream(file.path).on('error',error=>res.destroy(error)).pipe(res)}catch(error){sendError(res,error)}}
+    kind:'exact',path:'/dsh-vscode/download',handler:async(req,res)=>{if(!authorize(req,res,ctx.connection))return;try{const url=new URL(req.url??'/','http://dsh.local');const sessionId=url.searchParams.get('sessionId');const path=url.searchParams.get('path');if(sessionId===null||path===null)throw new WorkbenchError('bad-request','sessionId and path are required');const file=await workspaceDownloadFile(cwdFor(ctx,sessionId),path);res.writeHead(200,{'content-type':'application/octet-stream','content-length':file.size,'content-disposition':`attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`,'x-content-type-options':'nosniff','cache-control':'no-store'});createReadStream(file.path).on('error',error=>res.destroy(error)).pipe(res)}catch(error){sendError(res,error)}},
+    auth: 'required',
   }), 'dsh-vscode-workbench: file download')
 
   ctx.effect(() => ctx.webServer.register({
@@ -436,6 +445,7 @@ export function apply(ctx: HostContext): void {
         createReadStream(pdf.path).on('error', error => res.destroy(error)).pipe(res)
       } catch (error) { sendError(res, error) }
     },
+    auth: 'required',
   }), 'dsh-vscode-workbench: office preview')
   
 
@@ -449,12 +459,13 @@ export function apply(ctx: HostContext): void {
         res.end(await readFile(asset.path))
       } catch (error) { sendError(res, error) }
     },
+    auth: 'required',
   }), 'dsh-vscode-workbench: Monaco assets')
 
   const wss = new WebSocketServer({ noServer: true })
   ctx.effect(() => ctx.webServer.registerUpgrade({
     path: '/dsh-vscode/ws/files', handler(req, socket, head) {
-      if (ctx.connection.requestRejection(req) !== undefined) { socket.destroy(); return }
+      if (ctx.connection.requestRejection?.(req) !== undefined) { socket.destroy(); return }
       wss.handleUpgrade(req as IncomingMessage, socket as Duplex, head, (ws) => {
         const search = new URL(req.url ?? '/', 'http://dsh.local').searchParams
         const sessionId = search.get('sessionId')
@@ -526,12 +537,13 @@ export function apply(ctx: HostContext): void {
         })
       })
     },
+    auth: 'required',
   }), 'dsh-vscode-workbench: file watcher')
 
   const lspWss = new WebSocketServer({ noServer: true, maxPayload: 32 * 1024 * 1024 })
   ctx.effect(() => ctx.webServer.registerUpgrade({
     path: '/dsh-vscode/ws/lsp', handler(req, socket, head) {
-      if (ctx.connection.requestRejection(req) !== undefined) { socket.destroy(); return }
+      if (ctx.connection.requestRejection?.(req) !== undefined) { socket.destroy(); return }
       lspWss.handleUpgrade(req as IncomingMessage, socket as Duplex, head, (ws) => {
         const search = new URL(req.url ?? '/', 'http://dsh.local').searchParams
         const sessionId = search.get('sessionId'); const serverId = search.get('server')
@@ -542,12 +554,13 @@ export function apply(ctx: HostContext): void {
         void attachLanguageServerSocket(ws, workspace, serverId)
       })
     },
+    auth: 'required',
   }), 'dsh-vscode-workbench: language server bridge')
   ctx.effect(() => () => { for (const ws of lspWss.clients) ws.terminate(); lspWss.close() }, 'dsh-vscode-workbench: language server teardown')
   const debugWss = new WebSocketServer({ noServer: true })
   ctx.effect(() => ctx.webServer.registerUpgrade({
     path: '/dsh-vscode/ws/debug', handler(req, socket, head) {
-      if (ctx.connection.requestRejection(req) !== undefined) { socket.destroy(); return }
+      if (ctx.connection.requestRejection?.(req) !== undefined) { socket.destroy(); return }
       debugWss.handleUpgrade(req as IncomingMessage, socket as Duplex, head, ws => {
         const search = new URL(req.url ?? '/', 'http://dsh.local').searchParams
         const sessionId = search.get('sessionId')
@@ -573,6 +586,7 @@ export function apply(ctx: HostContext): void {
         ws.on('error', () => bridge.dispose())
       })
     },
+    auth: 'required',
   }), 'dsh-vscode-workbench: debug bridge')
   ctx.effect(() => () => { debugWss.close() }, 'dsh-vscode-workbench: debug teardown')
   ctx.effect(() => () => { wss.close() }, 'dsh-vscode-workbench: watcher teardown')

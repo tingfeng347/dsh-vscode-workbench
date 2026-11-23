@@ -40,6 +40,47 @@ describe('Harness plugin installation compatibility', () => {
 })
 
 describe('Harness 0.2 host integration', () => {
+  it('serves the real routes when Harness owns route authentication', async () => {
+    const directory = resolve('modern-runtime')
+    const routes: Parameters<WorkbenchWebServer['register']>[0][] = []
+    const upgrades: Parameters<WorkbenchWebServer['registerUpgrade']>[0][] = []
+    const ctx = {
+      connection: {},
+      sessions: { get: () => undefined },
+      workingDirectory: { get: () => directory },
+      webServer: {
+        register: (route: Parameters<WorkbenchWebServer['register']>[0]) => {
+          expect(route.auth).toBe('required')
+          routes.push(route)
+          return () => {}
+        },
+        registerUpgrade: (route: Parameters<WorkbenchWebServer['registerUpgrade']>[0]) => {
+          expect(route.auth).toBe('required')
+          upgrades.push(route)
+          return () => {}
+        },
+      },
+      effect(callback: () => void | (() => void)) { const dispose = callback(); if (dispose) cleanup.push(dispose) },
+    } as unknown as HostContext
+    apply(ctx)
+    expect(routes.length).toBeGreaterThan(10)
+    expect(upgrades.map(route => route.path).sort()).toEqual(['/dsh-vscode/ws/debug', '/dsh-vscode/ws/files', '/dsh-vscode/ws/lsp'])
+
+    const request = createServer((req, res) => {
+      const path = new URL(req.url ?? '/', 'http://localhost').pathname
+      const route = routes.find(route => route.kind === 'exact' ? route.path === path : path.startsWith(route.path))
+      if (!route) { res.writeHead(404); res.end(); return }
+      void route.handler(req, res)
+    })
+    await new Promise<void>(resolve => request.listen(0, '127.0.0.1', resolve))
+    cleanup.push(() => new Promise<void>((resolve, reject) => request.close(error => error ? reject(error) : resolve())))
+    const base = `http://127.0.0.1:${(request.address() as AddressInfo).port}`
+    expect((await fetch(`${base}/dsh-vscode/codicons/codicon.ttf`)).status).toBe(200)
+    expect((await fetch(`${base}/dsh-vscode/api/workspace`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: 'missing' }),
+    })).status).toBe(404)
+  })
+
   it('uses real Harness cookies for every HTTP route and rejects unauthenticated upgrades', async () => {
     const auth = new Context()
     let record: unknown

@@ -243,6 +243,83 @@ it('applies and persists the Git comparison style through Workbench settings', a
   expect(localStorage.getItem('dvw:git-diff-style')).toBe('ribbon')
 })
 
+it('compares a staged file against HEAD from the staged changes group', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: [], view: 'git' }, [], [{
+    path: 'a.txt', index: 'M', worktree: '.', staged: true, untracked: false,
+  }])
+
+  const row = await vi.waitFor(() => {
+    const value = document.querySelector<HTMLElement>('.dvw-git .dvw-change')
+    expect(value?.textContent).toContain('a.txt')
+    return value!
+  })
+  await act(async () => row.click())
+
+  expect(state.diff).toMatchObject({
+    original: 'before',
+    modified: 'after',
+    sourcePath: 'a.txt',
+    versions: ['HEAD', '暂存区'],
+  })
+  expect(document.querySelector('[data-tab-path="diff:staged:a.txt"]')).not.toBeNull()
+  const request = vi.mocked(fetch).mock.calls
+    .map(([, options]) => JSON.parse(String(options?.body)) as Record<string, unknown>)
+    .find(body => body.action === 'diff')
+  expect(request).toMatchObject({ action: 'diff', path: 'a.txt', value: 'staged' })
+})
+
+it('shows a new commit before the commit action finishes', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: [], view: 'git' }, [], [{
+    path: 'a.txt', index: 'M', worktree: '.', staged: true, untracked: false,
+  }])
+  const input = await vi.waitFor(() => {
+    const value = document.querySelector<HTMLTextAreaElement>('.dvw-commit-input')
+    expect(value).not.toBeNull()
+    return value!
+  })
+
+  const originalFetch = vi.mocked(fetch).getMockImplementation()!
+  let finishHistory!: (response: Response) => void
+  let historyStarted = false
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    const body = JSON.parse(String(options?.body)) as Record<string, unknown>
+    if (body.action === 'commit') {
+      // The commit itself completed in Git. Reading the new history remains pending.
+      return Response.json({
+        ok: true,
+        value: { repository: '/tmp/audit', branch: 'master', ahead: 1, behind: 0, changes: [] },
+      })
+    }
+    if (body.action === 'log' && vi.mocked(fetch).mock.calls.some(([, request]) =>
+      (JSON.parse(String(request?.body)) as Record<string, unknown>).action === 'commit')) {
+      historyStarted = true
+      return new Promise<Response>(resolve => { finishHistory = resolve })
+    }
+    return originalFetch(url, options)
+  })
+
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(input, 'feat(git): show immediately')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () => document.querySelector<HTMLButtonElement>('.dvw-commit-button')!.click())
+
+  await vi.waitFor(() => expect(historyStarted).toBe(true))
+  expect(input.value).toBe('feat(git): show immediately')
+
+  await act(async () => finishHistory(Response.json({
+    ok: true,
+    value: [{
+      hash: 'abcdef123456', author: 'Test', date: '2026-11-23T00:00:00Z',
+      subject: 'feat(git): show immediately', parents: [], refs: ['HEAD -> master'],
+    }],
+  })))
+  await vi.waitFor(() => expect(document.querySelector('.dvw-graph-subject')?.textContent).toBe('feat(git): show immediately'))
+  expect(input.value).toBe('')
+})
+
 it('shares the diff layout across new and existing files and restores it after reopening', async () => {
   localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
   localStorage.setItem('dvw:git-diff-style', 'ribbon')

@@ -227,15 +227,17 @@ body[data-dvw-workbench-active] [data-sidebar-toggle]{display:none!important}
 .dvw-scm-resizer:is(:hover,:focus-visible,[data-dragging=true])::after{height:2px;background:var(--dvw-accent)}
 .dvw-scm-changes .dvw-git,.dvw-scm-panes .dvw-graph-list{min-height:0;overflow:auto;overscroll-behavior:contain}
 .dvw-scm-panes .dvw-group-head{flex:none}
-.dvw-scm-panes :is(.dvw-group-head,.dvw-scm-head):is(:hover,:focus-within){background:var(--dvw-hover)}
-.dvw-scm-panes .dvw-group-toggle:hover{background:transparent}
-.dvw-git .dvw-group-head{padding-left:10px}
+.dvw-scm-panes .dvw-group-head:is(:hover,:focus-within),
+:is(.dvw-scm-head,.dvw-ssh-section-head):is(:hover,:focus-within){background:var(--dvw-hover)}
+.dvw-scm-panes .dvw-group-toggle:hover,.dvw-ssh-section-head .dvw-group-toggle:hover{background:transparent}
+.dvw-git .dvw-group-head{padding-left:4px}
+.dvw-git .dvw-group-head>.dvw-group-toggle{padding-left:0;gap:3px}
 .dvw-git .dvw-group-head>.dvw-icon{visibility:hidden}
 .dvw-git .dvw-group-head:is(:hover,:focus-within)>.dvw-icon{visibility:visible}
 .dvw-git .dvw-group-head .dvw-count{margin-left:3px;height:16px;min-width:16px;padding:0 4px;border-radius:9px;background:var(--dvw-accent);color:white}
-.dvw-scm-head{display:flex;align-items:center;position:relative;min-height:28px;padding:0 4px;gap:1px;z-index:5}
-.dvw-scm-head .dvw-group-toggle{padding:0;gap:3px;min-width:44px}
-.dvw-scm-head .dvw-icon{flex:0 1 22px;width:22px;min-width:17px;padding:0}
+:is(.dvw-scm-head,.dvw-ssh-section-head){display:flex;align-items:center;position:relative;min-height:28px;padding:0 4px;gap:1px;z-index:5}
+:is(.dvw-scm-head,.dvw-ssh-section-head)>.dvw-group-toggle{padding:0;gap:3px;min-width:44px}
+:is(.dvw-scm-head,.dvw-ssh-section-head) .dvw-icon{flex:0 1 22px;width:22px;min-width:17px;padding:0}
 .dvw-scm-menu-anchor{position:relative;display:flex}
 .dvw-scm-menu{position:fixed;inset:auto;margin:0;width:min(220px,calc(100vw - 8px));max-height:min(70vh,550px);overflow:auto;z-index:9;padding:4px;border:1px solid var(--dvw-border);border-radius:6px;background:var(--dvw-surface-2);box-shadow:0 5px 18px #0004}
 .dvw-scm-menu button{display:flex;align-items:center;justify-content:space-between;width:100%;padding:4px 9px;min-height:25px;color:var(--dvw-text);background:transparent;text-align:left;border:0;border-radius:3px;font:inherit;cursor:pointer}
@@ -565,6 +567,218 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-debug-paused-arrow{position:relative}
 .dvw-debug-paused-arrow::before{content:'▶';position:absolute;left:0;top:50%;transform:translateY(-50%);color:#e0a020;font-size:9px;line-height:1}
 .dvw-debug-paused-line{background:color-mix(in srgb,var(--dvw-accent) 14%,transparent)}
+
+/* SSH workspace */
+.dvw-ssh{--dvw-ssh-font:12px;--dvw-ssh-font-small:11px;--dvw-ssh-font-caption:10px;flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;background:var(--dvw-side);color:var(--dvw-text);font-size:var(--dvw-ssh-font);overflow:hidden}
+.dvw-ssh[hidden]{display:none}
+.dvw-ssh-error{flex:none;margin:8px 8px 0;padding:7px 7px 7px 9px;border:1px solid color-mix(in srgb,var(--dvw-error) 35%,var(--dvw-border));border-radius:6px;background:color-mix(in srgb,var(--dvw-error) 9%,var(--dvw-surface-1));color:var(--dvw-error);font-size:var(--dvw-ssh-font);line-height:1.45;display:flex;align-items:flex-start;gap:5px}
+.dvw-ssh-error span{min-width:0;flex:1;overflow-wrap:anywhere}
+.dvw-ssh-error .dvw-icon{flex:none;width:20px;min-width:20px;height:20px;color:inherit}
+.dvw-ssh-connect{flex:1;min-height:0;overflow:auto;padding:10px 9px 16px;scrollbar-gutter:stable}
+.dvw-ssh-hero{display:flex;align-items:flex-start;gap:9px;padding:10px;border:1px solid var(--dvw-border-soft);border-radius:8px;background:linear-gradient(145deg,color-mix(in srgb,var(--dvw-accent) 8%,var(--dvw-surface-2)),var(--dvw-surface-1))}
+.dvw-ssh-hero-icon{flex:none;width:30px;height:30px;display:grid;place-items:center;border-radius:7px;background:color-mix(in srgb,var(--dvw-accent) 15%,var(--dvw-surface-2));color:var(--dvw-accent);font-size:16px}
+.dvw-ssh-hero>div{min-width:0;display:flex;flex-direction:column;gap:3px}
+.dvw-ssh-hero strong{font-size:13px;font-weight:650;line-height:1.3}
+.dvw-ssh-hero small{color:var(--dvw-text-2);font-size:var(--dvw-ssh-font-small);line-height:1.45}
+.dvw-ssh-mode-switch{display:grid;grid-template-columns:1fr 1fr;gap:2px;margin:10px 0 8px;padding:2px;border:1px solid var(--dvw-border-soft);border-radius:7px;background:var(--dvw-surface-2)}
+.dvw-ssh-mode-switch button{height:30px;border:0;border-radius:5px;background:transparent;color:var(--dvw-text-2);font:inherit;font-size:var(--dvw-ssh-font);cursor:pointer}
+.dvw-ssh-mode-switch button:hover{color:var(--dvw-text);background:var(--dvw-hover)}
+.dvw-ssh-mode-switch button[data-active=true]{background:var(--dvw-surface-1);box-shadow:0 1px 4px rgba(0,0,0,.18),inset 0 0 0 1px var(--dvw-border-soft);color:var(--dvw-text);font-weight:600}
+.dvw-ssh-picker{display:flex;flex-direction:column;gap:9px;margin-bottom:10px}
+.dvw-ssh-picker-section{min-width:0}
+.dvw-ssh-picker-label{height:26px;display:flex;align-items:center;gap:6px;color:var(--dvw-text-2);font-size:var(--dvw-ssh-font);font-weight:650;letter-spacing:.02em}
+.dvw-ssh-picker-label small{margin-left:auto;min-width:20px;height:18px;display:grid;place-items:center;padding:0 5px;border-radius:9px;background:var(--dvw-active);color:var(--dvw-text-3);font-size:var(--dvw-ssh-font-caption);font-variant-numeric:tabular-nums}
+.dvw-ssh-host-list{max-height:164px;overflow:auto;border:1px solid var(--dvw-border-soft);border-radius:7px;background:var(--dvw-surface-1)}
+.dvw-ssh-host-list:empty{display:none}
+.dvw-ssh-host-main{width:100%;min-width:0;height:42px;display:flex;align-items:center;gap:8px;padding:0 8px;border:0;border-bottom:1px solid var(--dvw-border-soft);background:transparent;color:var(--dvw-text-2);font:inherit;text-align:left;cursor:pointer}
+.dvw-ssh-host-list>.dvw-ssh-host-main:last-child{border-bottom:0}
+.dvw-ssh-host-main:hover{background:var(--dvw-hover);color:var(--dvw-text)}
+.dvw-ssh-host-main[data-active=true]{background:color-mix(in srgb,var(--dvw-accent) 10%,var(--dvw-surface-1));color:var(--dvw-text);box-shadow:inset 2px 0 var(--dvw-accent)}
+.dvw-ssh-host-main>.codicon{flex:none;width:17px;color:var(--dvw-accent);font-size:15px}
+.dvw-ssh-host-main>span{min-width:0;flex:1;display:grid;gap:1px}
+.dvw-ssh-host-main strong,.dvw-ssh-host-main small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dvw-ssh-host-main strong{color:inherit;font-size:var(--dvw-ssh-font);font-weight:600}
+.dvw-ssh-host-main small{color:var(--dvw-text-3);font-size:var(--dvw-ssh-font-small);font-weight:400}
+.dvw-ssh-recent{display:grid;grid-template-columns:minmax(0,1fr) 24px;align-items:stretch;border-bottom:1px solid var(--dvw-border-soft)}
+.dvw-ssh-recent:last-child{border-bottom:0}
+.dvw-ssh-recent .dvw-ssh-host-main{border-bottom:0}
+.dvw-ssh-recent>.dvw-icon{align-self:center;width:20px;height:20px;margin-right:2px;opacity:0}
+.dvw-ssh-recent:hover>.dvw-icon,.dvw-ssh-recent:focus-within>.dvw-icon{opacity:1}
+.dvw-ssh-empty-card{display:flex;flex-direction:column;align-items:center;gap:5px;padding:15px 10px;border:1px dashed var(--dvw-border);border-radius:8px;color:var(--dvw-text-3);text-align:center}
+.dvw-ssh-empty-card>.codicon{font-size:22px;color:var(--dvw-text-2)}
+.dvw-ssh-empty-card strong{font-size:var(--dvw-ssh-font);color:var(--dvw-text-2)}
+.dvw-ssh-empty-card span{font-size:var(--dvw-ssh-font-small);line-height:1.45}
+.dvw-ssh-form{display:flex;flex-direction:column;gap:8px;padding:10px;border:1px solid var(--dvw-border-soft);border-radius:8px;background:var(--dvw-surface-1)}
+.dvw-ssh-form-title{min-width:0;display:flex;align-items:center;gap:6px;margin-bottom:1px}
+.dvw-ssh-form-title strong{flex:none;font-size:var(--dvw-ssh-font);font-weight:650}
+.dvw-ssh-form-title span{min-width:0;margin-left:auto;overflow:hidden;color:var(--dvw-text-3);font-size:var(--dvw-ssh-font-caption);text-overflow:ellipsis;white-space:nowrap}
+.dvw-ssh-form label{min-width:0;display:flex;flex-direction:column;gap:3px;color:var(--dvw-text-2);font-size:var(--dvw-ssh-font-small);font-weight:500}
+.dvw-ssh-form .dvw-input{height:30px;padding:3px 7px;background:var(--dvw-surface-2);font:inherit;font-size:var(--dvw-ssh-font)}
+.dvw-ssh-form-grid{display:grid;grid-template-columns:minmax(0,1fr) 66px;gap:7px}
+.dvw-ssh-advanced{border-top:1px solid var(--dvw-border-soft);padding-top:7px}
+.dvw-ssh-advanced summary,.dvw-ssh-security summary{list-style:none;display:flex;align-items:center;gap:5px;color:var(--dvw-text-2);font-size:var(--dvw-ssh-font-small);cursor:pointer;user-select:none}
+.dvw-ssh-advanced summary::-webkit-details-marker,.dvw-ssh-security summary::-webkit-details-marker{display:none}
+.dvw-ssh-advanced summary::before,.dvw-ssh-security summary::before{content:"›";display:inline-block;color:var(--dvw-text-3);font-size:15px;line-height:1;transform:rotate(0)}
+.dvw-ssh-advanced[open] summary::before,.dvw-ssh-security[open] summary::before{transform:rotate(90deg)}
+.dvw-ssh-advanced[open]{display:flex;flex-direction:column;gap:7px}
+.dvw-ssh-security{padding-top:1px}
+.dvw-ssh-security p{margin:5px 0 0 11px;color:var(--dvw-text-3);font-size:var(--dvw-ssh-font-caption);line-height:1.5}
+.dvw-ssh-primary{height:32px;border:0;border-radius:6px;background:var(--dvw-accent);color:#fff;display:flex;align-items:center;justify-content:center;gap:6px;font:inherit;font-size:var(--dvw-ssh-font);font-weight:600;cursor:pointer}
+.dvw-ssh-primary:hover:not(:disabled){filter:brightness(1.08)}
+.dvw-ssh-primary:disabled{opacity:.48;cursor:default}
+.dvw-ssh-connect-button{margin-top:1px}
+.dvw-ssh-connected{flex:1;min-height:0;display:flex;flex-direction:column}
+.dvw-ssh-connection-card{flex:none;min-width:0;display:grid;grid-template-columns:26px minmax(0,1fr) auto;align-items:center;gap:8px;margin:8px 9px 7px;padding:9px;border:1px solid var(--dvw-border-soft);border-radius:8px;background:linear-gradient(145deg,color-mix(in srgb,var(--dvw-success) 7%,var(--dvw-surface-2)),var(--dvw-surface-1))}
+.dvw-ssh-online{width:25px;height:25px;display:grid;place-items:center;border-radius:50%;background:color-mix(in srgb,var(--dvw-success) 14%,transparent);color:var(--dvw-success)}
+.dvw-ssh-connection-card>div:not(.dvw-ssh-online){min-width:0;display:grid;gap:1px}
+.dvw-ssh-connection-card strong,.dvw-ssh-connection-card small,.dvw-ssh-connection-card code{display:block;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dvw-ssh-connection-card strong{font-size:var(--dvw-ssh-font);font-weight:650}
+.dvw-ssh-connection-card small{color:var(--dvw-text-2);font-size:var(--dvw-ssh-font-small)}
+.dvw-ssh-connection-card code{margin-top:1px;color:var(--dvw-text-3);font:var(--dvw-ssh-font-caption)/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+.dvw-ssh-terminal-button{height:28px;display:flex;align-items:center;gap:4px;padding:0 7px;border:1px solid var(--dvw-border);border-radius:5px;background:var(--dvw-surface-2);color:var(--dvw-text-2);font:inherit;font-size:var(--dvw-ssh-font-small);cursor:pointer}
+.dvw-ssh-terminal-button:hover{background:var(--dvw-hover);color:var(--dvw-text)}
+.dvw-ssh-panel[hidden],.dvw-ssh-tree-section[hidden]{display:none}
+.dvw-ssh-tree-error{display:flex;align-items:center;justify-content:space-between;gap:4px;padding:4px 8px;color:var(--dvw-error);overflow-wrap:anywhere}
+.dvw-ssh-panel{flex:1;min-height:0;display:flex;overflow:hidden}
+.dvw-ssh-workspace-section{flex:none;min-height:30px;display:flex;flex-direction:column;border-bottom:1px solid var(--dvw-border-soft)}
+.dvw-ssh-workspace-section[data-expanded=true]{flex:1;min-height:120px}
+.dvw-ssh-section{flex:1;min-width:0;min-height:0;display:flex;flex-direction:column;overflow:hidden}
+.dvw-ssh-panel-toolbar{flex:none;height:31px;display:flex;align-items:center;gap:5px;padding:0 5px 0 9px;border-bottom:1px solid var(--dvw-border-soft);background:var(--dvw-side)}
+.dvw-ssh-panel-toolbar>span{min-width:0;flex:1;display:flex;align-items:center;gap:5px;overflow:hidden;color:var(--dvw-text-2);font-size:var(--dvw-ssh-font);font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.dvw-ssh-panel-toolbar>span>.codicon{color:var(--dvw-accent);font-size:13px}
+.dvw-ssh-panel-toolbar small{color:var(--dvw-text-3);font-size:var(--dvw-ssh-font-caption);font-weight:400}
+.dvw-ssh-tree{flex:1;min-height:0;overflow:auto;padding:3px 0 8px}
+.dvw-ssh-tree-row{height:26px;display:flex;align-items:center;gap:4px;padding-right:6px;cursor:pointer;white-space:nowrap}
+.dvw-ssh-tree-row:hover{background:var(--dvw-hover)}
+.dvw-ssh-tree-name{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.dvw-ssh-empty{padding:18px 10px;color:var(--dvw-text-3);font-size:var(--dvw-ssh-font-small);text-align:center}
+.dvw-ssh-spinner{width:11px;height:11px;margin-left:auto;flex:none;border:1px solid color-mix(in srgb,var(--dvw-accent) 26%,transparent);border-top-color:var(--dvw-accent);border-radius:50%;animation:dvw-spin .8s linear infinite}
+.dvw-ssh-search{flex:none;display:flex;flex-direction:column;gap:5px;padding:7px 7px 6px;border-bottom:1px solid var(--dvw-border-soft)}
+.dvw-ssh-search .dvw-search-box{height:30px}
+.dvw-ssh-search-status{min-height:16px;color:var(--dvw-text-3);font-size:var(--dvw-ssh-font-small);line-height:16px;white-space:pre-wrap;overflow-wrap:anywhere}
+.dvw-ssh-search-status:empty{display:none}
+.dvw-ssh-results{flex:1;min-height:0;overflow:auto;padding:2px 0 8px}
+.dvw-ssh-results details{border-bottom:1px solid var(--dvw-border-soft)}
+.dvw-ssh-results summary{height:28px;display:flex;align-items:center;gap:5px;padding:0 7px;color:var(--dvw-text);font-size:var(--dvw-ssh-font);cursor:pointer;white-space:nowrap}
+.dvw-ssh-results summary:hover{background:var(--dvw-hover)}
+.dvw-ssh-results summary span{min-width:0;overflow:hidden;color:var(--dvw-text-3);font-size:var(--dvw-ssh-font-caption);text-overflow:ellipsis}
+.dvw-ssh-results summary b{margin-left:auto;color:var(--dvw-text-3);font-size:var(--dvw-ssh-font-caption);font-weight:500}
+.dvw-ssh-result{width:100%;min-height:25px;display:grid;grid-template-columns:29px minmax(0,1fr);gap:4px;padding:2px 7px 2px 15px;border:0;background:transparent;color:var(--dvw-text-2);font:var(--dvw-ssh-font-small)/1.45 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;text-align:left;cursor:pointer;white-space:nowrap}
+.dvw-ssh-result:hover{background:var(--dvw-hover);color:var(--dvw-text)}
+.dvw-ssh-result span{overflow:hidden;color:var(--dvw-text-3);text-align:right;text-overflow:ellipsis}
+.dvw-ssh-result:not(span){overflow:hidden;text-overflow:ellipsis}
+.dvw-ssh-git-error{margin:7px;padding:6px 7px;border-radius:5px;background:color-mix(in srgb,var(--dvw-error) 9%,transparent);color:var(--dvw-error);font-size:var(--dvw-ssh-font-small);overflow-wrap:anywhere}
+.dvw-ssh-commit{flex:none;display:flex;flex-direction:column;gap:5px;padding:7px}
+.dvw-ssh-commit .dvw-textarea{min-height:50px;resize:vertical;padding:5px 6px;background:var(--dvw-surface-2);font-family:inherit;font-size:var(--dvw-ssh-font);line-height:1.35}
+.dvw-ssh-commit>div{display:flex;align-items:center;gap:4px}
+.dvw-ssh-commit .dvw-ssh-primary{height:30px;margin-left:auto;padding:0 9px}
+.dvw-ssh-git-group{flex:none;padding-bottom:5px}
+.dvw-ssh-git-group>strong{height:26px;display:flex;align-items:center;gap:4px;padding:0 5px 0 9px;color:var(--dvw-text-2);font-size:var(--dvw-ssh-font);font-weight:600}
+.dvw-ssh-git-group>strong .dvw-icon{width:20px;min-width:20px;height:20px}
+.dvw-ssh-git-group>strong>span{margin-left:auto;min-width:20px;height:18px;display:grid;place-items:center;border-radius:9px;background:var(--dvw-active);font-size:var(--dvw-ssh-font-caption);font-weight:500}
+.dvw-ssh-git-row{height:26px;display:flex;align-items:center;gap:5px;padding:0 5px 0 16px;cursor:pointer}
+.dvw-ssh-git-row:hover{background:var(--dvw-hover)}
+.dvw-ssh-git-row>span{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:var(--dvw-ssh-font)}
+.dvw-ssh-git-row .dvw-file-icon{width:16px;height:16px}
+.dvw-ssh-git-row .dvw-icon{width:20px;min-width:20px;height:20px;opacity:0}
+.dvw-ssh-git-row:hover .dvw-icon,.dvw-ssh-git-row:focus-within .dvw-icon{opacity:1}
+.dvw-ssh-secondary{height:30px;margin:5px 7px 8px;border:1px solid var(--dvw-border);border-radius:5px;background:var(--dvw-surface-2);color:var(--dvw-text);font:inherit;font-size:var(--dvw-ssh-font);cursor:pointer}
+.dvw-ssh-secondary:hover{background:var(--dvw-hover)}
+@keyframes dvw-spin{to{transform:rotate(360deg)}}
+
+/* VS Code-style remote explorer target list and quick input */
+.dvw-ssh-targets{flex:0 0 auto;min-height:56px;max-height:calc(100% - 180px);display:flex;flex-direction:column;border-bottom:1px solid var(--dvw-border-soft)}
+.dvw-ssh-targets[data-collapsed=true]{flex-basis:30px!important;height:30px;min-height:30px;max-height:30px}
+.dvw-ssh-targets-resizer{position:relative;z-index:6;flex:0 0 6px;margin-block:-3px;cursor:ns-resize;touch-action:none}
+.dvw-ssh-targets-resizer::after{content:"";position:absolute;inset:2px 0 auto;height:1px;background:var(--dvw-border);pointer-events:none}
+.dvw-ssh-targets-resizer:is(:hover,:focus-visible,[data-dragging=true])::after{height:2px;background:var(--dvw-accent)}
+.dvw-ssh-section-head{flex:none;font-size:13px}
+.dvw-ssh-section-toggle>span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dvw-ssh-target-row>.dvw-icon{width:20px;min-width:20px;height:20px}
+.dvw-ssh-target-list{flex:1;min-height:0;overflow:auto;padding:0 0 4px}
+.dvw-ssh-target-row{min-width:0;display:grid;grid-template-columns:minmax(0,1fr) repeat(3,20px);align-items:center;padding-right:4px}
+.dvw-ssh-target-row:hover{background:var(--dvw-hover)}
+.dvw-ssh-target-main{grid-column:1;min-width:0;height:30px;display:flex;align-items:center;gap:7px;padding:0 4px 0 11px;border:0;background:transparent;color:var(--dvw-text-2);font:inherit;text-align:left;cursor:pointer}
+.dvw-ssh-target-main:hover:not(:disabled){color:var(--dvw-text)}
+.dvw-ssh-target-main:disabled{opacity:.62;cursor:default}
+.dvw-ssh-target-main[data-connected=true]{color:var(--dvw-text)}
+.dvw-ssh-target-main>.codicon{flex:none;width:16px;color:var(--dvw-accent);font-size:14px}
+.dvw-ssh-target-main[data-connected=true]>.codicon{color:var(--dvw-success)}
+.dvw-ssh-target-main>span{min-width:0;flex:1}
+.dvw-ssh-target-main strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dvw-ssh-target-main strong{color:inherit;font-size:var(--dvw-ssh-font);font-weight:600}
+.dvw-ssh-target-main em{flex:none;padding:1px 5px;border-radius:9px;background:color-mix(in srgb,var(--dvw-success) 13%,transparent);color:var(--dvw-success);font-size:var(--dvw-ssh-font-caption);font-style:normal;line-height:16px}
+.dvw-ssh-target-row>.dvw-icon{opacity:0}
+.dvw-ssh-target-row:hover>.dvw-icon,.dvw-ssh-target-row:focus-within>.dvw-icon{opacity:1}
+.dvw-ssh-empty-target{width:calc(100% - 12px);height:32px;margin:1px 6px 4px;display:flex;align-items:center;gap:7px;padding:0 7px;border:0;border-radius:4px;background:transparent;color:var(--dvw-text-2);font:inherit;font-size:var(--dvw-ssh-font-small);text-align:left;cursor:pointer}
+.dvw-ssh-empty-target:hover{background:var(--dvw-hover);color:var(--dvw-text)}
+.dvw-ssh-quickpick-backdrop{position:fixed;inset:0;z-index:150;display:flex;align-items:flex-start;justify-content:center;padding:calc(var(--dvw-titlebar-height) + 76px) 20px 20px;background:rgba(0,0,0,.18);backdrop-filter:blur(1px)}
+.dvw-ssh-quickpick{width:min(620px,calc(100vw - 40px));max-height:min(680px,calc(100vh - 120px));display:flex;flex-direction:column;border:1px solid var(--dvw-border);border-radius:8px;background:var(--dvw-surface-1);color:var(--dvw-text);box-shadow:0 14px 40px rgba(0,0,0,.3);overflow:hidden}
+.dvw-ssh-quickpick-head{flex:none;height:34px;display:flex;align-items:center;padding:0 7px 0 12px;border-bottom:1px solid var(--dvw-border-soft);background:var(--dvw-base)}
+.dvw-ssh-quickpick-head strong{min-width:0;flex:1;overflow:hidden;font-size:13px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.dvw-ssh-quickpick-body{min-height:0;overflow:auto;padding:10px 12px 13px}
+.dvw-ssh-quickpick-input{display:flex;flex-direction:column;gap:5px;color:var(--dvw-text-2);font-size:var(--dvw-ssh-font-small)}
+.dvw-ssh-quickpick-input input{width:100%;height:34px;padding:0 9px;border:1px solid var(--dvw-accent);border-radius:4px;background:var(--dvw-surface-2);color:var(--dvw-text);font:inherit;font-size:var(--dvw-ssh-font);outline:0}
+.dvw-ssh-quickpick-body>small{display:block;margin-top:6px;color:var(--dvw-text-3);font-size:var(--dvw-ssh-font-caption)}
+.dvw-ssh-quickpick-options{margin-top:11px;padding-top:9px;border-top:1px solid var(--dvw-border-soft)}
+.dvw-ssh-quickpick-options summary{list-style:none;display:flex;align-items:center;gap:4px;color:var(--dvw-text-2);font-size:var(--dvw-ssh-font-small);cursor:pointer;user-select:none}
+.dvw-ssh-quickpick-options summary::-webkit-details-marker{display:none}
+.dvw-ssh-quickpick-options summary::before{content:"›";color:var(--dvw-text-3);font-size:15px;line-height:1;transition:transform 100ms ease}
+.dvw-ssh-quickpick-options[open] summary::before{transform:rotate(90deg)}
+.dvw-ssh-quickpick-options[open]{display:grid;gap:8px}
+.dvw-ssh-quickpick-options label{display:flex;flex-direction:column;gap:4px;color:var(--dvw-text-2);font-size:var(--dvw-ssh-font-small)}
+.dvw-ssh-quickpick-options .dvw-input{height:31px;font-size:var(--dvw-ssh-font)}
+.dvw-ssh-quickpick-actions{flex:none;min-height:45px;display:flex;align-items:center;justify-content:flex-end;gap:7px;padding:7px 10px;border-top:1px solid var(--dvw-border-soft);background:var(--dvw-base)}
+.dvw-ssh-quickpick-actions>button:not(.dvw-ssh-primary){height:30px;padding:0 12px;border:1px solid var(--dvw-border);border-radius:4px;background:var(--dvw-surface-2);color:var(--dvw-text);font:inherit;font-size:var(--dvw-ssh-font);cursor:pointer}
+.dvw-ssh-quickpick-actions>button:not(.dvw-ssh-primary):hover:not(:disabled){background:var(--dvw-hover)}
+.dvw-ssh-quickpick-actions>.dvw-ssh-primary{width:auto;min-width:84px;height:30px;padding:0 12px}
+.dvw-ssh-quickpick-actions button:disabled{opacity:.48;cursor:default}
+.dvw-ssh-workspace-picker{width:min(560px,calc(100vw - 40px))}
+.dvw-ssh-workspace-location{height:34px;display:flex;align-items:center;gap:6px;padding:0 5px 0 7px;border:1px solid var(--dvw-border);border-radius:5px;background:var(--dvw-surface-2)}
+.dvw-ssh-workspace-location>.codicon{flex:none;color:var(--dvw-accent);font-size:14px}
+.dvw-ssh-workspace-location code{min-width:0;flex:1;overflow:hidden;color:var(--dvw-text);font:var(--dvw-ssh-font)/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;text-overflow:ellipsis;white-space:nowrap}
+.dvw-ssh-workspace-note{margin:7px 2px 9px;color:var(--dvw-text-3);font-size:var(--dvw-ssh-font-small);line-height:1.45}
+.dvw-ssh-workspace-folders{max-height:min(390px,50vh);overflow:auto;border:1px solid var(--dvw-border-soft);border-radius:6px;background:var(--dvw-surface-2)}
+.dvw-ssh-workspace-folders>button{width:100%;height:31px;padding:0 8px;border:0;border-bottom:1px solid var(--dvw-border-soft);background:transparent;color:var(--dvw-text-2);display:flex;align-items:center;gap:7px;font:inherit;font-size:var(--dvw-ssh-font);text-align:left;cursor:pointer}
+.dvw-ssh-workspace-folders>button:last-child{border-bottom:0}
+.dvw-ssh-workspace-folders>button:hover,.dvw-ssh-workspace-folders>button:focus-visible{background:var(--dvw-hover);color:var(--dvw-text);outline:0}
+.dvw-ssh-workspace-folders>button>.codicon:first-child{flex:none;color:var(--dvw-accent);font-size:14px}
+.dvw-ssh-workspace-folders>button>span{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dvw-ssh-workspace-folders>button>.codicon:last-child{flex:none;color:var(--dvw-text-3);font-size:12px}
+
+/* SSH terminal */
+.dvw-ssh-terminal{--dvw-ssh-font:12px;--dvw-ssh-font-small:11px;--dvw-ssh-font-caption:10px;height:100%;min-height:0;display:flex;flex-direction:column;background:var(--dvw-surface-1);color:var(--dvw-text);font-size:var(--dvw-ssh-font)}
+.dvw-ssh-terminal-bar{flex:none;height:32px;display:flex;align-items:center;gap:10px;padding:0 8px 0 11px;border-bottom:1px solid var(--dvw-border-soft);background:var(--dvw-base);font-size:var(--dvw-ssh-font)}
+.dvw-ssh-terminal-bar>span{display:flex;align-items:center;gap:5px;min-width:0}
+.dvw-ssh-terminal-bar>span:first-child{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600}
+.dvw-ssh-terminal-bar>span:nth-child(2){flex:none;color:var(--dvw-text-3);font-size:var(--dvw-ssh-font-small)}
+.dvw-ssh-terminal-host{position:relative;flex:1;min-width:0;min-height:0;padding:7px 8px;overflow:hidden;background:var(--dvw-base)}
+.dvw-ssh-terminal-host[hidden]{display:none}
+.dvw-ssh-terminal-host .xterm{height:100%;position:relative;user-select:none;cursor:text}
+.dvw-ssh-terminal-host .xterm.focus,.dvw-ssh-terminal-host .xterm:focus{outline:none}
+.dvw-ssh-terminal-host .xterm-helpers{position:absolute;top:0;z-index:5}
+.dvw-ssh-terminal-host .xterm-helper-textarea{position:absolute;padding:0;border:0;margin:0;opacity:0;left:-9999em;top:0;width:0;height:0;z-index:-5;white-space:nowrap;overflow:hidden;resize:none}
+.dvw-ssh-terminal-host .xterm-viewport{position:absolute;inset:0;overflow-y:scroll;background-color:transparent;scrollbar-width:none}
+.dvw-ssh-terminal-host .xterm-viewport::-webkit-scrollbar{display:none}
+.dvw-ssh-terminal-host .xterm-screen{position:relative}
+.dvw-ssh-terminal-host .composition-view{display:none;position:absolute;white-space:nowrap;z-index:1;background:var(--dvw-base);color:var(--dvw-text)}
+.dvw-ssh-terminal-host .composition-view.active{display:block}
+.dvw-ssh-terminal-host .xterm-char-measure-element{display:inline-block;visibility:hidden;position:absolute;left:-9999em;line-height:normal}
+.dvw-ssh-terminal-host .xterm-cursor-pointer,.dvw-ssh-terminal-host .xterm .xterm-cursor-pointer{cursor:pointer}
+.dvw-ssh-terminal-host .xterm-accessibility,.dvw-ssh-terminal-host .xterm-message{position:absolute;inset:0;z-index:10;color:transparent;pointer-events:none}
+.dvw-ssh-terminal-host .xterm-accessibility-tree{position:absolute;left:0;top:0;width:100%;user-select:text;white-space:pre}
+.dvw-ssh-terminal-host .xterm-accessibility-tree>div{position:absolute;transform-origin:top left}
+.dvw-ssh-terminal-host canvas{position:absolute;left:0;top:0}
+.dvw-ssh-terminal-empty{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;color:var(--dvw-text-3);text-align:center}
+.dvw-ssh-terminal-empty>.codicon{font-size:28px;color:var(--dvw-text-2)}
+.dvw-ssh-terminal-empty strong{color:var(--dvw-text-2);font-size:14px}
+.dvw-ssh-terminal-empty span{font-size:var(--dvw-ssh-font)}
+@media(prefers-reduced-motion:reduce){.dvw-ssh-spinner{animation:none}}
+.codicon-arrow-left:before{content:"\ea9b"}.codicon-arrow-right:before{content:"\ea9c"}.codicon-comment-discussion:before{content:"\eac7"}.codicon-copy:before{content:"\ebcc"}.codicon-chevron-up:before{content:"\eab7"}.codicon-link-external:before{content:"\eb14"}.codicon-history:before{content:"\ea82"}.codicon-tools:before{content:"\eb6d"}.codicon-play:before{content:"\eb2c"}.codicon-debug-stop:before{content:"\ead7"}.codicon-warning:before{content:"\ea6c"}.codicon-error:before{content:"\ea87"}.codicon-info:before{content:"\ea74"}.codicon-fold:before{content:"\eaf5"}.codicon-unfold:before{content:"\eb73"}.codicon-lock:before{content:"\ea75"}.codicon-remote:before{content:"\eb3a"}.codicon-remote-explorer:before{content:"\eb39"}.codicon-server:before{content:"\eb50"}.codicon-plug:before{content:"\eb2d"}.codicon-debug-disconnect:before{content:"\ead0"}.codicon-account:before{content:"\eb99"}
+.dvw-side-head{height:37px;font-size:13px;font-weight:600;letter-spacing:.2px}
+.dvw-side-head>strong{font-weight:inherit}
+.dvw-graph>.dvw-group-head{padding-left:4px}
+.dvw-graph>.dvw-group-head>.dvw-group-toggle{padding-left:0;gap:3px}
 `
 
 export function installStyles(): () => void {

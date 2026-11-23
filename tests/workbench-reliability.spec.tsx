@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react'
+import { act, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Workbench } from '../src/client/Workbench.tsx'
@@ -101,7 +101,15 @@ const defaultModelCatalog: FakeModelCatalog = {
   unavailable: [],
   defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' },
 }
-async function setup(binary = false, saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' }, changes: typeof reviewChanges = [], gitChanges: GitChange[] = [], modelCatalog: FakeModelCatalog = defaultModelCatalog, files: FileEntry[] = []) {
+async function setup(
+  binary = false,
+  saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' },
+  changes: typeof reviewChanges = [],
+  gitChanges: GitChange[] = [],
+  modelCatalog: FakeModelCatalog = defaultModelCatalog,
+  files: FileEntry[] = [],
+  readFailure?: (path: string) => { code: string; message: string; status?: number } | undefined,
+) {
   disk = 'disk'; revision = 'r1'; completeSave = undefined; state.editor = undefined
   projectSource = 'export const a = 1'; projectReads = 0; reviewChanges = changes
   localStorage.setItem('dvw:/tmp/audit', JSON.stringify(saved))
@@ -119,7 +127,17 @@ async function setup(binary = false, saved: Record<string, unknown> = { paths: [
     else if (method === 'git.action') value = body.action === 'log' ? [] : { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
     else if (method === 'commit.models') value = modelCatalog
     else if (method === 'git.commitMessage') value = { message: 'feat(git): generate the message directly' }
-    else if (method === 'fs.read') value = doc()
+    else if (method === 'fs.read') {
+      const path = typeof body.path === 'string' ? body.path : 'a.txt'
+      const failure = readFailure?.(path)
+      if (failure !== undefined) {
+        return Response.json({
+          ok: false,
+          error: { code: failure.code, message: failure.message },
+        }, { status: failure.status ?? 409 })
+      }
+      value = doc()
+    }
     else if (method === 'project.sources') { projectReads++; value = { files: [{ path: 'a.ts', content: projectSource }], truncated: false } }
     else if (method === 'review.feed') value = { cursor: 9, changes: reviewChanges, busy: false }
     else if (method === 'review.inspect') value = {
@@ -159,6 +177,45 @@ it('opens a DSH generated-file link at its requested line in the workbench edito
   })
   expect(state.editor).toMatchObject({ value: 'disk', line: 2, focusOnReveal: true })
   expect(document.querySelector<HTMLElement>('.dvw-tab[data-active="true"]')?.textContent).toContain('a.txt')
+})
+
+it('closes stale remote tabs instead of surfacing a disconnected SSH error', async () => {
+  const stale = 'ssh://dead/root/stale.txt'
+  const live = 'ssh://live/root/live.txt'
+  await setup(
+    false,
+    { paths: [stale, live], active: stale },
+    [],
+    [],
+    defaultModelCatalog,
+    [],
+    path => path === stale
+      ? { code: 'ssh-disconnected', message: 'SSH 连接已断开，请重新连接' }
+      : undefined,
+  )
+
+  await vi.waitFor(() => {
+    expect(document.querySelector(`[data-tab-path="${stale}"]`)).toBeNull()
+  })
+  expect(document.querySelector(`[data-tab-path="${live}"]`)).not.toBeNull()
+  expect(document.querySelector('.dvw-error')).toBeNull()
+  expect(document.body.textContent).not.toContain('SSH 连接已断开')
+})
+
+it('renders SSH images through the remote file preview route', async () => {
+  const image = 'ssh://live/images/orchard.jpg'
+  await setup(false, { paths: [image], active: image })
+
+  const preview = await vi.waitFor(() => {
+    const value = document.querySelector<HTMLImageElement>('.dvw-image-preview img')
+    expect(value).not.toBeNull()
+    return value!
+  })
+  expect(preview.src).toContain('/dsh-vscode/ssh/file?')
+  expect(preview.src).toContain('connectionId=live')
+  expect(preview.src).toContain(`path=${encodeURIComponent('images/orchard.jpg')}`)
+  expect(state.editor).toBeUndefined()
+  expect(document.body.textContent).not.toContain('该格式文件暂时无法预览')
 })
 
 it('follows a newly discovered AI change after the one and a half second idle delay', async () => {
@@ -526,6 +583,38 @@ it('switches between Terminal and Problems from the bottom panel header', async 
   expect(document.querySelector('.dvw-bottom-body')?.textContent).toBe('终端内容')
   await act(async () => close!.click())
   expect(service.getSnapshot().bottomPanel).toBeUndefined()
+})
+
+it('keeps the SSH terminal mounted and reachable while debugging', async () => {
+  const service = await setup()
+  let mounts = 0
+  let unmounts = 0
+  function SshTerminal() {
+    useEffect(() => {
+      mounts += 1
+      return () => { unmounts += 1 }
+    }, [])
+    return <div data-test-ssh>SSH 会话内容</div>
+  }
+  await act(async () => {
+    service.registerBottomPanel({ id: 'ssh-terminal', title: 'SSH 终端', component: SshTerminal })
+    service.registerBottomPanel({ id: 'debug', title: '调试', component: () => <div data-test-debug>调试内容</div> })
+    service.toggleBottomPanel('ssh-terminal')
+  })
+  const sshTab = () => Array.from(document.querySelectorAll<HTMLElement>('.dvw-bottom-head .dvw-bottom-title')).find(tab => tab.textContent === 'SSH 终端')
+  const debugTab = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.dvw-bottom-head button')).find(button => button.textContent === '调试')
+  expect(sshTab()?.textContent).toBe('SSH 终端')
+  expect(mounts).toBe(1)
+  await act(async () => debugTab()!.click())
+  expect(service.getSnapshot().bottomPanel).toBe('debug')
+  expect(sshTab()?.textContent).toBe('SSH 终端')
+  expect(document.querySelector('[data-test-ssh]')?.closest('[hidden]')).not.toBeNull()
+  expect(document.querySelector('[data-test-debug]')).not.toBeNull()
+  expect(unmounts).toBe(0)
+  await act(async () => sshTab()!.click())
+  expect(service.getSnapshot().bottomPanel).toBe('ssh-terminal')
+  expect(document.querySelector('[data-test-ssh]')?.closest('[hidden]')).toBeNull()
+  expect(mounts).toBe(1)
 })
 
 it('puts branch controls in the status bar and commit metadata in the hover card', async () => {

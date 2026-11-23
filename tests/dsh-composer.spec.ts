@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { dshReference, findDshComposer, insertIntoDshComposer, isAddToDshShortcut, referenceSeparator } from '../src/client/dshComposer.ts'
+import { dshReference, dshReferenceInsert, findDshComposer, insertIntoDshComposer, isAddToDshShortcut, referenceSeparator } from '../src/client/dshComposer.ts'
 
 afterEach(() => { document.body.replaceChildren(); vi.unstubAllGlobals() })
 
@@ -11,6 +11,34 @@ describe('DSH chat references', () => {
     expect(dshReference('tsconfig.json', { selection: { text: '{\n  "jsx": "react-jsx"\n}\n', startLine: 1, endLine: 3 } })).toBe('`tsconfig.json:1-3`\n```json\n{\n  "jsx": "react-jsx"\n}\n```\n')
     expect(dshReference('a.ts', { selection: { text: 'x', startLine: 7, endLine: 7 } })).toBe('`a.ts:7`\n```ts\nx\n```\n')
     expect(dshReference('README.md', { selection: { text: '```sh\nls\n```', startLine: 2, endLine: 4 } })).toContain('````md\n```sh\nls\n```\n````')
+  })
+
+  it('builds native file and folder chips for the DSH composer', () => {
+    expect(dshReferenceInsert('src/App.tsx')).toEqual({
+      appearance: 'file',
+      clipboardText: '@src/App.tsx',
+      fallback: '`src/App.tsx`',
+      label: 'App.tsx',
+      ref: '@src/App.tsx',
+      source: 'reference',
+    })
+    expect(dshReferenceInsert('src/client', { directory: true })).toMatchObject({
+      appearance: 'folder',
+      clipboardText: '@src/client/',
+      label: 'client/',
+      ref: '@src/client/',
+    })
+    expect(dshReferenceInsert('src/App.tsx', { selection: { text: 'x', startLine: 2, endLine: 4 } })).toMatchObject({
+      clipboardText: '@src/App.tsx:2-4',
+      label: 'App.tsx:2-4',
+      ref: '@src/App.tsx:2-4',
+    })
+    expect(dshReferenceInsert('src/App.tsx', { lines: { startLine: 7, endLine: 9 } })).toMatchObject({
+      clipboardText: '@src/App.tsx:7-9',
+      fallback: '`src/App.tsx:7-9`',
+      label: 'App.tsx:7-9',
+      ref: '@src/App.tsx:7-9',
+    })
   })
 
   it('separates references from an existing draft', () => {
@@ -52,6 +80,119 @@ describe('DSH composer insertion', () => {
     expect(pasted).toEqual([' `src/a.ts` '])
     input.setAttribute('contenteditable', 'false')
     expect(await insertIntoDshComposer('`b`')).toBe(false)
+  })
+
+  it('inserts a native Lexical reference chip while preserving the draft', async () => {
+    document.body.innerHTML = '<div data-composer-card><div contenteditable="true" data-composer-input></div></div>'
+    const input = document.querySelector<HTMLElement>('[data-composer-input]')!
+    const state = {
+      root: {
+        children: [{
+          children: [{ detail: 0, format: 0, mode: 'normal', style: '', text: 'explain', type: 'text', version: 1 }],
+          direction: null,
+          format: '',
+          indent: 0,
+          type: 'paragraph',
+          version: 1,
+        }],
+        direction: null,
+        format: '',
+        indent: 0,
+        type: 'root',
+        version: 1,
+      },
+    }
+    const setEditorState = vi.fn()
+    ;(input as HTMLElement & {
+      __lexicalEditor: {
+        getEditorState(): { toJSON(): typeof state }
+        parseEditorState(value: string): unknown
+        setEditorState(value: unknown): void
+        getRootElement(): HTMLElement | null
+        focus(callback?: () => void): void
+      }
+    }).__lexicalEditor = {
+      focus: callback => callback?.(),
+      getEditorState: () => ({ toJSON: () => state }),
+      getRootElement: () => input,
+      parseEditorState: value => JSON.parse(value),
+      setEditorState,
+    }
+
+    expect(await insertIntoDshComposer(dshReferenceInsert('src/a.ts'))).toBe(true)
+    expect(setEditorState).toHaveBeenCalledOnce()
+    const parsed = setEditorState.mock.calls[0]?.[0] as typeof state
+    const children = parsed.root.children[0]!.children
+    expect(children).toContainEqual({
+      appearance: 'file',
+      clipboardText: '@src/a.ts',
+      invalid: false,
+      label: 'a.ts',
+      ref: '@src/a.ts',
+      source: 'reference',
+      type: 'reference-chip',
+      version: 1,
+    })
+    expect(children.slice(0, 2)).toEqual([
+      { detail: 0, format: 0, mode: 'normal', style: '', text: 'explain', type: 'text', version: 1 },
+      { detail: 0, format: 0, mode: 'normal', style: '', text: ' ', type: 'text', version: 1 },
+    ])
+  })
+
+  it('drops hidden whitespace before the first reference chip', async () => {
+    document.body.innerHTML = '<div data-composer-card><div contenteditable="true" data-composer-input>   </div></div>'
+    const input = document.querySelector<HTMLElement>('[data-composer-input]')!
+    const state = {
+      root: {
+        children: [
+          {
+            children: [{ detail: 0, format: 0, mode: 'normal', style: '', text: '   ', type: 'text', version: 1 }],
+            direction: null,
+            format: '',
+            indent: 0,
+            type: 'paragraph',
+            version: 1,
+          },
+          {
+            children: [],
+            direction: null,
+            format: '',
+            indent: 0,
+            type: 'paragraph',
+            version: 1,
+          },
+        ],
+        direction: null,
+        format: '',
+        indent: 0,
+        type: 'root',
+        version: 1,
+      },
+    }
+    const setEditorState = vi.fn()
+    ;(input as HTMLElement & {
+      __lexicalEditor: {
+        getEditorState(): { toJSON(): typeof state }
+        parseEditorState(value: string): unknown
+        setEditorState(value: unknown): void
+        getRootElement(): HTMLElement | null
+        focus(callback?: () => void): void
+      }
+    }).__lexicalEditor = {
+      focus: callback => callback?.(),
+      getEditorState: () => ({ toJSON: () => state }),
+      getRootElement: () => input,
+      parseEditorState: value => JSON.parse(value),
+      setEditorState,
+    }
+
+    expect(await insertIntoDshComposer(dshReferenceInsert('src/a.ts'))).toBe(true)
+    const parsed = setEditorState.mock.calls[0]?.[0] as typeof state
+    expect(parsed.root.children).toHaveLength(1)
+    expect(parsed.root.children[0]!.children).toEqual([
+      expect.objectContaining({ type: 'reference-chip', label: 'a.ts' }),
+      { detail: 0, format: 0, mode: 'normal', style: '', text: ' ', type: 'text', version: 1 },
+    ])
   })
 
   it('appends through an input event and refuses a busy composer', async () => {

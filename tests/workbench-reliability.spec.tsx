@@ -172,10 +172,10 @@ it('opens a DSH generated-file link at its requested line in the workbench edito
   await setup()
   await act(async () => {
     window.dispatchEvent(new CustomEvent('dvw-open-generated-file', {
-      detail: { sessionId: 's', path: 'a.txt', line: 2 },
+      detail: { sessionId: 's', path: 'a.txt', line: 2, endLine: 3 },
     }))
   })
-  expect(state.editor).toMatchObject({ value: 'disk', line: 2, focusOnReveal: true })
+  expect(state.editor).toMatchObject({ value: 'disk', line: 2, endLine: 3, focusOnReveal: true })
   expect(document.querySelector<HTMLElement>('.dvw-tab[data-active="true"]')?.textContent).toContain('a.txt')
 })
 
@@ -265,39 +265,76 @@ it('postpones AI follow while the user is typing or scrolling', async () => {
   expect(state.editor).toMatchObject({ line: 1, focusOnReveal: false })
 })
 
-it('uses the file review bar to accept or reject every block in the active file', async () => {
+it('opens the DSH conversation with a file reference when asking from a change block', async () => {
   localStorage.setItem('dvw:ai-review-mode', 'all')
   localStorage.setItem('dvw:ai-review-follow', 'off')
+  localStorage.setItem('dvw:dsh-chat-visible', 'closed')
   await setup(false, { paths: ['a.txt'], active: 'a.txt' }, [
     { id: '8:0', seq: 8, path: 'a.txt', before: 'old', after: 'disk', created: false },
     { id: '8:1', seq: 8, path: 'a.txt', before: 'before', after: 'tail', created: false },
   ])
-  await vi.waitFor(() => expect(document.querySelector('.dvw-review-filebar')).not.toBeNull())
-  const bar = document.querySelector('.dvw-review-filebar')!
-  expect(bar.textContent).toContain('AI 改动 · 2 处')
-  const buttons = [...bar.querySelectorAll<HTMLButtonElement>('button')]
-  expect(buttons.map(button => button.textContent)).toEqual(['接受', '拒绝'])
-  expect(buttons[0]!.title).toContain('Ctrl+Enter')
-  expect(buttons[1]!.title).toContain('Ctrl+Backspace')
-  await act(async () => buttons[0]!.click())
+  await vi.waitFor(() => expect(state.editor?.review?.changes).toHaveLength(2))
   expect(document.querySelector('.dvw-review-filebar')).toBeNull()
+  const review = state.editor!.review!
+  expect(review.onAsk).toBeTypeOf('function')
+  const composer = document.createElement('textarea')
+  const card = document.createElement('div')
+  card.dataset.composerCard = ''
+  card.append(composer)
+  const panel = document.createElement('div')
+  panel.dataset.dvwConversationPanel = ''
+  panel.append(card)
+  document.body.append(panel)
+  await act(async () => review.onAsk!(review.changes[0]!))
+  await vi.waitFor(() => expect(composer.value).toBe('`a.txt:1` '))
+  expect(document.querySelector('.dvw-chat')).not.toBeNull()
+  expect(document.querySelector('.dvw-file-ai-menu')).toBeNull()
+  await act(async () => review.onKeep('8:0'))
+})
+
+it('asks about a Git diff by inserting its reference into the visible DSH composer', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  localStorage.setItem('dvw:dsh-chat-visible', 'closed')
+  await setup(false, { paths: [], view: 'git' }, [], [
+    { path: 'a.txt', index: '.', worktree: 'M', staged: false, untracked: false },
+  ])
+  const row = await vi.waitFor(() => {
+    const value = document.querySelector<HTMLElement>('.dvw-git .dvw-change')
+    expect(value).not.toBeNull()
+    return value!
+  })
+  await act(async () => row.click())
+  const composer = document.createElement('textarea')
+  const card = document.createElement('div')
+  card.dataset.composerCard = ''
+  card.append(composer)
+  const panel = document.createElement('div')
+  panel.dataset.dvwConversationPanel = ''
+  panel.append(card)
+  document.body.append(panel)
+  await act(async () => state.diff!.reviewActions!.onAsk({ startLine: 3, endLine: 5 }))
+  await vi.waitFor(() => expect(composer.value).toBe('`a.txt:3-5` '))
+  expect(document.querySelector('.dvw-chat')).not.toBeNull()
+  expect(document.querySelector('.dvw-file-ai-menu')).toBeNull()
 })
 
 it('applies and persists the Git comparison style through Workbench settings', async () => {
   localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
   await setup(false, { paths: [], view: 'git' }, [], [{ path: 'a.txt', index: '.', worktree: 'M', staged: false, untracked: false }])
   await act(async () => document.querySelector<HTMLElement>('.dvw-change')!.click())
-  expect(state.diff).toMatchObject({ mode: 'inline', style: 'classic' })
+  expect(state.diff).toMatchObject({ mode: 'split', style: 'ribbon' })
   const settings = document.createElement('div')
   document.body.append(settings)
   await act(async () => settingsHost.set(settings))
   const selector = settings.querySelector<HTMLButtonElement>('button[aria-label^="Git 对比样式："]')!
-  expect(selector.textContent).toContain('VS Code（默认）')
+  expect(selector.textContent).toContain('IDEA / PyCharm（默认）')
   await act(async () => selector.click())
-  const jetBrainsStyle = Array.from(settings.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]')).find(button=>button.textContent?.trim()==='IDEA / PyCharm')!
-  await act(async () => jetBrainsStyle.click())
-  expect(state.diff).toMatchObject({ mode: 'split', style: 'ribbon' })
-  expect(localStorage.getItem('dvw:git-diff-style')).toBe('ribbon')
+  const options = Array.from(settings.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]'))
+  expect(options.map(option => option.textContent?.trim())).toEqual(['IDEA / PyCharm（默认）', 'VS Code'])
+  const vsCodeStyle = options.find(button => button.textContent?.trim() === 'VS Code')!
+  await act(async () => vsCodeStyle.click())
+  expect(state.diff).toMatchObject({ mode: 'inline', style: 'classic' })
+  expect(localStorage.getItem('dvw:git-diff-style')).toBe('classic')
 })
 
 it('compares a staged file against HEAD from the staged changes group', async () => {
@@ -375,6 +412,36 @@ it('shows a new commit before the commit action finishes', async () => {
   })))
   await vi.waitFor(() => expect(document.querySelector('.dvw-graph-subject')?.textContent).toBe('feat(git): show immediately'))
   expect(input.value).toBe('')
+})
+
+it('closes a stale Git diff after the file leaves the change list', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: [], view: 'git' }, [], [{
+    path: 'a.txt', index: '.', worktree: 'M', staged: false, untracked: false,
+  }])
+
+  const change = await vi.waitFor(() => {
+    const row = document.querySelector<HTMLElement>('.dvw-git .dvw-change')
+    expect(row?.textContent).toContain('a.txt')
+    return row!
+  })
+  await act(async () => change.click())
+  expect(document.querySelector('[data-tab-path="diff:a.txt"]')).not.toBeNull()
+
+  const originalFetch = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    const body = JSON.parse(String(options?.body)) as Record<string, unknown>
+    if (body.action === 'status') {
+      return Response.json({
+        ok: true,
+        value: { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: [] },
+      })
+    }
+    return originalFetch(url, options)
+  })
+
+  await act(async () => window.dispatchEvent(new Event('dvw-files-changed')))
+  await vi.waitFor(() => expect(document.querySelector('[data-tab-path="diff:a.txt"]')).toBeNull())
 })
 
 it('shares the diff layout across new and existing files and restores it after reopening', async () => {
@@ -636,6 +703,8 @@ it('puts branch controls in the status bar and commit metadata in the hover card
     return row!
   })
   expect(document.querySelector('.dvw-status [title="切换分支"]')).not.toBeNull()
+  expect(document.querySelector('.dvw-scm-head .dvw-group-toggle')?.textContent).toBe('提交')
+  expect(document.querySelector('.dvw-git .dvw-group-head .dvw-group-toggle')?.textContent).toBe('更改')
   expect(document.querySelector('.dvw-graph .dvw-count')).toBeNull()
   expect(document.querySelector('.dvw-git .dvw-group-head')?.lastElementChild?.textContent).toBe('1')
   await act(async () => { row.focus(); await new Promise(resolve => setTimeout(resolve,350)) })

@@ -333,8 +333,8 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
 
     <section className="dvw-set-group">
       <h3 className="dvw-set-group-title">Git</h3>
-      <Row title="Git 对比样式" description="VS Code 默认内联。IDEA / PyCharm 默认并排，使用改动连线和联动滚动。">
-        <Selector label="Git 对比样式" value={props.gitDiffStyle} options={[['classic', 'VS Code（默认）'], ['ribbon', 'IDEA / PyCharm']]} onChange={props.setGitDiffStyle}/>
+      <Row title="Git 对比样式" description="IDEA / PyCharm 使用并排差异、改动连线和联动滚动。VS Code 使用经典内联差异。">
+        <Selector label="Git 对比样式" value={props.gitDiffStyle} options={[['ribbon', 'IDEA / PyCharm（默认）'], ['classic', 'VS Code']]} onChange={props.setGitDiffStyle}/>
       </Row>
       <Row title="逐行提交信息" description="点击文件编辑器或 Git 对比中的代码行，在代码行尾显示提交作者、时间和摘要。">
         <Switch label="逐行提交信息" checked={props.gitLineBlame} onChange={props.setGitLineBlame}/>

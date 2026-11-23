@@ -1,6 +1,6 @@
 import type { languages } from 'monaco-editor'
 import { editorLanguageForPath } from './lspLanguage.ts'
-import { colorInlineGitDiff, connectGitSplit } from './GitSplitDiff.ts'
+import { colorInlineGitDiff, connectGitSplit, type GitDiffLineRange } from './GitSplitDiff.ts'
 import type { GitDiff } from '../types.ts'
 import { clickedCodeLine, clickedDeletedLine, createGitLineBlame, lastBlameLine } from './GitLineBlame.ts'
 import { Icon } from './Icon.tsx'
@@ -215,11 +215,16 @@ export type GitDiffStyle = 'classic' | 'ribbon'
 
 type DiffEditor = import('monaco-editor').editor.IStandaloneDiffEditor
 
+export interface GitDiffReviewActions {
+  onAsk(range: GitDiffLineRange): void
+}
+
 export function MonacoDiffEditor(props: {
   uri: string
   sourcePath?: string
   versions?: readonly [string, string]
   viewControls?: ReactNode
+  reviewActions?: GitDiffReviewActions
   original: string
   modified: string
   mode: 'inline' | 'split'
@@ -234,6 +239,7 @@ export function MonacoDiffEditor(props: {
   const leftPane = useRef<HTMLDivElement>(null)
   const rightPane = useRef<HTMLDivElement>(null)
   const ribbon = useRef<SVGSVGElement>(null)
+  const hunkControls = useRef<HTMLDivElement>(null)
   const overview = useRef<HTMLInputElement>(null)
   const marks = useRef<HTMLDivElement>(null)
   const preview = useRef<HTMLDivElement>(null)
@@ -270,7 +276,7 @@ export function MonacoDiffEditor(props: {
         renderSideBySide: current.mode === 'split', useInlineViewWhenSpaceIsLimited:false,
         ...diffStyleOptions(current.style === 'ribbon' && !parallax, current.fold && !parallax),
       })
-      if (parallax && board.current && leftPane.current && rightPane.current && ribbon.current && overview.current && marks.current && preview.current) {
+      if (parallax && board.current && leftPane.current && rightPane.current && ribbon.current && hunkControls.current && overview.current && marks.current && preview.current) {
         const hosts = [leftPane.current,rightPane.current] as const
         const panes = hosts.map((host,index)=>monaco.editor.create(host,{
           ...WORKBENCH_EDITOR_CHROME,
@@ -284,8 +290,19 @@ export function MonacoDiffEditor(props: {
         })) as [import('monaco-editor').editor.IStandaloneCodeEditor,import('monaco-editor').editor.IStandaloneCodeEditor]
         splitPanes.current = panes
         panes.forEach(localizeMonacoActions)
-        linked.current = connectGitSplit(board.current,panes,ribbon.current,overview.current,marks.current,preview.current)
+        linked.current = connectGitSplit(
+          board.current,
+          panes,
+          ribbon.current,
+          overview.current,
+          marks.current,
+          preview.current,
+          hunkControls.current,
+          () => latest.current.reviewActions,
+        )
       }
+      const originalPane = instance.getOriginalEditor()
+      const modifiedPane = instance.getModifiedEditor()
       const inlineColors = ribbonStyle && !parallax
         ? colorInlineGitDiff(instance.getModifiedEditor(), monaco.editor.OverviewRulerLane.Full)
         : undefined
@@ -306,8 +323,6 @@ export function MonacoDiffEditor(props: {
       ]
       const attribution = createGitLineBlame()
       lineBlame.current = attribution
-      const originalPane = instance.getOriginalEditor()
-      const modifiedPane = instance.getModifiedEditor()
       const visiblePanes = parallax ? splitPanes.current : [originalPane, modifiedPane]
       visiblePanes.forEach((pane,index)=>{
         const lookup = (side: number) => {
@@ -385,6 +400,9 @@ export function MonacoDiffEditor(props: {
     editor.current?.updateOptions({ fontSize })
     splitPanes.current.forEach(pane=>pane.updateOptions({fontSize}))
   }, [props.fontSize])
+  useEffect(() => {
+    linked.current?.refreshActions()
+  }, [props.reviewActions !== undefined, props.mode])
   useEffect(() => { window.monaco?.editor.setTheme(monacoThemeFor(props.theme)) }, [props.theme])
 
   return <div className="dvw-git-diff-view" data-jetbrains={ribbonStyle || undefined} data-theme={props.theme}>
@@ -413,6 +431,7 @@ export function MonacoDiffEditor(props: {
         <div className="dvw-diff-parallax-pane" ref={leftPane}/>
         <svg className="dvw-diff-ribbons" aria-hidden="true" ref={ribbon}/>
         <div className="dvw-diff-parallax-pane" ref={rightPane}/>
+        <div className="dvw-diff-hunk-controls" ref={hunkControls}/>
         <div className="dvw-diff-overview">
           <div className="dvw-diff-overview-marks" ref={marks} aria-hidden="true"/>
           <input aria-label="差异滚动进度" type="range" min="0" defaultValue="0" step="any" ref={overview}/>
@@ -447,7 +466,7 @@ function modelUri(monaco: Monaco, uri: string): import('monaco-editor').Uri {
 const viewStates = new Map<string, import('monaco-editor').editor.ICodeEditorViewState>()
 /** The search hit last revealed per document, so only a new hit overrides the saved position. */
 const revealedHits = new Map<string, string>()
-const hitKey = (props: { line?: number; column?: number; highlight?: string }) => props.line === undefined ? '' : `${props.line}:${props.column ?? 1}:${props.highlight ?? ''}`
+const hitKey = (props: { line?: number; endLine?: number; column?: number; highlight?: string }) => props.line === undefined ? '' : `${props.line}:${props.endLine ?? props.line}:${props.column ?? 1}:${props.highlight ?? ''}`
 
 /** Dispose the models of closed tabs so Monaco stops tracking their text. */
 export function retainEditorModels(uris: string[]): void {
@@ -570,13 +589,15 @@ export function reviewLinePresentation(
 export interface MonacoReviewProps {
   changes: EditorReviewChange[]
   activeId?: string
+  busy?: boolean
   rejectDisabled?: boolean
   onFocus(id: string): void
   onKeep(id: string): void
   onReject(id: string): void
+  onAsk?(change: EditorReviewChange): void
 }
 
-export function MonacoEditor(props: { uri: string; value: string; readOnly?: boolean; theme: MonacoColorScheme; line?: number; column?: number; fontSize?: number; minimap?: boolean; highlight?: string; focusOnReveal?: boolean; review?: MonacoReviewProps; blame?: { sessionId: string; path: string; revision: string; dirty: boolean }; breakpoints?: number[]; pausedLine?: number; onToggleBreakpoint?(line: number): void; aiCompletion?: InlineCompletionSettings; onCompletionError?(message: string): void; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
+export function MonacoEditor(props: { uri: string; value: string; readOnly?: boolean; theme: MonacoColorScheme; line?: number; endLine?: number; column?: number; fontSize?: number; minimap?: boolean; highlight?: string; focusOnReveal?: boolean; review?: MonacoReviewProps; blame?: { sessionId: string; path: string; revision: string; dirty: boolean }; breakpoints?: number[]; pausedLine?: number; onToggleBreakpoint?(line: number): void; aiCompletion?: InlineCompletionSettings; onCompletionError?(message: string): void; onChange(value: string): void; onSave(): void; onAddToDsh?(selection?: EditorSelection): void }) {
   const inlineCompletion = useRef<{ dispose(): void }>()
   const root = useRef<HTMLDivElement>(null)
   const editor = useRef<import('monaco-editor').editor.IStandaloneCodeEditor>()
@@ -592,19 +613,22 @@ export function MonacoEditor(props: { uri: string; value: string; readOnly?: boo
   const [error, setError] = useState<string>()
   /** Select the requested search hit in the current model. */
   const reveal = (monaco: Monaco, instance: import('monaco-editor').editor.IStandaloneCodeEditor) => {
-    const { line: target, column, highlight } = latest.current
+    const { line: target, endLine, column, highlight } = latest.current
     const model = instance.getModel()
     decorations.current?.clear(); decorations.current = undefined
     if (model === null) return
     revealedHits.set(model.uri.toString(), hitKey(latest.current))
     if (target === undefined) return
-    const line = Math.max(1, Math.min(Math.round(target), model.getLineCount()))
-    const text = model.getLineContent(line)
+    const firstLine = Math.max(1, Math.min(Math.round(target), model.getLineCount()))
+    const lastLine = endLine === undefined
+      ? firstLine
+      : Math.max(firstLine, Math.min(Math.round(endLine), model.getLineCount()))
+    const text = model.getLineContent(firstLine)
     const needle = highlight ?? ''
     const { startColumn, endColumn } = searchHighlightRange(text, needle, column ?? 1)
-    const range = new monaco.Range(line, startColumn, line, endColumn)
+    const range = new monaco.Range(firstLine, startColumn, lastLine, lastLine === firstLine ? endColumn : model.getLineMaxColumn(lastLine))
     instance.setSelection(range)
-    instance.revealLineInCenter(line)
+    instance.revealLineInCenter(firstLine)
     if (latest.current.focusOnReveal !== false) instance.focus()
     decorations.current = needle === '' ? undefined : instance.createDecorationsCollection([{ range, options: { inlineClassName: 'dvw-search-hit' } }])
   }
@@ -655,17 +679,25 @@ export function MonacoEditor(props: { uri: string; value: string; readOnly?: boo
       const keep = document.createElement('button')
       keep.type = 'button'
       keep.dataset.action = 'accept'
-      keep.textContent = '^Y'
-      keep.title = '接受这一处 AI 修改 (Alt+Y)'
+      keep.textContent = '允许'
+      keep.disabled = review?.busy === true
+      keep.title = '允许这一处 AI 修改 (Alt+Y)'
       keep.addEventListener('click', () => latest.current.review?.onKeep(change.id))
       const reject = document.createElement('button')
       reject.type = 'button'
       reject.dataset.action = 'reject'
-      reject.textContent = '^N'
-      reject.disabled = change.conflict !== undefined || review?.rejectDisabled === true
+      reject.textContent = '拒绝'
+      reject.disabled = review?.busy === true || change.conflict !== undefined || review?.rejectDisabled === true
       reject.title = reject.disabled ? (change.conflict ?? '当前无法撤销') : '拒绝这一处 AI 修改 (Alt+N)'
       reject.addEventListener('click', () => latest.current.review?.onReject(change.id))
-      actions.append(label, keep, reject)
+      const ask = document.createElement('button')
+      ask.type = 'button'
+      ask.dataset.action = 'ask'
+      ask.disabled = review?.busy === true
+      ask.title = '让 DSH 修复或优化此文件'
+      ask.innerHTML = '<span class="codicon codicon-sparkle"></span>询问 AI'
+      ask.addEventListener('click', () => latest.current.review?.onAsk?.(change))
+      actions.append(label, keep, reject, ask)
       return actions
     }
     const addActionWidget = (change: EditorReviewChange, afterLineNumber: number) => {
@@ -907,6 +939,6 @@ export function MonacoEditor(props: { uri: string; value: string; readOnly?: boo
     const instance = editor.current; const monaco = window.monaco; const model = instance?.getModel()
     if (instance === undefined || monaco === undefined || model === null || model === undefined) return
     if (revealedHits.get(model.uri.toString()) !== hitKey(props)) reveal(monaco, instance)
-  }, [props.uri, props.line, props.column, props.highlight])
+  }, [props.uri, props.line, props.endLine, props.column, props.highlight])
   return error === undefined ? <div ref={root} style={{ position: 'absolute', inset: 0 }} /> : <div className="dvw-error">{error}</div>
 }

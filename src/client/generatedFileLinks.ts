@@ -12,6 +12,7 @@ export interface ParsedGeneratedFileAddress {
 /** Event payload consumed by the workbench to open a generated file in its editor. */
 export interface GeneratedFileOpenDetail extends ParsedGeneratedFileAddress {
   readonly line?: number
+  readonly endLine?: number
 }
 
 export const GENERATED_FILE_OPEN_EVENT = 'dvw-open-generated-file'
@@ -49,6 +50,20 @@ function requestedLine(options: SidebarRightOpenResourceOptions | undefined): nu
   const params = options?.params as { readonly line?: unknown } | undefined
   const line = params?.line
   return typeof line === 'number' && Number.isSafeInteger(line) && line > 0 ? line : undefined
+}
+
+/** DSH encodes selected line ranges in the resource path as `file.ts:20-25`. */
+function generatedFileTarget(path: string, requested?: number): { path: string; line?: number; endLine?: number } {
+  const range = /^(.*):([1-9]\d*)(?:-([1-9]\d*))?$/.exec(path)
+  if (range === null) return { path, ...(requested === undefined ? {} : { line: requested }) }
+  const start = Number(range[2])
+  const suppliedEnd = range[3] === undefined ? start : Number(range[3])
+  const end = Math.max(start, suppliedEnd)
+  return {
+    path: range[1]!,
+    line: requested ?? start,
+    ...(end > start ? { endLine: end } : {}),
+  }
 }
 
 interface InstalledInterceptor {
@@ -95,9 +110,9 @@ export function installGeneratedFileOpenInterceptor(
       ? parseGeneratedFileAddress(address)
       : undefined
     if (parsed !== undefined && sidebar.mounted.getSnapshot() === parsed.sessionId) {
-      const line = requestedLine(options)
+      const target = generatedFileTarget(parsed.path, requestedLine(options))
       window.dispatchEvent(new CustomEvent<GeneratedFileOpenDetail>(GENERATED_FILE_OPEN_EVENT, {
-        detail: line === undefined ? parsed : { ...parsed, line },
+        detail: { sessionId: parsed.sessionId, ...target },
       }))
       return
     }

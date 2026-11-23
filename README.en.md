@@ -39,19 +39,14 @@ Installing from the DSH Plugins page or a marketplace enables the plugin automat
 
 | Area | What you can do |
 | --- | --- |
-| Explorer | Create, rename, move, and delete files or folders. Upload by dropping files into the tree, drag files out to download, and select multiple entries to delete or copy relative or absolute paths. Open a file in a system app or reveal its location. |
-| Editing and split panes | Use Monaco with syntax highlighting and Chinese menus. Drag a tab to an editor edge to split the view, or into another pane to move or swap files. The workbench restores tabs and layout per workspace, flags external file changes, and uses revision checks and atomic saves. |
+| Files and editing | Create, rename, move, delete, and drag files, with multi-selection, split panes, Monaco editing, and per-workspace layout restoration. Saves use revision checks and atomic writes. |
 | Workspace search and replace | Search with case, whole-word, regular-expression, and include or exclude path options. Preview and replace one match, one file, or all results. |
 | Git workflow | Stage, commit, amend, push, and sync from Source Control. Compare staged files with `HEAD`, browse the automatically refreshed commit graph, resolve conflicts, use Git Tools, choose VS Code or IDEA / PyCharm diff styles, and view line attribution. |
-| AI change review | Review all changes or the latest AI changes, then keep or reject individual blocks, a file, or all pending files. Auto-follow can reveal new changes. |
-| Language intelligence | Install a language server for TypeScript / JavaScript, Vue, or Python, or find manual setup instructions for C / C++, Go, Rust, and Java under DSH Settings → Workbench → Language Intelligence. Servers start when you open a matching file. Check their status or restart them in settings. Completion, auto imports, definition and reference previews, quick fixes, cross-file rename previews, formatting, and Problems depend on server capabilities. |
-| Debugging | Open the Debug panel from the activity bar to set breakpoints, step through code, and inspect frames and variables. Node.js uses the built-in inspector. Python needs debugpy and C/C++ needs GDB with DAP support. |
-| AI code completion | Choose Off, Manual, or Automatic under DSH Settings → Workbench → AI Code Completion. Off is the default. Follow the DSH chat model or pick a separate model. The model receives code around the cursor in the active file, including unsaved edits. |
-| Documents and web pages | Switch between Markdown source and preview, and navigate with the outline. Preview images, PDFs, and Excel workbooks in tabs. LibreOffice converts Word and PowerPoint files to PDF for preview. Without LibreOffice, `.docx` can still preview in the browser. Web links and local HTML open in the built-in or system browser selected in settings. Use the Explorer context menu to edit HTML source. |
-| Terminal and DSH chat | Use the official Harness terminal with multiple sessions, renaming, and splits. Add a selected file or folder from Explorer, or selected code from the editor, to DSH chat. Open generated file links for the current session in the workbench. |
-| Workspaces and layout | Use the activity bar to open or create workspaces and create or switch sessions. Drag activity buttons to reorder them within each group. Home and Settings stay at the bottom. Resize the sidebars and terminal. Choose light, dark, pure white, or eye-care colors, or follow the DSH theme. Editor font size is configurable. |
-
-Select Floating window under DSH Settings → Workbench → Window. Drag the title bar to move the window, drag an edge to resize it, or use the title bar button to enter fullscreen. The workbench remembers the position and size, which can be reset in settings.
+| Language intelligence and debugging | Install and restart language servers for completion, definitions, references, fixes, formatting, and Problems. The Debug panel supports breakpoints, stepping, call stacks, and variables. |
+| AI assistance | Use Off, Manual, or Automatic code completion. Review all or the latest AI changes by block, file, or batch, with optional auto-follow. |
+| Documents and web pages | Preview Markdown, images, PDFs, Excel, Word, and PowerPoint in tabs, and open web links or local HTML in the built-in or system browser. |
+| Terminal and DSH chat | Use the official Harness terminal with multiple sessions, renaming, and splits. Add files or editor selections to DSH chat and open generated file links from the current session. |
+| Workspaces, layout, and window | Manage workspaces and sessions, arrange the activity bar, sidebars, chat, terminal, themes, and font size. Floating windows support dragging, resizing, fullscreen, and remembered geometry. |
 
 ## Demo
 

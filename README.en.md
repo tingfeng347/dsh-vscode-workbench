@@ -41,6 +41,9 @@ Installing from the DSH Plugins page or a marketplace enables the plugin automat
 | --- | --- |
 | Explorer | Create, rename, move, and delete files or folders. Upload by dropping files into the tree, drag files out to download, and select multiple entries to delete or copy relative or absolute paths. Open a file in a system app or reveal its location. |
 | Editing and split panes | Use Monaco with syntax highlighting and Chinese menus. Drag a tab to an editor edge to split the view, or into another pane to move or swap files. The workbench restores tabs and layout per workspace, flags external file changes, and uses revision checks and atomic saves. |
+| Workspace search and replace | Search with case, whole-word, regular-expression, and include or exclude path options. Preview and replace one match, one file, or all results. |
+| Git workflow | Stage, commit, amend, push, and sync from Source Control. Compare staged files with `HEAD`, browse the automatically refreshed commit graph, resolve conflicts, use Git Tools, choose VS Code or IDEA / PyCharm diff styles, and view line attribution. |
+| AI change review | Review all changes or the latest AI changes, then keep or reject individual blocks, a file, or all pending files. Auto-follow can reveal new changes. |
 | Language intelligence | Install a language server for TypeScript / JavaScript, Vue, or Python, or find manual setup instructions for C / C++, Go, Rust, and Java under DSH Settings → Workbench → Language Intelligence. Servers start when you open a matching file. Check their status or restart them in settings. Completion, auto imports, definition and reference previews, quick fixes, cross-file rename previews, formatting, and Problems depend on server capabilities. |
 | Debugging | Open the Debug panel from the activity bar to set breakpoints, step through code, and inspect frames and variables. Node.js uses the built-in inspector. Python needs debugpy and C/C++ needs GDB with DAP support. |
 | AI code completion | Choose Off, Manual, or Automatic under DSH Settings → Workbench → AI Code Completion. Off is the default. Follow the DSH chat model or pick a separate model. The model receives code around the cursor in the active file, including unsaved edits. |
@@ -49,27 +52,6 @@ Installing from the DSH Plugins page or a marketplace enables the plugin automat
 | Workspaces and layout | Use the activity bar to open or create workspaces and create or switch sessions. Drag activity buttons to reorder them within each group. Home and Settings stay at the bottom. Resize the sidebars and terminal. Choose light, dark, pure white, or eye-care colors, or follow the DSH theme. Editor font size is configurable. |
 
 Select Floating window under DSH Settings → Workbench → Window. Drag the title bar to move the window, drag an edge to resize it, or use the title bar button to enter fullscreen. The workbench remembers the position and size, which can be reset in settings.
-
-### Workspace search and replace
-
-Open Search in the sidebar and click the arrow beside the search box, or press `Ctrl+Shift+H` (`⌘⇧H` also works on macOS). Results are grouped by file. Select a match to reveal it in the editor.
-
-- Use case-sensitive, whole-word, or regular-expression search. Open the search details menu to set include and exclude globs such as `src/**` and `**/*.test.ts`.
-- Enter replacement text to preview deletions and additions. Replacement supports regex capture groups such as `$1` and a Preserve Case option. Replace one match, all matches in a file, or every result. File-wide and workspace-wide replacements ask for confirmation.
-- An empty replacement field shows regular match highlighting. Clicking Replace with an empty field deletes the match. Save unsaved changes in target files first. If there are more than 2,000 matches, narrow the search before replacing in bulk.
-
-### Git workflow
-
-- **Source Control** supports staging, unstaging, discarding changes, committing, amending, and committing followed by push or sync. Click a staged file to compare `HEAD` with its staged content. Commits and amended commits refresh the commit graph before the operation finishes, so the new commit is visible when the action completes. AI can draft a commit message from the changes using the current DSH chat model or a model selected in settings. Choose the language and level of detail in settings, or stop generation and keep the draft.
-- **The commit graph** expands to show changed files. Open a diff or preview an image or document from history. Hover over a commit for author, time, change statistics, and a copyable hash. The card links to GitHub when a known remote-tracking branch contains the commit. Drag the divider between Changes and Graph to resize, or double-click to reset it.
-- Choose the **VS Code or IDEA / PyCharm diff style** under DSH Settings → Workbench → Git. Diff views support change navigation and folding of unchanged lines. The workbench remembers the inline or side-by-side selection. In the side-by-side ribbon view, the right pane follows the left in the same frame, and guides extend into both panes. Blue means modified, green added, and red deleted. Click a line in a file or diff to see its commit attribution.
-- Open Source Control → **Git Tools** to filter commit or file history, compare branches, tags, commits, or tracked working tree files, cherry-pick or revert commits, and manage stashes, local branches, and tags. Fetch, fast-forward pull, push, merge, and rebase from the sync view. In the conflict view, inspect all three versions, take a side, or edit and stage the merged result.
-
-### AI change review
-
-In DSH Settings → Workbench → AI Change Review, choose to review all changes or only the latest task. Review is off by default. Once enabled, review individual blocks in Monaco, review a file from the editor toolbar, or act on all pending files above the DSH chat input. Auto-follow can reveal new changes once you stop interacting.
-
-Accepting keeps changes already written by the AI. Rejecting attempts to restore the affected content and reports conflicts. Review covers edits made by DSH file tools. See [AI change review](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/ai-review.md) for details in Chinese.
 
 ## Demo
 

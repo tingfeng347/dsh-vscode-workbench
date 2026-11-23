@@ -26,7 +26,7 @@
 
 ## Installation
 
-The plugin requires DeepSeek Harness `>=0.2.1-rc.1` at install time. The default test baseline is `0.2.2-rc.5` (Cordis `4.1.0`). The main branch also adapts to Harness `0.2.3-alpha.2` route authentication and verifies the workbench entry, Explorer, Search, Source Control, terminal, debugger, and route authentication. These fixes are not yet included in the `0.3.0` npm package.
+The plugin requires DeepSeek Harness `>=0.2.1-rc.1` at install time. The default test baseline is `0.2.2-rc.5` (Cordis `4.1.0`). The main branch also adds compatibility with Harness `0.2.3-alpha.2` route authentication.
 
 ```bash
 npm i -g @deepseek-ai/dsh@0.2.2-rc.5

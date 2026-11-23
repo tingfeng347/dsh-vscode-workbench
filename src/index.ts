@@ -24,6 +24,7 @@ import type { GitStatus, SearchFileEdits, SearchRequest } from './types.ts'
 import { watchIgnore, workspaceWatchIgnores } from './watch-ignore.ts'
 import { isStaleManifest } from './workspace-watch.ts'
 import { createWorkspaceWatcher } from './workspace-watch-host.ts'
+import { connectSsh, disconnectSsh, getLiveSshConnection, liveSshConnections, listSshHosts, shellQuote, sshEnvironment, sshGit, sshListFiles, sshOpenFilePreview, sshReadDocument, sshReadPreviewFile, sshReplaceSearchResults, sshSaveDocument, sshSearchWorkspace, sshStatus, sshTargetArguments, switchSshWorkspace } from './ssh.ts'
 import { readBinaryBody, readBody, send, sendError, stringField, authorize, WorkbenchError } from './wire.ts'
 
 export { WorkbenchError } from './wire.ts'
@@ -66,6 +67,16 @@ function stringArrayField(body: Record<string, unknown>, key: string): string[] 
     throw new WorkbenchError('bad-request', `${key} must be a non-empty array of non-empty strings`)
   }
   return value as string[]
+}
+
+function remoteFileRef(path: string): { sessionIdConnection: string; remotePath: string } | undefined {
+  if (!path.startsWith('ssh://')) return undefined
+  let url: URL
+  try { url = new URL(path) } catch { throw new WorkbenchError('path-invalid', 'SSH 文件路径无效') }
+  const connectionId = url.hostname
+  const remotePath = url.pathname.slice(1).split('/').map(decodeURIComponent).join('/')
+  if (connectionId === '' || remotePath.includes('\0')) throw new WorkbenchError('path-invalid', 'SSH 文件路径无效')
+  return { sessionIdConnection: connectionId, remotePath }
 }
 
 function currentChatCommitModel(ctx: HostContext, sessionId: string | undefined): CommitModelSelection | undefined {
@@ -180,9 +191,24 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
         stringField(body, 'revision'),
       )
     case 'workspace': return { cwd, name: cwd.split(/[\\/]/).at(-1) || cwd }
-    case 'fs.list': return listFiles(cwd, stringField(body, 'path'))
-    case 'fs.read': return readDocument(cwd, stringField(body, 'path'))
-    case 'fs.save': return saveDocument(cwd, stringField(body, 'path'), stringField(body, 'content'), stringField(body, 'revision'))
+    case 'fs.list': {
+      const path = stringField(body, 'path')
+      const remote = remoteFileRef(path)
+      if (remote !== undefined) return sshListFiles(sessionId, remote.sessionIdConnection, remote.remotePath, signal)
+      return listFiles(cwd, path)
+    }
+    case 'fs.read': {
+      const path = stringField(body, 'path')
+      const remote = remoteFileRef(path)
+      if (remote !== undefined) return { ...await sshReadDocument(sessionId, remote.sessionIdConnection, remote.remotePath, signal), path }
+      return readDocument(cwd, path)
+    }
+    case 'fs.save': {
+      const path = stringField(body, 'path')
+      const remote = remoteFileRef(path)
+      if (remote !== undefined) return { ...await sshSaveDocument(sessionId, remote.sessionIdConnection, remote.remotePath, stringField(body, 'content'), stringField(body, 'revision'), signal), path }
+      return saveDocument(cwd, path, stringField(body, 'content'), stringField(body, 'revision'))
+    }
     case 'fs.create': return createEntry(cwd, stringField(body, 'path'), body.kind === 'directory' ? 'directory' : 'file').then(() => ({ ok: true }))
     case 'fs.rename': return renameEntry(cwd, stringField(body, 'path'), stringField(body, 'nextPath')).then(() => ({ ok: true }))
     case 'fs.delete': return deleteEntry(cwd, stringField(body, 'path')).then(() => ({ ok: true }))
@@ -228,6 +254,26 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     case 'search.replace':
       if (cwd !== stringField(body, 'cwd')) throw new WorkbenchError('workspace-changed', '工作区已切换，请重新搜索', 409)
       return replaceSearchResults(cwd, body.files as SearchFileEdits[])
+    case 'ssh.hosts': return listSshHosts()
+    case 'ssh.connections': return liveSshConnections(sessionId)
+    case 'ssh.connect': return connectSsh(sessionId, {
+      host: stringField(body, 'host'),
+      ...(typeof body.user === 'string' && body.user !== '' ? { user: body.user } : {}),
+      ...(typeof body.password === 'string' && body.password !== '' ? { password: body.password } : {}),
+      ...(typeof body.port === 'number' || typeof body.port === 'string' ? { port: Number(body.port) } : {}),
+      ...(typeof body.identityFile === 'string' && body.identityFile !== '' ? { identityFile: body.identityFile } : {}),
+      ...(typeof body.workspace === 'string' && body.workspace !== '' ? { workspace: body.workspace } : {}),
+      ...(typeof body.label === 'string' && body.label !== '' ? { label: body.label } : {}),
+    })
+    case 'ssh.status': return sshStatus(sessionId, stringField(body, 'connectionId'))
+    case 'ssh.disconnect': return disconnectSsh(sessionId, stringField(body, 'connectionId'))
+    case 'ssh.workspace': return switchSshWorkspace(sessionId, stringField(body, 'connectionId'), stringField(body, 'path'))
+    case 'ssh.list': return sshListFiles(sessionId, stringField(body, 'connectionId'), stringField(body, 'path'), signal)
+    case 'ssh.read': return sshReadDocument(sessionId, stringField(body, 'connectionId'), stringField(body, 'path'), signal)
+    case 'ssh.save': return sshSaveDocument(sessionId, stringField(body, 'connectionId'), stringField(body, 'path'), stringField(body, 'content'), stringField(body, 'revision'), signal)
+    case 'ssh.search': return sshSearchWorkspace(sessionId, stringField(body, 'connectionId'), body as unknown as SearchRequest, signal)
+    case 'ssh.search.replace': return sshReplaceSearchResults(sessionId, stringField(body, 'connectionId'), body.files as SearchFileEdits[], signal)
+    case 'ssh.git': return sshGit(sessionId, stringField(body, 'connectionId'), stringField(body, 'action'), typeof body.path === 'string' ? body.path : undefined, typeof body.value === 'string' ? body.value : undefined, signal)
     case 'git.status': return readGitStatus(cwd)
     case 'git.blameRange': return gitBlameRange(cwd, body.source, body.startLine, body.endLine, signal)
     case 'git.blameLine': return gitBlameLine(cwd, body.source, body.line, signal)
@@ -422,6 +468,59 @@ export function apply(ctx: HostContext): void {
   }), 'dsh-vscode-workbench: file upload')
 
   ctx.effect(() => ctx.webServer.register({
+    kind: 'exact', path: '/dsh-vscode/ssh/file', handler: async (req, res) => {
+      if (!authorize(req, res, ctx.connection)) return
+      const controller = new AbortController()
+      res.once('close', () => { if (!res.writableEnded) controller.abort() })
+      try {
+        const url = new URL(req.url ?? '/', 'http://dsh.local')
+        const sessionId = url.searchParams.get('sessionId')
+        const connectionId = url.searchParams.get('connectionId')
+        const path = url.searchParams.get('path')
+        if (sessionId === null || connectionId === null || path === null) {
+          throw new WorkbenchError('bad-request', 'sessionId, connectionId and path are required')
+        }
+        const file = await sshOpenFilePreview(sessionId, connectionId, path, controller.signal)
+        res.writeHead(200, {
+          'content-type': file.type,
+          'content-length': file.size,
+          'x-content-type-options': 'nosniff',
+          'cache-control': 'no-store',
+        })
+        res.once('close', () => file.child.kill())
+        file.child.stdout.on('error', error => res.destroy(error))
+        file.child.stderr.on('data', () => undefined)
+        file.child.once('error', error => res.destroy(error))
+        file.child.stdout.pipe(res)
+      } catch (error) { sendError(res, error) }
+    },
+    auth: 'required',
+  }), 'dsh-vscode-workbench: SSH file preview')
+
+  ctx.effect(() => ctx.webServer.register({
+    kind: 'exact', path: '/dsh-vscode/ssh/office', handler: async (req, res) => {
+      if (!authorize(req, res, ctx.connection)) return
+      const controller = new AbortController()
+      res.once('close', () => { if (!res.writableEnded) controller.abort() })
+      try {
+        const url = new URL(req.url ?? '/', 'http://dsh.local')
+        const sessionId = url.searchParams.get('sessionId')
+        const connectionId = url.searchParams.get('connectionId')
+        const path = url.searchParams.get('path')
+        if (sessionId === null || connectionId === null || path === null) {
+          throw new WorkbenchError('bad-request', 'sessionId, connectionId and path are required')
+        }
+        const source = await sshReadPreviewFile(sessionId, connectionId, path, controller.signal)
+        const pdf = await officePdfBuffer(source.data, source.name)
+        const info = await stat(pdf.path)
+        res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': info.size, 'x-content-type-options': 'nosniff', 'cache-control': 'no-store' })
+        createReadStream(pdf.path).on('error', error => res.destroy(error)).pipe(res)
+      } catch (error) { sendError(res, error) }
+    },
+    auth: 'required',
+  }), 'dsh-vscode-workbench: SSH Office preview')
+
+  ctx.effect(() => ctx.webServer.register({
     kind:'prefix',path:'/dsh-vscode/file',handler:async(req,res)=>{if(!authorize(req,res,ctx.connection))return;try{const url=new URL(req.url??'/','http://dsh.local');const sessionId=url.searchParams.get('sessionId');const path=url.searchParams.get('path');const commit=url.searchParams.get('commit');if(sessionId===null||path===null)throw new WorkbenchError('bad-request','sessionId and path are required');const cwd=cwdFor(ctx,sessionId);if(commit===null){const asset=await workspacePreviewFile(cwd,path);res.writeHead(200,{'content-type':asset.type,'x-content-type-options':'nosniff','cache-control':'no-store'});res.end(await readFile(asset.path))}else{const asset=await gitPreviewFile(cwd,commit,path);res.writeHead(200,{'content-type':asset.type,'x-content-type-options':'nosniff','cache-control':'no-store'});res.end(asset.data)}}catch(error){sendError(res,error)}},
     auth: 'required',
   }), 'dsh-vscode-workbench: file preview')
@@ -589,5 +688,58 @@ export function apply(ctx: HostContext): void {
     auth: 'required',
   }), 'dsh-vscode-workbench: debug bridge')
   ctx.effect(() => () => { debugWss.close() }, 'dsh-vscode-workbench: debug teardown')
+  const sshWss = new WebSocketServer({ noServer: true, maxPayload: 1024 * 1024 })
+  ctx.effect(() => ctx.webServer.registerUpgrade({
+    path: '/dsh-vscode/ws/ssh', handler(req, socket, head) {
+      if (ctx.connection.requestRejection?.(req) !== undefined) { socket.destroy(); return }
+      sshWss.handleUpgrade(req as IncomingMessage, socket as Duplex, head, ws => {
+        const search = new URL(req.url ?? '/', 'http://dsh.local').searchParams
+        const sessionId = search.get('sessionId')
+        const connectionId = search.get('connection')
+        if (sessionId === null || connectionId === null) { ws.close(1008, 'sessionId and connection required'); return }
+        let connection
+        try { connection = getLiveSshConnection(sessionId, connectionId) }
+        catch (error) {
+          ws.close(1008, error instanceof Error ? error.message : String(error))
+          return
+        }
+        const cols = Math.max(20, Math.min(500, Number(search.get('cols') ?? 80)))
+        const rows = Math.max(5, Math.min(200, Number(search.get('rows') ?? 24)))
+        const remote = `stty cols ${cols} rows ${rows} 2>/dev/null || true; cd -- ${shellQuote(connection.root)} && exec "\${SHELL:-/bin/sh}" -l`
+        const child = spawn('ssh', [...sshTargetArguments(connection), remote], {
+          cwd: homedir(),
+          shell: false,
+          windowsHide: true,
+          env: { ...process.env, TERM: 'xterm-256color', ...sshEnvironment(connection.target) },
+          stdio: ['pipe', 'pipe', 'pipe'],
+        })
+        const sendData = (data: Buffer) => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'data', data: data.toString('base64') }))
+        }
+        child.stdout.on('data', sendData)
+        child.stderr.on('data', sendData)
+        child.on('error', error => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'error', message: error.message }))
+        })
+        child.on('close', code => {
+          if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'exit', code: code ?? 1 }))
+          if (ws.readyState === WebSocket.OPEN) ws.close()
+        })
+        ws.on('message', data => {
+          let message: { type?: string; data?: string }
+          try { message = JSON.parse(String(data)) } catch { return }
+          if (message.type === 'input' && typeof message.data === 'string') child.stdin.write(message.data)
+          else if (message.type === 'close') child.kill()
+        })
+        ws.on('close', () => child.kill())
+        ws.on('error', () => child.kill())
+      })
+    },
+    auth: 'required',
+  }), 'dsh-vscode-workbench: SSH terminal bridge')
+  ctx.effect(() => () => {
+    for (const ws of sshWss.clients) ws.terminate()
+    sshWss.close()
+  }, 'dsh-vscode-workbench: SSH terminal teardown')
   ctx.effect(() => () => { wss.close() }, 'dsh-vscode-workbench: watcher teardown')
 }

@@ -40,3 +40,37 @@ export interface GitDiff {
   blame?: { original?: GitBlameSource; modified?: GitBlameSource }
   staging?: { mode: 'staged' | 'worktree'; revision: string; hunks: { label: string; line: number }[] }
 }
+
+/** One Host block from the local OpenSSH config. */
+export interface SshHost {
+  alias: string
+  hostName: string
+  user?: string
+  port?: number
+  identityFile?: string
+}
+
+/** A live remote workspace owned by one DSH Session. */
+export interface SshConnection {
+  id: string
+  label: string
+  host: string
+  hostName: string
+  user?: string
+  port?: number
+  identityFile?: string
+  root: string
+  connectedAt: string
+}
+
+/** Parameters for opening an SSH workspace through the local OpenSSH client. */
+export interface SshConnectRequest {
+  host: string
+  user?: string
+  /** One-time password for OpenSSH askpass. It is kept only in host memory. */
+  password?: string
+  port?: number
+  identityFile?: string
+  workspace?: string
+  label?: string
+}

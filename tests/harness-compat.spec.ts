@@ -64,7 +64,7 @@ describe('Harness 0.2 host integration', () => {
     } as unknown as HostContext
     apply(ctx)
     expect(routes.length).toBeGreaterThan(10)
-    expect(upgrades.map(route => route.path).sort()).toEqual(['/dsh-vscode/ws/debug', '/dsh-vscode/ws/files', '/dsh-vscode/ws/lsp'])
+    expect(upgrades.map(route => route.path).sort()).toEqual(['/dsh-vscode/ws/debug', '/dsh-vscode/ws/files', '/dsh-vscode/ws/lsp', '/dsh-vscode/ws/ssh'])
 
     const request = createServer((req, res) => {
       const path = new URL(req.url ?? '/', 'http://localhost').pathname

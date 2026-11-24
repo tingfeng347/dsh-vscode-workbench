@@ -3,6 +3,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { DshConversationPanel, DshReviewActions, findDshConversationRoot } from '../src/client/DshConversationPanel.tsx'
+import { SshChatTarget } from '../src/client/SshChatTarget.tsx'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
@@ -110,4 +111,32 @@ it('keeps overflowed project files reachable with visible scroll controls', asyn
   expect(list.scrollLeft).toBeGreaterThan(0)
   expect(document.querySelector('.dvw-review-composer-scroll[data-direction=previous]')).not.toBeNull()
   await act(async () => root.unmount())
+})
+
+it('attaches the SSH selector when DSH creates and replaces its composer status row', async () => {
+  document.body.innerHTML = '<div data-phase="active"><div data-conversation-scroll></div></div><div id="plugin"></div>'
+  const conversationRoot = document.querySelector<HTMLElement>('[data-phase]')!
+  const root = createRoot(document.getElementById('plugin')!)
+  try {
+    await act(async () => root.render(<SshChatTarget conversationRoot={conversationRoot} sessionId="session" visible status={{ available: true }} onSelect={vi.fn()} onOpenSsh={vi.fn()}/>))
+    expect(conversationRoot.querySelector('.dvw-ssh-chat-trigger')).toBeNull()
+    const previous = document.createElement('div')
+    previous.innerHTML = '<button aria-label="上下文已用 3%"></button>'
+    await act(async () => {
+      conversationRoot.append(previous)
+      await new Promise(resolve => requestAnimationFrame(resolve))
+    })
+    expect(previous.querySelector('.dvw-ssh-chat-trigger')?.textContent).toBe('选择 SSH')
+    const next = previous.cloneNode(false) as HTMLElement
+    next.innerHTML = '<button aria-label="上下文已用 4%"></button>'
+    await act(async () => {
+      previous.replaceWith(next)
+      await new Promise(resolve => requestAnimationFrame(resolve))
+    })
+    expect(next.querySelector('.dvw-ssh-chat-trigger')?.textContent).toBe('选择 SSH')
+    expect(conversationRoot.querySelectorAll('.dvw-ssh-chat-host')).toHaveLength(1)
+    expect(previous.hasAttribute('data-dvw-ssh-chat-status')).toBe(false)
+  } finally {
+    await act(async () => root.unmount())
+  }
 })

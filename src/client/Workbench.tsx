@@ -1444,7 +1444,7 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     if((floating&&snapshot.visible)||!ownsFullscreen.current||document.fullscreenElement!==document.body)return
     void document.exitFullscreen?.().catch(()=>{})
   },[floating,snapshot.visible])
-  // The conversation may still be attaching after the chat column opens, so retry for about a second.
+  const [conversationRoot, setConversationRoot] = useState<HTMLElement | null>(null)
   const [sshChat, setSshChat] = useState<{ session: string; status: SshChatStatus }>()
   const sshChatRevision = useRef(0)
   const sshChatStatus = sshChat?.session === sessionId ? sshChat?.status : undefined
@@ -2480,9 +2480,9 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     </>}
     <WorkbenchTitlebar name={workspace?.name}/>
     {dshTabId!==undefined&&<DshPanelPage panelId={dshTabId} active={showingDshPanel&&!floatSurfacePaused} floating={floating}/>}
-    <DshConversationPanel visible={chatShown&&!floatSurfacePaused} width={chatWidth} statusHeight={statusVisible?30:6} floating={floating}/>
+    <DshConversationPanel visible={chatShown&&!floatSurfacePaused} width={chatWidth} statusHeight={statusVisible?30:6} floating={floating} onRootChange={setConversationRoot}/>
     <DshConversationTheme visible={chatShown} colorScheme={colorScheme} followDsh={false}/>
-    {sessionId !== undefined && <SshChatTarget key={sessionId} sessionId={sessionId} visible={chatShown && !floatSurfacePaused} status={sshChatStatus} localName={workspace?.name}
+    {sessionId !== undefined && <SshChatTarget key={sessionId} conversationRoot={conversationRoot} sessionId={sessionId} visible={chatShown && !floatSurfacePaused} status={sshChatStatus} localName={workspace?.name}
       onSelect={selectSshChat} onOpenSsh={() => { setPrimarySideVisible(true); service.show('ssh') }}/>}
     <DshReviewActions visible={chatShown&&reviewEnabled} files={reviewFiles} count={reviewSnapshot.changes.length} disabled={reviewSnapshot.busy||reviewSnapshot.working} onOpen={path=>void openPath(path)} onAcceptAll={keepAllReview} onRejectAll={()=>void rejectAllReview()}/>
     {chatShown&&<aside className="dvw-chat"><PanelResizer className="dvw-chat-resizer" label="拖动调整 DSH 对话栏宽度" size={chatWidth} min={DSH_CHAT_MIN_WIDTH} max={DSH_CHAT_MAX_WIDTH} defaultSize={DSH_CHAT_DEFAULT_WIDTH} direction={-1} hideBelow={200} onHide={()=>setChatVisible(false)} onResize={setChatWidth}/>{!floating&&<header className="dvw-chat-head"><span><DshMark/> DSH</span><button className="dvw-icon" title="关闭 DSH 对话栏" onClick={()=>setChatVisible(false)}><Icon name="close"/></button></header>}<div className="dvw-chat-body"/></aside>}

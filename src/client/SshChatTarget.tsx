@@ -2,7 +2,6 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import type { SshConnection } from '../types.ts'
 import { api } from './api.ts'
-import { findDshConversationRoot } from './DshConversationPanel.tsx'
 import { Icon } from './Icon.tsx'
 
 export interface SshChatStatus {
@@ -12,7 +11,8 @@ export interface SshChatStatus {
 }
 
 /** Execution-target control beside the native DSH composer. */
-export function SshChatTarget({ sessionId, visible, status, localName, onSelect, onOpenSsh }: {
+export function SshChatTarget({ conversationRoot, sessionId, visible, status, localName, onSelect, onOpenSsh }: {
+  conversationRoot: HTMLElement | null
   sessionId: string
   visible: boolean
   status?: SshChatStatus
@@ -28,45 +28,52 @@ export function SshChatTarget({ sessionId, visible, status, localName, onSelect,
   const [error, setError] = useState<string>()
 
   useEffect(() => {
-    if (!visible || !status?.available) return
+    if (!visible || !status?.available || conversationRoot === null) return
     const node = document.createElement('div')
     node.className = 'dvw-ssh-chat-host'
-    let attachedAnchor: HTMLElement | undefined
+    let statusRow: HTMLElement | null = null
+    let frame = 0
     const attach = () => {
-      const root = findDshConversationRoot()
-      const bar = root?.querySelector<HTMLElement>('[data-slot="conversation.composer.bar"]')
-      const usage = root && Array.from(root.querySelectorAll<HTMLButtonElement>('button')).find(button =>
-        `${button.title} ${button.getAttribute('aria-label') ?? ''}`.includes('上下文已用'))
-      const anchor = usage?.parentElement ?? bar?.parentElement
-      if (!anchor || node.parentElement === anchor) return
-      attachedAnchor?.removeAttribute('data-dvw-ssh-chat-status')
-      attachedAnchor = usage?.parentElement ?? undefined
-      attachedAnchor?.setAttribute('data-dvw-ssh-chat-status', '')
-      if (usage) anchor.insertBefore(node, usage)
-      else anchor.insertBefore(node, bar?.nextSibling ?? null)
+      const usage = conversationRoot.querySelector<HTMLButtonElement>('button[aria-label*="上下文已用"], button[title*="上下文已用"]')
+      const bar = conversationRoot.querySelector<HTMLElement>('[data-slot="conversation.composer.bar"]')
+      const nextStatusRow = usage?.parentElement ?? null
+      const anchor = nextStatusRow ?? bar?.parentElement
+      if (!anchor || (node.parentElement === anchor && statusRow === nextStatusRow)) return
+      statusRow?.removeAttribute('data-dvw-ssh-chat-status')
+      statusRow = nextStatusRow
+      statusRow?.setAttribute('data-dvw-ssh-chat-status', '')
+      anchor.insertBefore(node, usage ?? bar?.nextSibling ?? null)
       setHost(node)
     }
+    const observer = new MutationObserver(records => {
+      if (frame !== 0 || !records.some(({ target }) => target instanceof Element
+        && !target.closest('[data-conversation-scroll], .dvw-ssh-chat-host'))) return
+      frame = requestAnimationFrame(() => {
+        frame = 0
+        attach()
+      })
+    })
+    observer.observe(conversationRoot, { childList: true, subtree: true })
     attach()
-    const timer = window.setTimeout(() => { attach(); setHost(node) }, 250)
     return () => {
-      window.clearTimeout(timer)
-      attachedAnchor?.removeAttribute('data-dvw-ssh-chat-status')
+      observer.disconnect()
+      cancelAnimationFrame(frame)
+      statusRow?.removeAttribute('data-dvw-ssh-chat-status')
       node.remove()
       setHost(undefined)
     }
-  }, [visible, status?.available])
+  }, [conversationRoot, visible, status?.available])
 
   useLayoutEffect(() => {
     if (choices === undefined) { setMenuPosition(undefined); return }
     const place = () => {
       const rect = trigger.current?.getBoundingClientRect()
       if (!rect) return
-      const root = findDshConversationRoot()?.getBoundingClientRect()
+      const root = conversationRoot?.getBoundingClientRect()
       const width = Math.max(240, Math.min(380, (root?.width ?? 440) - 24, innerWidth - 24))
       const position = { left: Math.max(12, Math.min(rect.left, innerWidth - width - 12)), bottom: innerHeight - rect.top + 6, width }
-      const conversation = findDshConversationRoot()
-      if (conversation) {
-        const styles = getComputedStyle(conversation)
+      if (conversationRoot) {
+        const styles = getComputedStyle(conversationRoot)
         const variables = [
           '--dsw-alias-bg-layer-1', '--dsw-alias-bg-layer-2', '--dsw-alias-bg-layer-3',
           '--dsw-alias-label-primary', '--dsw-alias-label-secondary', '--dsw-alias-label-tertiary',
@@ -81,7 +88,7 @@ export function SshChatTarget({ sessionId, visible, status, localName, onSelect,
     place()
     window.addEventListener('resize', place)
     return () => window.removeEventListener('resize', place)
-  }, [choices])
+  }, [choices, conversationRoot])
 
   useEffect(() => {
     if (choices === undefined) return

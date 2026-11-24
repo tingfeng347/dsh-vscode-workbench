@@ -28,7 +28,13 @@ export function findDshConversationRoot(documentRoot: Document = document): HTML
 }
 
 /** Keep the official conversation mounted while presenting it in the workbench's right column. */
-export function DshConversationPanel({ visible, width, statusHeight, floating = false }: { visible: boolean; width: number; statusHeight: number; floating?: boolean }) {
+export function DshConversationPanel({ visible, width, statusHeight, floating = false, onRootChange }: {
+  visible: boolean
+  width: number
+  statusHeight: number
+  floating?: boolean
+  onRootChange?(root: HTMLElement | null): void
+}) {
   useLayoutEffect(() => {
     if (!visible) return
     let attached: HTMLElement | null = null
@@ -50,6 +56,7 @@ export function DshConversationPanel({ visible, width, statusHeight, floating = 
           attached?.setAttribute('data-dvw-conversation-panel', '')
           attached?.style.setProperty('--dvw-chat-width', `${width}px`)
           attached?.style.setProperty('--dvw-status-height', `${statusHeight}px`)
+          onRootChange?.(next)
         }
         placement?.place(rect)
       },
@@ -59,8 +66,9 @@ export function DshConversationPanel({ visible, width, statusHeight, floating = 
       stop()
       release()
       document.body.removeAttribute('data-dvw-conversation-active')
+      onRootChange?.(null)
     }
-  }, [visible, width, statusHeight, floating])
+  }, [visible, width, statusHeight, floating, onRootChange])
   return null
 }
 

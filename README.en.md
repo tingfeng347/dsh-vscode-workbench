@@ -26,10 +26,10 @@
 
 ## Installation
 
-The plugin requires DeepSeek Harness `>=0.2.1-rc.1` at install time. The default test baseline is `0.2.2-rc.5` (Cordis `4.1.0`), with route-authentication support verified for Harness `0.2.3`.
+Install the npm `latest` version of DeepSeek Harness. The plugin requires Harness `>=0.2.1-rc.1`.
 
 ```bash
-npm i -g @deepseek-ai/dsh@0.2.2-rc.5
+npm i -g @deepseek-ai/dsh@latest
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 

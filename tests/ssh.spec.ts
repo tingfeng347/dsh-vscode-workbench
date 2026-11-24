@@ -87,7 +87,9 @@ core.gitProxy config option and the GIT_PROXY_COMMAND environment variable are N
     const args = sshRunArguments(['build-host'], script)
     expect(args).toHaveLength(2)
     expect(args[1]).toBe(`sh -c ${shellQuote(script)}`)
-    expect(execFileSync('/bin/sh', ['-c', args[1]!], { encoding: 'utf8' })).toBe('two words\n')
+    if (process.platform !== 'win32') {
+      expect(execFileSync('/bin/sh', ['-c', args[1]!], { encoding: 'utf8' })).toBe('two words\n')
+    }
   })
 
   it('compares staged content with HEAD and worktree content with the index', () => {

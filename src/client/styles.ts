@@ -268,18 +268,19 @@ body[data-dvw-workbench-active] [data-sidebar-toggle]{display:none!important}
 .dvw-commit-ai[aria-busy=true]{background:var(--dvw-hover);color:var(--dvw-text)}
 .dvw-scm-stop{display:grid;place-items:center;width:16px;height:16px;border:1px solid currentColor;border-radius:50%}
 .dvw-scm-stop::after{content:"";width:6px;height:6px;border-radius:1px;background:currentColor}
-.dvw-scm-dialog,.dvw-commit-hover{color:var(--dvw-text);background:var(--dvw-surface-2);border:1px solid var(--dvw-border);border-radius:5px;box-shadow:0 5px 20px #0004}
+.dvw-scm-dialog,.dvw-commit-hover{color:var(--dvw-text);background:var(--dvw-surface-2);border:1px solid color-mix(in srgb,var(--dvw-border) 82%,transparent);border-radius:12px;box-shadow:0 16px 40px #0005,0 2px 8px #0003}
 .dvw-scm-dialog{width:min(540px,90vw)}
 .dvw-scm-dialog form label{display:grid;gap:4px;margin:8px 0}
 .dvw-scm-dialog textarea{width:100%;min-height:160px}
 .dvw-scm-dialog pre{white-space:pre-wrap;max-height:60vh;overflow:auto}
-.dvw-commit-hover{position:fixed;inset:auto;margin:0;padding:10px 12px;z-index:50;box-sizing:border-box;width:max-content;max-width:min(430px,calc(100vw - 8px));max-height:85vh;overflow:auto;font:inherit;text-align:left;overflow-wrap:anywhere}
+.dvw-commit-hover{position:fixed;inset:auto;margin:0;padding:14px 16px;z-index:50;box-sizing:border-box;width:max-content;max-width:min(430px,calc(100vw - 8px));max-height:85vh;overflow:auto;font:inherit;text-align:left;overflow-wrap:anywhere}
 .dvw-commit-hover time{color:var(--dvw-text-2)}
 .dvw-commit-hover p{margin:7px 0;white-space:pre-wrap}
 .dvw-hover-refs,.dvw-hover-actions,.dvw-commit-stats{border-top:1px solid var(--dvw-border-soft);padding-top:6px;margin-top:6px}
 .dvw-hover-refs,.dvw-hover-actions{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
 .dvw-hover-refs .dvw-ref{max-width:100%;height:auto;white-space:normal;overflow-wrap:anywhere}
-.dvw-hover-actions button,.dvw-hover-actions a{color:var(--dvw-accent);border:0;background:transparent;cursor:pointer;font:inherit}
+.dvw-hover-actions button,.dvw-hover-actions a{display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:0 6px;border-radius:6px;color:var(--dvw-accent);border:0;background:transparent;cursor:pointer;font:inherit;text-decoration:none}
+.dvw-hover-actions button:hover,.dvw-hover-actions a:hover{background:var(--dvw-hover)}
 .dvw-commit-stats span:first-child{color:var(--dvw-success)}
 .dvw-commit-stats span:last-child{color:var(--dvw-error)}
 /* VS Code-style split commit button: primary action plus a narrow dropdown for commit variants. */

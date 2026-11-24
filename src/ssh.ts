@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
 import { homedir, tmpdir } from 'node:os'
-import { posix } from 'node:path'
+import { join, posix, win32 } from 'node:path'
 import { setTimeout as delay } from 'node:timers/promises'
 import type {
   FileDocument,
@@ -20,6 +20,7 @@ import type {
   SshConnection,
   SshHost,
 } from './types.ts'
+import { readSshPassword, sshPasswordAccount, storeSshPassword } from './ssh-password.ts'
 import { WorkbenchError } from './wire.ts'
 
 const TEXT_LIMIT = 5 * 1024 * 1024
@@ -194,7 +195,7 @@ function targetFromRequest(request: SshConnectRequest, configured?: SshHost): Ta
   const user = optionalText(request.user, 'SSH 用户名', 255) ?? configured?.user
   const password = optionalText(request.password, 'SSH 密码', 4096)
   const port = parsePort(request.port) ?? configured?.port
-  const identityFile = typeof request.identityFile === 'string' && request.identityFile !== ''
+  const identityFile = password !== undefined ? undefined : typeof request.identityFile === 'string' && request.identityFile !== ''
     ? expandLocalHome(request.identityFile)
     : configured?.identityFile === undefined ? undefined : expandLocalHome(configured.identityFile)
   const alias = configured?.alias === host ? host : undefined
@@ -225,14 +226,20 @@ function expandLocalHome(path: string): string {
 function sshArguments(target: Target, interactive = false): string[] {
   return [
     ...(interactive ? ['-tt'] : []),
-    ...(target.password === undefined ? ['-o', 'BatchMode=yes'] : []),
+    ...(target.password === undefined ? ['-o', 'BatchMode=yes'] : [
+      '-o', 'BatchMode=no',
+      '-o', 'PreferredAuthentications=password,keyboard-interactive',
+      '-o', 'PubkeyAuthentication=no',
+      '-o', 'NumberOfPasswordPrompts=1',
+      '-o', 'ControlPath=none',
+    ]),
     '-o', 'ConnectTimeout=15',
     '-o', 'ServerAliveInterval=15',
     '-o', 'ServerAliveCountMax=3',
     ...(target.user === undefined ? [] : ['-l', target.user]),
     ...(target.port === undefined ? [] : ['-p', String(target.port)]),
     ...(target.identityFile === undefined ? [] : ['-i', target.identityFile]),
-    target.alias ?? target.hostName,
+    '--', target.alias ?? target.hostName,
   ]
 }
 
@@ -266,15 +273,56 @@ export function remotePreviewType(path: string): string | undefined {
   return REMOTE_PREVIEW_TYPES[posix.extname(path).toLowerCase()]
 }
 
+// Win32 OpenSSH launches askpass as an executable. Compile once per host process.
+function createWindowsAskpass(directory: string): string {
+  const path = join(directory, 'askpass.exe')
+  const powerShell = win32.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
+  const command = `$ErrorActionPreference = 'Stop'
+$source = @'
+using System;
+using System.Text;
+
+public static class Askpass {
+  public static int Main(string[] args) {
+    if (Environment.GetEnvironmentVariable("SSH_ASKPASS_PROMPT") == "confirm" ||
+        args.Length == 0 || args[0].IndexOf("password", StringComparison.OrdinalIgnoreCase) < 0) return 1;
+    string password = Environment.GetEnvironmentVariable("DSH_SSH_PASSWORD");
+    if (password == null) return 1;
+    Console.OutputEncoding = new UTF8Encoding(false);
+    Console.WriteLine(password);
+    return 0;
+  }
+}
+'@
+Add-Type -TypeDefinition $source -OutputAssembly $env:DSH_ASKPASS_OUTPUT -OutputType ConsoleApplication`
+  execFileSync(powerShell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', command], {
+    env: { ...process.env, DSH_ASKPASS_OUTPUT: path },
+    stdio: 'ignore',
+    timeout: 10_000,
+    windowsHide: true,
+  })
+  return path
+}
+
 let askpassPath: string | undefined
 
 /** Build the child-only environment that lets OpenSSH ask for a one-time password without a TTY. */
 export function sshEnvironment(target: Target): NodeJS.ProcessEnv {
   if (target.password === undefined) return {}
   if (askpassPath === undefined) {
-    const directory = mkdtempSync(posix.join(tmpdir().replace(/\\/g, '/'), 'dsh-vscode-ssh-'))
-    askpassPath = posix.join(directory, 'askpass.sh')
-    writeFileSync(askpassPath, '#!/bin/sh\nprintf \'%s\\n\' "$DSH_SSH_PASSWORD"\n', { encoding: 'utf8', mode: 0o700 })
+    const directory = mkdtempSync(join(tmpdir(), 'dsh-vscode-ssh-'))
+    try {
+      if (process.platform === 'win32') {
+        askpassPath = createWindowsAskpass(directory)
+      } else {
+        const path = join(directory, 'askpass.sh')
+        writeFileSync(path, '#!/bin/sh\n[ "$SSH_ASKPASS_PROMPT" != confirm ] || exit 1\ncase "$1" in *[Pp]assword*) printf \'%s\\n\' "$DSH_SSH_PASSWORD" ;; *) exit 1 ;; esac\n', { encoding: 'utf8', mode: 0o700 })
+        askpassPath = path
+      }
+    } catch {
+      rmSync(directory, { recursive: true, force: true })
+      throw new WorkbenchError('ssh-askpass', '无法初始化 OpenSSH 密码输入程序。', 500)
+    }
   }
   return {
     SSH_ASKPASS: askpassPath,
@@ -299,7 +347,7 @@ function sshFailure(result: ProcessResult): WorkbenchError {
     return new WorkbenchError('ssh-not-workspace', '该 SSH 目标只接受 Git 操作，不提供远程开发所需的登录 shell。请选择可登录的 SSH 服务器。', 422)
   }
   if (/permission denied|authentication failed|no supported authentication methods/i.test(detail)) {
-    return new WorkbenchError('ssh-auth', `SSH 认证失败。请确认密钥、ssh-agent 和服务器授权配置。\n${detail}`, 401)
+    return new WorkbenchError('ssh-auth', `SSH 认证失败。请检查登录用户、密码或私钥，以及服务器允许的认证方式。\n${detail}`, 401)
   }
   if (/could not resolve hostname|name or service not known/i.test(detail)) {
     return new WorkbenchError('ssh-host', `无法解析 SSH 主机。\n${detail}`, 502)
@@ -417,7 +465,14 @@ async function resolveRemoteWorkspace(target: Target, workspace: string): Promis
       ? `cd -- "$HOME"/${shellQuote(requestedWorkspace.slice(2))}`
       : `cd -- ${shellQuote(requestedWorkspace)}`
   const result = await runSsh(target, `set -eu\n${cd}\npwd -P\n`, { timeout: 20_000, maxOutput: 64 * 1024, retryRead: true })
-  if (result.code !== 0) throw sshFailure(result)
+  if (result.code !== 0) {
+    const password = target.password
+    if (password !== undefined) {
+      result.stdout = result.stdout.split(password).join('•••')
+      result.stderr = result.stderr.split(password).join('•••')
+    }
+    throw sshFailure(result)
+  }
   const root = result.stdout.trim().split('\n').at(-1) ?? ''
   if (!root.startsWith('/')) throw new WorkbenchError('ssh-workspace', '远程工作区没有返回绝对路径', 502)
   return root
@@ -430,13 +485,23 @@ function publicSshConnection(connection: LiveConnection): SshConnection {
 
 export async function connectSsh(sessionId: string, request: SshConnectRequest): Promise<SshConnection> {
   const configured = findConfiguredHost((await listSshHosts()).hosts, request.host)
-  const target = targetFromRequest(request, configured)
+  let target = targetFromRequest(request, configured)
+  const account = sshPasswordAccount(request.host.trim(), target.hostName, target.user, target.port)
+  const useSavedPassword = request.useSavedPassword === true && target.password === undefined
+  if (useSavedPassword) {
+    const password = await readSshPassword(account)
+    if (password === undefined) throw new WorkbenchError('ssh-password-unavailable', '无法读取已保存的 SSH 密码，请重新输入。', 409)
+    target = targetFromRequest({ ...request, password }, configured)
+  }
   const requestedWorkspace = optionalText(request.workspace, '远程工作区', 8192)?.trim() || '.'
+  const label = optionalText(request.label, '连接名称', 255)?.trim() || labelFor(target, requestedWorkspace)
   const root = await resolveRemoteWorkspace(target, requestedWorkspace)
+  const passwordSaved = useSavedPassword || (request.savePassword === true && target.password !== undefined
+    && await storeSshPassword(account, target.password))
   const id = randomUUID()
   const connection: LiveConnection = {
     id,
-    label: optionalText(request.label, '连接名称', 255)?.trim() || labelFor(target, requestedWorkspace),
+    label,
     host: request.host.trim(),
     hostName: target.hostName,
     ...(target.user === undefined ? {} : { user: target.user }),
@@ -447,7 +512,7 @@ export async function connectSsh(sessionId: string, request: SshConnectRequest):
     target,
   }
   connections.set(keyFor(sessionId, id), connection)
-  return publicSshConnection(connection)
+  return { ...publicSshConnection(connection), passwordSaved }
 }
 
 /** Repoint one live SSH target at a narrower workspace without asking for credentials again. */

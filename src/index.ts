@@ -317,6 +317,8 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
       host: stringField(body, 'host'),
       ...(typeof body.user === 'string' && body.user !== '' ? { user: body.user } : {}),
       ...(typeof body.password === 'string' && body.password !== '' ? { password: body.password } : {}),
+      ...(body.savePassword === true ? { savePassword: true } : {}),
+      ...(body.useSavedPassword === true ? { useSavedPassword: true } : {}),
       ...(typeof body.port === 'number' || typeof body.port === 'string' ? { port: Number(body.port) } : {}),
       ...(typeof body.identityFile === 'string' && body.identityFile !== '' ? { identityFile: body.identityFile } : {}),
       ...(typeof body.workspace === 'string' && body.workspace !== '' ? { workspace: body.workspace } : {}),

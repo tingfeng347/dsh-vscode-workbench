@@ -61,14 +61,16 @@ export interface SshConnection {
   identityFile?: string
   root: string
   connectedAt: string
+  passwordSaved?: boolean
 }
 
 /** Parameters for opening an SSH workspace through the local OpenSSH client. */
 export interface SshConnectRequest {
   host: string
   user?: string
-  /** One-time password for OpenSSH askpass. It is kept only in host memory. */
   password?: string
+  savePassword?: boolean
+  useSavedPassword?: boolean
   port?: number
   identityFile?: string
   workspace?: string

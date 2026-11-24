@@ -147,5 +147,8 @@
     "typescript": "^5.9.0",
     "vitest": "^4.0.0",
     "zustand": "~4.5.7"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring": "2.1.2"
   }
 }

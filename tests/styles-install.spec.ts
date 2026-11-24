@@ -29,6 +29,15 @@ describe('installStyles', () => {
     const css = document.head.querySelector(SELECTOR)?.textContent ?? ''
     expect(css).toContain('.dvw-debug-toolbar')
     expect(css).toContain('.dvw-debug-paused-line')
+    expect(css).toContain('.dvw-ssh-terminal-host .xterm-viewport{position:absolute;inset:0')
+    expect(css).toContain('.dvw-ssh-terminal-host .xterm-helper-textarea{position:absolute;padding:0;border:0;margin:0;opacity:0;left:-9999em')
+    expect(css).toContain('.dvw-diff-hunk-actions[hidden]{display:none}')
+    expect(css).toContain('.dvw-diff-hunk-actions::before{content:"";position:absolute;inset:-12px -36px;pointer-events:none}')
+    expect(css).toContain('.dvw-diff-ribbons path{fill:var(--dvw-diff-modified)}')
+    expect(css).toContain('.dvw-ssh-workspace-section[data-expanded=true]')
+    expect(css).toContain(':is(.dvw-scm-head,.dvw-ssh-section-head):is(:hover,:focus-within){background:var(--dvw-hover)}')
+    expect(css).toContain(':is(.dvw-scm-head,.dvw-ssh-section-head) .dvw-icon{flex:0 1 22px;width:22px;min-width:17px;padding:0}')
+    expect(css).toContain('.dvw-ssh-targets-resizer')
     dispose()
   })
 
@@ -38,6 +47,9 @@ describe('installStyles', () => {
     // The activity bar renders Icon name="debug-alt"; without this rule the button is blank.
     expect(css).toContain('.codicon-debug-alt:before{content:"\\eb91"}')
     expect(css).toContain('.codicon-terminal:before')
+    // The SSH activity entry and disconnect action use the same local codicon stylesheet.
+    expect(css).toContain('.codicon-remote-explorer:before{content:"\\eb39"}')
+    expect(css).toContain('.codicon-debug-disconnect:before{content:"\\ead0"}')
     dispose()
   })
 })

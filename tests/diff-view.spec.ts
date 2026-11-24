@@ -12,9 +12,9 @@ describe('split diff layout', () => {
     expect(styles).toContain('.dvw-editor-body{min-width:0;overflow:hidden}')
   })
 
-  it('uses the classic inline style unless the ribbon preference was saved', () => {
+  it('uses the IDEA / PyCharm ribbon style unless the VS Code style was saved', () => {
     const workbench = read('src/client/Workbench.tsx')
-    expect(workbench).toContain("localStorage.getItem('dvw:git-diff-style') === 'ribbon' ? 'ribbon' : 'classic'")
+    expect(workbench).toContain("localStorage.getItem('dvw:git-diff-style') === 'classic' ? 'classic' : 'ribbon'")
     expect(workbench).toContain("const defaultDiffMode = gitDiffStyle === 'ribbon' ? 'split' : 'inline'")
     expect(read('src/client/SettingsPanel.tsx')).toContain('Git 对比样式')
   })

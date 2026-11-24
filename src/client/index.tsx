@@ -16,6 +16,7 @@ import type { PropsRuntime } from '@deepseek-ai/dsh-client-ui-slots'
 import type { VscodeWorkbench } from './service.ts'
 import { WorkbenchController } from './service.ts'
 import { TerminalPanel } from './TerminalPanel.tsx'
+import { SSHRemoteTerminalPanel } from './SSHRemoteTerminal.tsx'
 import { DebugPanel } from './DebugPanel.tsx'
 import { debugController, debugShortcut } from './debug.ts'
 import { Workbench } from './Workbench.tsx'
@@ -75,6 +76,7 @@ export function apply(ctx: ClientContext): void {
   ctx.effect(() => installDshChangedFilesOpenInterceptor(ctx.sidebarRight, () => service.getSnapshot().visible, () => service.show('explorer')), 'dsh-vscode-workbench: changed file links')
   ctx.effect(() => { const dispose = ctx.reflect.provide('vscodeWorkbench', service); return () => { void dispose() } }, 'dsh-vscode-workbench: service')
   ctx.effect(() => service.registerBottomPanel({ id: 'terminal', title: '终端', component: props => <TerminalPanel key={props.sessionId} {...props} workspace={terminals.get(props.sessionId)}/> }), 'dsh-vscode-workbench: terminal panel')
+  ctx.effect(() => service.registerBottomPanel({ id: 'ssh-terminal', title: 'SSH 终端', component: props => <SSHRemoteTerminalPanel key={`${props.sessionId}:ssh`} {...props}/> }), 'dsh-vscode-workbench: SSH terminal panel')
   ctx.effect(() => service.registerBottomPanel({ id: 'debug', title: '调试', component: props => <DebugPanel controller={debugController} sessionId={props.sessionId ?? ''} onOpenFrame={(path, line) => window.dispatchEvent(new CustomEvent('dvw-open-workspace-path', { detail: { path, line } }))}/> }), 'dsh-vscode-workbench: debug panel')
   // F5/F10/F11 belong to the debugger only while it can act on them; otherwise the host keeps its
   // own bindings, so F11 still toggles fullscreen when nothing is paused.

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react'
+import { act, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Workbench } from '../src/client/Workbench.tsx'
@@ -101,7 +101,15 @@ const defaultModelCatalog: FakeModelCatalog = {
   unavailable: [],
   defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' },
 }
-async function setup(binary = false, saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' }, changes: typeof reviewChanges = [], gitChanges: GitChange[] = [], modelCatalog: FakeModelCatalog = defaultModelCatalog, files: FileEntry[] = []) {
+async function setup(
+  binary = false,
+  saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' },
+  changes: typeof reviewChanges = [],
+  gitChanges: GitChange[] = [],
+  modelCatalog: FakeModelCatalog = defaultModelCatalog,
+  files: FileEntry[] = [],
+  readFailure?: (path: string) => { code: string; message: string; status?: number } | undefined,
+) {
   disk = 'disk'; revision = 'r1'; completeSave = undefined; state.editor = undefined
   projectSource = 'export const a = 1'; projectReads = 0; reviewChanges = changes
   localStorage.setItem('dvw:/tmp/audit', JSON.stringify(saved))
@@ -119,7 +127,17 @@ async function setup(binary = false, saved: Record<string, unknown> = { paths: [
     else if (method === 'git.action') value = body.action === 'log' ? [] : { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
     else if (method === 'commit.models') value = modelCatalog
     else if (method === 'git.commitMessage') value = { message: 'feat(git): generate the message directly' }
-    else if (method === 'fs.read') value = doc()
+    else if (method === 'fs.read') {
+      const path = typeof body.path === 'string' ? body.path : 'a.txt'
+      const failure = readFailure?.(path)
+      if (failure !== undefined) {
+        return Response.json({
+          ok: false,
+          error: { code: failure.code, message: failure.message },
+        }, { status: failure.status ?? 409 })
+      }
+      value = doc()
+    }
     else if (method === 'project.sources') { projectReads++; value = { files: [{ path: 'a.ts', content: projectSource }], truncated: false } }
     else if (method === 'review.feed') value = { cursor: 9, changes: reviewChanges, busy: false }
     else if (method === 'review.inspect') value = {
@@ -154,11 +172,50 @@ it('opens a DSH generated-file link at its requested line in the workbench edito
   await setup()
   await act(async () => {
     window.dispatchEvent(new CustomEvent('dvw-open-generated-file', {
-      detail: { sessionId: 's', path: 'a.txt', line: 2 },
+      detail: { sessionId: 's', path: 'a.txt', line: 2, endLine: 3 },
     }))
   })
-  expect(state.editor).toMatchObject({ value: 'disk', line: 2, focusOnReveal: true })
+  expect(state.editor).toMatchObject({ value: 'disk', line: 2, endLine: 3, focusOnReveal: true })
   expect(document.querySelector<HTMLElement>('.dvw-tab[data-active="true"]')?.textContent).toContain('a.txt')
+})
+
+it('closes stale remote tabs instead of surfacing a disconnected SSH error', async () => {
+  const stale = 'ssh://dead/root/stale.txt'
+  const live = 'ssh://live/root/live.txt'
+  await setup(
+    false,
+    { paths: [stale, live], active: stale },
+    [],
+    [],
+    defaultModelCatalog,
+    [],
+    path => path === stale
+      ? { code: 'ssh-disconnected', message: 'SSH 连接已断开，请重新连接' }
+      : undefined,
+  )
+
+  await vi.waitFor(() => {
+    expect(document.querySelector(`[data-tab-path="${stale}"]`)).toBeNull()
+  })
+  expect(document.querySelector(`[data-tab-path="${live}"]`)).not.toBeNull()
+  expect(document.querySelector('.dvw-error')).toBeNull()
+  expect(document.body.textContent).not.toContain('SSH 连接已断开')
+})
+
+it('renders SSH images through the remote file preview route', async () => {
+  const image = 'ssh://live/images/orchard.jpg'
+  await setup(false, { paths: [image], active: image })
+
+  const preview = await vi.waitFor(() => {
+    const value = document.querySelector<HTMLImageElement>('.dvw-image-preview img')
+    expect(value).not.toBeNull()
+    return value!
+  })
+  expect(preview.src).toContain('/dsh-vscode/ssh/file?')
+  expect(preview.src).toContain('connectionId=live')
+  expect(preview.src).toContain(`path=${encodeURIComponent('images/orchard.jpg')}`)
+  expect(state.editor).toBeUndefined()
+  expect(document.body.textContent).not.toContain('该格式文件暂时无法预览')
 })
 
 it('follows a newly discovered AI change after the one and a half second idle delay', async () => {
@@ -208,39 +265,76 @@ it('postpones AI follow while the user is typing or scrolling', async () => {
   expect(state.editor).toMatchObject({ line: 1, focusOnReveal: false })
 })
 
-it('uses the file review bar to accept or reject every block in the active file', async () => {
+it('opens the DSH conversation with a file reference when asking from a change block', async () => {
   localStorage.setItem('dvw:ai-review-mode', 'all')
   localStorage.setItem('dvw:ai-review-follow', 'off')
+  localStorage.setItem('dvw:dsh-chat-visible', 'closed')
   await setup(false, { paths: ['a.txt'], active: 'a.txt' }, [
     { id: '8:0', seq: 8, path: 'a.txt', before: 'old', after: 'disk', created: false },
     { id: '8:1', seq: 8, path: 'a.txt', before: 'before', after: 'tail', created: false },
   ])
-  await vi.waitFor(() => expect(document.querySelector('.dvw-review-filebar')).not.toBeNull())
-  const bar = document.querySelector('.dvw-review-filebar')!
-  expect(bar.textContent).toContain('AI 改动 · 2 处')
-  const buttons = [...bar.querySelectorAll<HTMLButtonElement>('button')]
-  expect(buttons.map(button => button.textContent)).toEqual(['接受', '拒绝'])
-  expect(buttons[0]!.title).toContain('Ctrl+Enter')
-  expect(buttons[1]!.title).toContain('Ctrl+Backspace')
-  await act(async () => buttons[0]!.click())
+  await vi.waitFor(() => expect(state.editor?.review?.changes).toHaveLength(2))
   expect(document.querySelector('.dvw-review-filebar')).toBeNull()
+  const review = state.editor!.review!
+  expect(review.onAsk).toBeTypeOf('function')
+  const composer = document.createElement('textarea')
+  const card = document.createElement('div')
+  card.dataset.composerCard = ''
+  card.append(composer)
+  const panel = document.createElement('div')
+  panel.dataset.dvwConversationPanel = ''
+  panel.append(card)
+  document.body.append(panel)
+  await act(async () => review.onAsk!(review.changes[0]!))
+  await vi.waitFor(() => expect(composer.value).toBe('`a.txt:1` '))
+  expect(document.querySelector('.dvw-chat')).not.toBeNull()
+  expect(document.querySelector('.dvw-file-ai-menu')).toBeNull()
+  await act(async () => review.onKeep('8:0'))
+})
+
+it('asks about a Git diff by inserting its reference into the visible DSH composer', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  localStorage.setItem('dvw:dsh-chat-visible', 'closed')
+  await setup(false, { paths: [], view: 'git' }, [], [
+    { path: 'a.txt', index: '.', worktree: 'M', staged: false, untracked: false },
+  ])
+  const row = await vi.waitFor(() => {
+    const value = document.querySelector<HTMLElement>('.dvw-git .dvw-change')
+    expect(value).not.toBeNull()
+    return value!
+  })
+  await act(async () => row.click())
+  const composer = document.createElement('textarea')
+  const card = document.createElement('div')
+  card.dataset.composerCard = ''
+  card.append(composer)
+  const panel = document.createElement('div')
+  panel.dataset.dvwConversationPanel = ''
+  panel.append(card)
+  document.body.append(panel)
+  await act(async () => state.diff!.reviewActions!.onAsk({ startLine: 3, endLine: 5 }))
+  await vi.waitFor(() => expect(composer.value).toBe('`a.txt:3-5` '))
+  expect(document.querySelector('.dvw-chat')).not.toBeNull()
+  expect(document.querySelector('.dvw-file-ai-menu')).toBeNull()
 })
 
 it('applies and persists the Git comparison style through Workbench settings', async () => {
   localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
   await setup(false, { paths: [], view: 'git' }, [], [{ path: 'a.txt', index: '.', worktree: 'M', staged: false, untracked: false }])
   await act(async () => document.querySelector<HTMLElement>('.dvw-change')!.click())
-  expect(state.diff).toMatchObject({ mode: 'inline', style: 'classic' })
+  expect(state.diff).toMatchObject({ mode: 'split', style: 'ribbon' })
   const settings = document.createElement('div')
   document.body.append(settings)
   await act(async () => settingsHost.set(settings))
   const selector = settings.querySelector<HTMLButtonElement>('button[aria-label^="Git 对比样式："]')!
-  expect(selector.textContent).toContain('VS Code（默认）')
+  expect(selector.textContent).toContain('IDEA / PyCharm（默认）')
   await act(async () => selector.click())
-  const jetBrainsStyle = Array.from(settings.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]')).find(button=>button.textContent?.trim()==='IDEA / PyCharm')!
-  await act(async () => jetBrainsStyle.click())
-  expect(state.diff).toMatchObject({ mode: 'split', style: 'ribbon' })
-  expect(localStorage.getItem('dvw:git-diff-style')).toBe('ribbon')
+  const options = Array.from(settings.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]'))
+  expect(options.map(option => option.textContent?.trim())).toEqual(['IDEA / PyCharm（默认）', 'VS Code'])
+  const vsCodeStyle = options.find(button => button.textContent?.trim() === 'VS Code')!
+  await act(async () => vsCodeStyle.click())
+  expect(state.diff).toMatchObject({ mode: 'inline', style: 'classic' })
+  expect(localStorage.getItem('dvw:git-diff-style')).toBe('classic')
 })
 
 it('compares a staged file against HEAD from the staged changes group', async () => {
@@ -318,6 +412,36 @@ it('shows a new commit before the commit action finishes', async () => {
   })))
   await vi.waitFor(() => expect(document.querySelector('.dvw-graph-subject')?.textContent).toBe('feat(git): show immediately'))
   expect(input.value).toBe('')
+})
+
+it('closes a stale Git diff after the file leaves the change list', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: [], view: 'git' }, [], [{
+    path: 'a.txt', index: '.', worktree: 'M', staged: false, untracked: false,
+  }])
+
+  const change = await vi.waitFor(() => {
+    const row = document.querySelector<HTMLElement>('.dvw-git .dvw-change')
+    expect(row?.textContent).toContain('a.txt')
+    return row!
+  })
+  await act(async () => change.click())
+  expect(document.querySelector('[data-tab-path="diff:a.txt"]')).not.toBeNull()
+
+  const originalFetch = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    const body = JSON.parse(String(options?.body)) as Record<string, unknown>
+    if (body.action === 'status') {
+      return Response.json({
+        ok: true,
+        value: { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: [] },
+      })
+    }
+    return originalFetch(url, options)
+  })
+
+  await act(async () => window.dispatchEvent(new Event('dvw-files-changed')))
+  await vi.waitFor(() => expect(document.querySelector('[data-tab-path="diff:a.txt"]')).toBeNull())
 })
 
 it('shares the diff layout across new and existing files and restores it after reopening', async () => {
@@ -528,6 +652,38 @@ it('switches between Terminal and Problems from the bottom panel header', async 
   expect(service.getSnapshot().bottomPanel).toBeUndefined()
 })
 
+it('keeps the SSH terminal mounted and reachable while debugging', async () => {
+  const service = await setup()
+  let mounts = 0
+  let unmounts = 0
+  function SshTerminal() {
+    useEffect(() => {
+      mounts += 1
+      return () => { unmounts += 1 }
+    }, [])
+    return <div data-test-ssh>SSH 会话内容</div>
+  }
+  await act(async () => {
+    service.registerBottomPanel({ id: 'ssh-terminal', title: 'SSH 终端', component: SshTerminal })
+    service.registerBottomPanel({ id: 'debug', title: '调试', component: () => <div data-test-debug>调试内容</div> })
+    service.toggleBottomPanel('ssh-terminal')
+  })
+  const sshTab = () => Array.from(document.querySelectorAll<HTMLElement>('.dvw-bottom-head .dvw-bottom-title')).find(tab => tab.textContent === 'SSH 终端')
+  const debugTab = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.dvw-bottom-head button')).find(button => button.textContent === '调试')
+  expect(sshTab()?.textContent).toBe('SSH 终端')
+  expect(mounts).toBe(1)
+  await act(async () => debugTab()!.click())
+  expect(service.getSnapshot().bottomPanel).toBe('debug')
+  expect(sshTab()?.textContent).toBe('SSH 终端')
+  expect(document.querySelector('[data-test-ssh]')?.closest('[hidden]')).not.toBeNull()
+  expect(document.querySelector('[data-test-debug]')).not.toBeNull()
+  expect(unmounts).toBe(0)
+  await act(async () => sshTab()!.click())
+  expect(service.getSnapshot().bottomPanel).toBe('ssh-terminal')
+  expect(document.querySelector('[data-test-ssh]')?.closest('[hidden]')).toBeNull()
+  expect(mounts).toBe(1)
+})
+
 it('puts branch controls in the status bar and commit metadata in the hover card', async () => {
   localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({visible:true, view:'git'}))
   await setup(false, {}, [], [{path:'src/a.txt', index:'?', worktree:'?', staged:false, untracked:true}])
@@ -547,6 +703,8 @@ it('puts branch controls in the status bar and commit metadata in the hover card
     return row!
   })
   expect(document.querySelector('.dvw-status [title="切换分支"]')).not.toBeNull()
+  expect(document.querySelector('.dvw-scm-head .dvw-group-toggle')?.textContent).toBe('提交')
+  expect(document.querySelector('.dvw-git .dvw-group-head .dvw-group-toggle')?.textContent).toBe('更改')
   expect(document.querySelector('.dvw-graph .dvw-count')).toBeNull()
   expect(document.querySelector('.dvw-git .dvw-group-head')?.lastElementChild?.textContent).toBe('1')
   await act(async () => { row.focus(); await new Promise(resolve => setTimeout(resolve,350)) })

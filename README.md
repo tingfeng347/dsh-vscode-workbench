@@ -26,10 +26,10 @@
 
 ## 安装
 
-插件的安装版本要求是 DeepSeek Harness `>=0.2.1-rc.1`，当前默认验证基线为 `0.2.2-rc.5`（Cordis `4.1.0`），并完成 Harness `0.2.3` 的路由认证适配。
+建议安装 npm 上的 DeepSeek Harness `latest`。插件要求 Harness `>=0.2.1-rc.1`。
 
 ```bash
-npm i -g @deepseek-ai/dsh@0.2.2-rc.5
+npm i -g @deepseek-ai/dsh@latest
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 

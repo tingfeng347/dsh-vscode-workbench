@@ -12,7 +12,7 @@ const CSS = String.raw`
 @font-face{font-family:codicon;font-display:block;src:url('/dsh-vscode/codicons/codicon.ttf') format('truetype')}
 :root{--dvw-titlebar-height:0px}html[data-platform=darwin]{--dvw-titlebar-height:var(--dsh-frame-top-clearance,48px)}html[data-windows-titlebar]{--dvw-titlebar-height:var(--dsh-frame-top-clearance,40px)}
 .codicon{display:inline-block;font:normal normal normal 16px/1 codicon;text-align:center;text-decoration:none;text-rendering:auto;-webkit-font-smoothing:antialiased;user-select:none}
-.codicon-add:before{content:"\ea60"}.codicon-git-branch:before,.codicon-source-control:before{content:"\ea68"}.codicon-debug-alt:before{content:"\eb91"}.codicon-search:before{content:"\ea6d"}.codicon-edit:before{content:"\ea73"}.codicon-close:before{content:"\ea76"}.codicon-close-all:before{content:"\eac1"}.codicon-cloud-upload:before{content:"\eac3"}.codicon-file:before{content:"\ea7b"}.codicon-new-file:before{content:"\ea7f"}.codicon-new-folder:before{content:"\ea80"}.codicon-folder:before{content:"\ea83"}.codicon-trash:before{content:"\ea81"}.codicon-code:before{content:"\eac4"}.codicon-check:before{content:"\eab2"}.codicon-chevron-down:before{content:"\eab4"}.codicon-chevron-right:before{content:"\eab6"}.codicon-color-mode:before{content:"\eac6"}.codicon-diff:before,.codicon-diff-sidebyside:before{content:"\eae1"}.codicon-diff-single:before{content:"\ec22"}.codicon-discard:before{content:"\eae2"}.codicon-file-code:before{content:"\eae9"}.codicon-file-media:before{content:"\eaea"}.codicon-file-pdf:before{content:"\eaeb"}.codicon-file-zip:before{content:"\eaef"}.codicon-files:before{content:"\eaf0"}.codicon-folder-opened:before{content:"\eaf7"}.codicon-git-commit:before{content:"\eafc"}.codicon-graph:before{content:"\eb03"}.codicon-home:before{content:"\eb06"}.codicon-list-tree:before{content:"\eb86"}.codicon-preview:before{content:"\eb2f"}.codicon-refresh:before{content:"\eb37"}.codicon-remove:before{content:"\eb3b"}.codicon-check-all:before{content:"\ebb1"}
+.codicon-add:before{content:"\ea60"}.codicon-git-branch:before,.codicon-source-control:before{content:"\ea68"}.codicon-debug-alt:before{content:"\eb91"}.codicon-search:before{content:"\ea6d"}.codicon-edit:before{content:"\ea73"}.codicon-close:before{content:"\ea76"}.codicon-close-all:before{content:"\eac1"}.codicon-cloud-download:before{content:"\eac2"}.codicon-cloud-upload:before{content:"\eac3"}.codicon-file:before{content:"\ea7b"}.codicon-new-file:before{content:"\ea7f"}.codicon-new-folder:before{content:"\ea80"}.codicon-folder:before{content:"\ea83"}.codicon-trash:before{content:"\ea81"}.codicon-code:before{content:"\eac4"}.codicon-check:before{content:"\eab2"}.codicon-chevron-down:before{content:"\eab4"}.codicon-chevron-right:before{content:"\eab6"}.codicon-color-mode:before{content:"\eac6"}.codicon-diff:before,.codicon-diff-sidebyside:before{content:"\eae1"}.codicon-diff-single:before{content:"\ec22"}.codicon-discard:before{content:"\eae2"}.codicon-file-code:before{content:"\eae9"}.codicon-file-media:before{content:"\eaea"}.codicon-file-pdf:before{content:"\eaeb"}.codicon-file-zip:before{content:"\eaef"}.codicon-files:before{content:"\eaf0"}.codicon-folder-opened:before{content:"\eaf7"}.codicon-git-commit:before{content:"\eafc"}.codicon-graph:before{content:"\eb03"}.codicon-home:before{content:"\eb06"}.codicon-list-tree:before{content:"\eb86"}.codicon-preview:before{content:"\eb2f"}.codicon-refresh:before{content:"\eb37"}.codicon-remove:before{content:"\eb3b"}.codicon-check-all:before{content:"\ebb1"}
 .codicon-case-sensitive:before { content: "\eab1" }.codicon-whole-word:before { content: "\eb7e" }.codicon-regex:before { content: "\eb38" }.codicon-preserve-case:before { content: "\eb2e" }.codicon-replace:before { content: "\eb3d" }.codicon-replace-all:before { content: "\eb3c" }.codicon-ellipsis:before { content: "\ea7c" }.codicon-clear-all:before { content: "\eabf" }.codicon-collapse-all:before { content: "\eac5" }.codicon-expand-all:before { content: "\eb95" }
 .codicon-layout-sidebar-right:before{content:"\ebf4"}.codicon-layout-sidebar-right-off:before{content:"\ec00"}.codicon-screen-full:before{content:"\eb4c"}.codicon-screen-normal:before{content:"\eb4d"}.codicon-settings:before{content:"\eb51"}.codicon-sparkle:before{content:"\ec10"}.codicon-split-horizontal:before{content:"\eb56"}.codicon-terminal:before{content:"\ea85"}
 .dvw-overlay{--dvw-side-width:210px;--dvw-graph-ref:#3794ff;--dvw-base:var(--dsw-alias-bg-base,#181818);--dvw-surface-1:var(--dsw-alias-bg-layer-1,#1e1e1e);--dvw-surface-2:var(--dsw-alias-bg-layer-2,#252526);--dvw-surface-3:var(--dsw-alias-bg-layer-3,#2d2d30);--dvw-side:var(--dvw-surface-1);--dvw-tab-active:var(--dvw-surface-2);--dvw-gutter:var(--dvw-base);--dvw-text:var(--dsw-alias-label-primary,#ccc);--dvw-text-2:var(--dsw-alias-label-secondary,#aaa);--dvw-text-3:var(--dsw-alias-label-tertiary,#858585);--dvw-border:var(--dsw-alias-border-l2,#333);--dvw-border-soft:var(--dsw-alias-border-l3,#292929);--dvw-hover:var(--dsw-alias-interactive-bg-hover,rgba(255,255,255,.08));--dvw-active:var(--dsw-alias-interactive-bg-active,rgba(255,255,255,.14));--dvw-accent:var(--dsw-alias-state-business-primary,#3b82f6);--dvw-error:var(--dsw-alias-state-error-primary,#f48771);--dvw-success:var(--dsw-alias-state-success-primary,#73c991);--dvw-warn:var(--dsw-alias-state-warn-primary,#d7ba7d);position:absolute;inset:0;z-index:100;display:grid;grid-template-columns:48px var(--dvw-side-width) minmax(0,1fr);grid-template-rows:minmax(0,1fr) auto 30px;box-sizing:border-box;padding-top:calc(var(--dvw-titlebar-height) + 6px);background:var(--dvw-gutter);color:var(--dvw-text);pointer-events:auto;font:13px/1.4 var(--dsw-font-family,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);overflow:hidden;color-scheme:light}
@@ -166,6 +166,8 @@ button.dvw-bottom-title{cursor:pointer}.dvw-bottom-title:hover,.dvw-bottom-title
 .dvw-side-resizer::after,.dvw-chat-resizer::after{background:transparent;left:3px;width:4px}
 .dvw-side-resizer:hover::after,.dvw-side-resizer:focus-visible::after,.dvw-side-resizer[data-dragging=true]::after,.dvw-chat-resizer:hover::after,.dvw-chat-resizer:focus-visible::after,.dvw-chat-resizer[data-dragging=true]::after{background:var(--dvw-accent)}
 [data-dvw-conversation-panel]{position:fixed!important;top:calc(var(--dvw-titlebar-height) + 6px)!important;right:3px!important;bottom:var(--dvw-status-height,30px)!important;left:auto!important;width:calc(var(--dvw-chat-width) - 6px)!important;height:auto!important;min-width:0!important;z-index:21!important;border:1px solid var(--dsw-alias-border-l2)!important;border-radius:8px!important;overflow:hidden!important;box-shadow:none!important}
+[data-dvw-conversation-panel] [data-conversation-content]{font-size:14px}
+[data-dvw-conversation-panel] [data-conversation-content] pre{font-size:12px}
 html[data-platform=darwin] [data-dvw-conversation-panel]{top:var(--dvw-titlebar-height)!important}
 body[data-dvw-palette=light] [data-dvw-conversation-panel]{--dsw-alias-bg-base:#f9fafb;--dsw-specific-sidebar-fill:#f9fafb;--dsw-alias-border-l2:#e5e5e5;background:#f9fafb!important}body[data-dvw-palette=dark] [data-dvw-conversation-panel]{--dsw-alias-bg-base:#191a1b;--dsw-specific-sidebar-fill:#191a1b;--dsw-alias-bg-layer-1:#202122;--dsw-alias-bg-layer-2:#252526;--dsw-alias-bg-layer-3:#2a2b2c;--dsw-alias-label-primary:#bfbfbf;--dsw-alias-label-secondary:#8c8c8c;--dsw-alias-label-tertiary:#6e6e6e;--dsw-alias-border-l2:#2a2b2c;--dsw-alias-border-l3:#303132;--dsw-alias-interactive-bg-hover:#ffffff12;--dsw-alias-interactive-bg-active:#ffffff1f}
 body[data-dvw-workbench-active] [data-sidebar-right-expand],body[data-dvw-conversation-active] [data-sidebar-right-expand]{display:none!important}
@@ -268,18 +270,19 @@ body[data-dvw-workbench-active] [data-sidebar-toggle]{display:none!important}
 .dvw-commit-ai[aria-busy=true]{background:var(--dvw-hover);color:var(--dvw-text)}
 .dvw-scm-stop{display:grid;place-items:center;width:16px;height:16px;border:1px solid currentColor;border-radius:50%}
 .dvw-scm-stop::after{content:"";width:6px;height:6px;border-radius:1px;background:currentColor}
-.dvw-scm-dialog,.dvw-commit-hover{color:var(--dvw-text);background:var(--dvw-surface-2);border:1px solid var(--dvw-border);border-radius:5px;box-shadow:0 5px 20px #0004}
+.dvw-scm-dialog,.dvw-commit-hover{color:var(--dvw-text);background:var(--dvw-surface-2);border:1px solid color-mix(in srgb,var(--dvw-border) 82%,transparent);border-radius:12px;box-shadow:0 16px 40px #0005,0 2px 8px #0003}
 .dvw-scm-dialog{width:min(540px,90vw)}
 .dvw-scm-dialog form label{display:grid;gap:4px;margin:8px 0}
 .dvw-scm-dialog textarea{width:100%;min-height:160px}
 .dvw-scm-dialog pre{white-space:pre-wrap;max-height:60vh;overflow:auto}
-.dvw-commit-hover{position:fixed;inset:auto;margin:0;padding:10px 12px;z-index:50;box-sizing:border-box;width:max-content;max-width:min(430px,calc(100vw - 8px));max-height:85vh;overflow:auto;font:inherit;text-align:left;overflow-wrap:anywhere}
+.dvw-commit-hover{position:fixed;inset:auto;margin:0;padding:14px 16px;z-index:50;box-sizing:border-box;width:max-content;max-width:min(430px,calc(100vw - 8px));max-height:85vh;overflow:auto;font:inherit;text-align:left;overflow-wrap:anywhere}
 .dvw-commit-hover time{color:var(--dvw-text-2)}
 .dvw-commit-hover p{margin:7px 0;white-space:pre-wrap}
 .dvw-hover-refs,.dvw-hover-actions,.dvw-commit-stats{border-top:1px solid var(--dvw-border-soft);padding-top:6px;margin-top:6px}
 .dvw-hover-refs,.dvw-hover-actions{display:flex;align-items:center;flex-wrap:wrap;gap:6px}
 .dvw-hover-refs .dvw-ref{max-width:100%;height:auto;white-space:normal;overflow-wrap:anywhere}
-.dvw-hover-actions button,.dvw-hover-actions a{color:var(--dvw-accent);border:0;background:transparent;cursor:pointer;font:inherit}
+.dvw-hover-actions button,.dvw-hover-actions a{display:inline-flex;align-items:center;gap:5px;min-height:28px;padding:0 6px;border-radius:6px;color:var(--dvw-accent);border:0;background:transparent;cursor:pointer;font:inherit;text-decoration:none}
+.dvw-hover-actions button:hover,.dvw-hover-actions a:hover{background:var(--dvw-hover)}
 .dvw-commit-stats span:first-child{color:var(--dvw-success)}
 .dvw-commit-stats span:last-child{color:var(--dvw-error)}
 /* VS Code-style split commit button: primary action plus a narrow dropdown for commit variants. */
@@ -724,13 +727,28 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-ssh-empty-target{width:calc(100% - 12px);height:32px;margin:1px 6px 4px;display:flex;align-items:center;gap:7px;padding:0 7px;border:0;border-radius:4px;background:transparent;color:var(--dvw-text-2);font:inherit;font-size:var(--dvw-ssh-font-small);text-align:left;cursor:pointer}
 .dvw-ssh-empty-target:hover{background:var(--dvw-hover);color:var(--dvw-text)}
 .dvw-ssh-quickpick-backdrop{position:fixed;inset:0;z-index:150;display:flex;align-items:flex-start;justify-content:center;padding:calc(var(--dvw-titlebar-height) + 76px) 20px 20px;background:rgba(0,0,0,.18);backdrop-filter:blur(1px)}
-.dvw-ssh-quickpick{width:min(620px,calc(100vw - 40px));max-height:min(680px,calc(100vh - 120px));display:flex;flex-direction:column;border:1px solid var(--dvw-border);border-radius:8px;background:var(--dvw-surface-1);color:var(--dvw-text);box-shadow:0 14px 40px rgba(0,0,0,.3);overflow:hidden}
+.dvw-ssh-dialog-layer{--dvw-base:var(--dsw-alias-bg-base,#fff);--dvw-surface-1:var(--dsw-alias-bg-layer-1,#fff);--dvw-surface-2:var(--dsw-alias-bg-layer-2,#fff);--dvw-surface-3:var(--dsw-alias-bg-layer-3,#f5f6f7);--dvw-text:var(--dsw-alias-label-primary,#171717);--dvw-text-2:var(--dsw-alias-label-secondary,#5c5c5c);--dvw-text-3:var(--dsw-alias-label-tertiary,#6e6e6e);--dvw-border:var(--dsw-alias-border-l2,#dedede);--dvw-border-soft:var(--dsw-alias-border-l3,#ececec);--dvw-hover:var(--dsw-alias-interactive-bg-hover,#0000000c);--dvw-accent:var(--dsw-alias-state-business-primary,#3b82f6);--dvw-ssh-font:13px;--dvw-ssh-font-small:12px;--dvw-ssh-font-caption:11px;z-index:250;align-items:center;padding:calc(var(--dvw-titlebar-height) + 20px) 20px 20px;color:var(--dvw-text);font:13px/1.4 var(--dsw-font-family,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif)}
+.dvw-ssh-dialog-layer *{box-sizing:border-box}
+.dvw-ssh-dialog-layer .dvw-ssh-quickpick{max-width:100%;max-height:100%;flex:none}
+.dvw-ssh-dialog-layer button:focus-visible,.dvw-ssh-dialog-layer input:focus-visible,.dvw-ssh-dialog-layer summary:focus-visible{outline:1px solid var(--dvw-accent);outline-offset:2px}
+.dvw-ssh-quickpick{width:min(620px,calc(100vw - 40px));max-height:min(680px,calc(100vh - 120px));display:flex;flex-direction:column;border:1px solid color-mix(in srgb,var(--dvw-border) 82%,transparent);border-radius:12px;background:var(--dvw-surface-1);color:var(--dvw-text);box-shadow:0 16px 40px #0005,0 2px 8px #0003;overflow:hidden}
 .dvw-ssh-quickpick-head{flex:none;height:34px;display:flex;align-items:center;padding:0 7px 0 12px;border-bottom:1px solid var(--dvw-border-soft);background:var(--dvw-base)}
 .dvw-ssh-quickpick-head strong{min-width:0;flex:1;overflow:hidden;font-size:13px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
 .dvw-ssh-quickpick-body{min-height:0;overflow:auto;padding:10px 12px 13px}
 .dvw-ssh-quickpick-input{display:flex;flex-direction:column;gap:5px;color:var(--dvw-text-2);font-size:var(--dvw-ssh-font-small)}
-.dvw-ssh-quickpick-input input{width:100%;height:34px;padding:0 9px;border:1px solid var(--dvw-accent);border-radius:4px;background:var(--dvw-surface-2);color:var(--dvw-text);font:inherit;font-size:var(--dvw-ssh-font);outline:0}
+.dvw-ssh-quickpick-input input{width:100%;height:34px;padding:0 10px;border:1px solid var(--dvw-border);border-radius:6px;background:var(--dvw-surface-2);color:var(--dvw-text);font:inherit;font-size:var(--dvw-ssh-font);outline:0;transition:border-color 120ms ease,box-shadow 120ms ease}
+.dvw-ssh-quickpick-input input:focus{border-color:var(--dvw-accent);box-shadow:0 0 0 2px color-mix(in srgb,var(--dvw-accent) 14%,transparent)}
 .dvw-ssh-quickpick-body>small{display:block;margin-top:6px;color:var(--dvw-text-3);font-size:var(--dvw-ssh-font-caption)}
+.dvw-ssh-auth-method{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-top:12px;padding-top:12px;border-top:1px solid var(--dvw-border-soft)}
+.dvw-ssh-credentials{display:grid;gap:8px;margin-top:10px}
+.dvw-ssh-credentials label{min-width:0}
+.dvw-ssh-remember-password{display:flex;align-items:center;gap:6px;font-size:var(--dvw-ssh-font-small);color:var(--dvw-text-2)}
+.dvw-ssh-remember-password input{margin:0;accent-color:var(--dvw-accent)}
+.dvw-ssh-auth-method label{display:flex;flex-direction:column;gap:3px}
+.dvw-ssh-auth-method strong{font-size:var(--dvw-ssh-font-small);font-weight:600}
+.dvw-ssh-auth-method small{color:var(--dvw-text-3);font-size:var(--dvw-ssh-font-caption)}
+.dvw-ssh-auth-method select{min-width:112px;height:32px;padding:0 28px 0 10px;border:1px solid var(--dvw-border);border-radius:6px;background:var(--dvw-surface-2);color:var(--dvw-text);font:inherit;cursor:pointer}
+.dvw-ssh-quickpick-body>.dvw-ssh-save-hint{margin-top:10px;line-height:1.5}
 .dvw-ssh-quickpick-options{margin-top:11px;padding-top:9px;border-top:1px solid var(--dvw-border-soft)}
 .dvw-ssh-quickpick-options summary{list-style:none;display:flex;align-items:center;gap:4px;color:var(--dvw-text-2);font-size:var(--dvw-ssh-font-small);cursor:pointer;user-select:none}
 .dvw-ssh-quickpick-options summary::-webkit-details-marker{display:none}
@@ -738,12 +756,33 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-ssh-quickpick-options[open] summary::before{transform:rotate(90deg)}
 .dvw-ssh-quickpick-options[open]{display:grid;gap:8px}
 .dvw-ssh-quickpick-options label{display:flex;flex-direction:column;gap:4px;color:var(--dvw-text-2);font-size:var(--dvw-ssh-font-small)}
-.dvw-ssh-quickpick-options .dvw-input{height:31px;font-size:var(--dvw-ssh-font)}
+.dvw-ssh-quickpick-options .dvw-input{height:31px;border-radius:6px;font-size:var(--dvw-ssh-font)}
 .dvw-ssh-quickpick-actions{flex:none;min-height:45px;display:flex;align-items:center;justify-content:flex-end;gap:7px;padding:7px 10px;border-top:1px solid var(--dvw-border-soft);background:var(--dvw-base)}
-.dvw-ssh-quickpick-actions>button:not(.dvw-ssh-primary){height:30px;padding:0 12px;border:1px solid var(--dvw-border);border-radius:4px;background:var(--dvw-surface-2);color:var(--dvw-text);font:inherit;font-size:var(--dvw-ssh-font);cursor:pointer}
+.dvw-ssh-quickpick-actions>button:not(.dvw-ssh-primary){height:30px;padding:0 12px;border:1px solid var(--dvw-border);border-radius:6px;background:var(--dvw-surface-2);color:var(--dvw-text);font:inherit;font-size:var(--dvw-ssh-font);cursor:pointer}
 .dvw-ssh-quickpick-actions>button:not(.dvw-ssh-primary):hover:not(:disabled){background:var(--dvw-hover)}
 .dvw-ssh-quickpick-actions>.dvw-ssh-primary{width:auto;min-width:84px;height:30px;padding:0 12px}
 .dvw-ssh-quickpick-actions button:disabled{opacity:.48;cursor:default}
+.dvw-ssh-connection-dialog{border:0;padding:0;background:transparent;max-width:calc(100% - 32px);overflow:visible}
+.dvw-ssh-connection-dialog::backdrop{background:rgba(0,0,0,.24)}
+.dvw-ssh-connection-dialog>.dvw-ssh-quickpick{width:min(440px,calc(100vw - 40px));max-width:100%;font-size:var(--dvw-ssh-font)}
+.dvw-ssh-connection-message{margin:0;overflow-wrap:anywhere}
+.dvw-ssh-connection-detail{margin:0;padding:8px 10px;max-height:200px;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;border-radius:4px;background:var(--dvw-surface-2);color:var(--dvw-text);font:11px/1.5 monospace;user-select:text}
+[data-dvw-ssh-chat-status]{overflow:hidden!important;scrollbar-width:none}
+[data-dvw-ssh-chat-status]::-webkit-scrollbar{display:none}
+[data-dvw-ssh-chat-status]>button:not(.dvw-ssh-chat-host *){min-width:0;max-width:100px;overflow:hidden}
+[data-dvw-ssh-chat-status]>button:not(.dvw-ssh-chat-host *) span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dvw-ssh-chat-host{position:relative;z-index:1;display:flex;flex:1 0 116px;justify-content:flex-start;min-width:116px;max-width:150px;margin-right:4px}
+.dvw-ssh-chat-target{position:relative;min-width:0;max-width:100%;margin:0;color:var(--dsw-alias-label-secondary,var(--dvw-text-2,#666))}
+.dvw-ssh-chat-trigger{display:inline-flex;align-items:center;gap:4px;width:100%;max-width:100%;height:24px;padding:2px 5px;border:0;border-radius:4px;background:transparent;color:inherit;font:11px/1.4 var(--dsw-font-family,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);cursor:pointer}
+.dvw-ssh-chat-trigger>.codicon{flex:none;font-size:12px}
+.dvw-ssh-chat-trigger>span:not(.codicon){flex:none;overflow:visible;text-overflow:clip;white-space:nowrap}
+.dvw-ssh-chat-trigger:hover,.dvw-ssh-chat-trigger[aria-expanded=true]{background:var(--dsw-alias-interactive-bg-hover,var(--dvw-hover,#8882))}
+.dvw-ssh-chat-menu{position:fixed;z-index:1000;inset:auto;box-sizing:border-box;min-width:0;max-width:calc(100vw - 24px);max-height:40vh;padding:8px;overflow:auto;border:1px solid color-mix(in srgb,var(--dvw-chat--dsw-alias-border-l3,#333) 60%,transparent);border-radius:12px;color:var(--dvw-chat--dsw-alias-label-primary,#ddd);background:var(--dvw-chat--dsw-alias-bg-layer-2,#252526);box-shadow:0 16px 40px #0004,0 2px 6px #0002;font-family:var(--dvw-chat--dsw-font-family,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif);font-size:12px;isolation:isolate}
+.dvw-ssh-chat-menu button{display:flex;align-items:center;gap:8px;width:100%;height:34px;min-width:0;padding:0 8px;border:0;border-radius:6px;overflow:hidden;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer}
+.dvw-ssh-chat-menu button:hover{background:var(--dvw-chat--dsw-alias-interactive-bg-hover,#ffffff12)}
+.dvw-ssh-chat-menu button>span:not(.codicon){flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dvw-ssh-chat-menu button small{max-width:50%;overflow:hidden;color:var(--dvw-chat--dsw-alias-label-secondary,#aaa);font-size:11px;font-weight:400;text-overflow:ellipsis;white-space:nowrap}
+.dvw-ssh-entry-dialog{width:min(400px,calc(100vw - 40px))}
 .dvw-ssh-workspace-picker{width:min(560px,calc(100vw - 40px))}
 .dvw-ssh-workspace-location{height:34px;display:flex;align-items:center;gap:6px;padding:0 5px 0 7px;border:1px solid var(--dvw-border);border-radius:5px;background:var(--dvw-surface-2)}
 .dvw-ssh-workspace-location>.codicon{flex:none;color:var(--dvw-accent);font-size:14px}

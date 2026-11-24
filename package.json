@@ -1,6 +1,6 @@
 {
   "name": "dsh-vscode-workbench",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "VS Code-style workbench for DeepSeek Harness: editor, search, Git, terminal, document and web preview",
   "keywords": [
     "dsh",
@@ -147,5 +147,8 @@
     "typescript": "^5.9.0",
     "vitest": "^4.0.0",
     "zustand": "~4.5.7"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring": "2.1.2"
   }
 }

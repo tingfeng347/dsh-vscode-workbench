@@ -121,7 +121,8 @@ async function setup(
     let value: unknown
     if (method === 'workspace') value = { cwd: '/tmp/audit', name: 'audit' }
     else if (method === 'fs.list') value = files
-    else if (method === 'lsp.status') value = []
+    else if (method === 'lsp.status' || method === 'ssh.connections') value = []
+    else if (method === 'ssh.hosts') value = { hosts: [] }
     else if (method === 'git.status') value = { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
     else if (method === 'git.action' && body.action === 'diff') value = { diff: '', original: 'before', modified: 'after' }
     else if (method === 'git.action') value = body.action === 'log' ? [] : { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
@@ -650,6 +651,16 @@ it('switches between Terminal and Problems from the bottom panel header', async 
   expect(document.querySelector('.dvw-bottom-body')?.textContent).toBe('终端内容')
   await act(async () => close!.click())
   expect(service.getSnapshot().bottomPanel).toBeUndefined()
+})
+
+it('keeps exactly one SSH explorer mounted when switching between Git and SSH', async () => {
+  const service = await setup()
+  const panel = document.querySelector('.dvw-ssh')
+  expect(panel).not.toBeNull()
+  for (const view of ['git', 'ssh', 'git', 'ssh'] as const) {
+    await act(async () => service.show(view))
+    expect([...document.querySelectorAll('.dvw-ssh')]).toEqual([panel])
+  }
 })
 
 it('keeps the SSH terminal mounted and reachable while debugging', async () => {

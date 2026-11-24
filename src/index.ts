@@ -1,13 +1,14 @@
 /** DSH host plugin for the VS Code workbench. */
 import { inspectReview, rejectReview, reviewFeed, reviewPath } from './review.ts'
-import { createReadStream } from 'node:fs'
-import { readFile, realpath, stat } from 'node:fs/promises'
+import { createReadStream, createWriteStream } from 'node:fs'
+import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { appendFileSync, lstatSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import type { IncomingMessage } from 'node:http'
 import { isAbsolute, join, join as joinPath, relative, sep } from 'node:path'
 import { homedir } from 'node:os'
 import type { Duplex } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
 import { spawn } from 'node:child_process'
 import chokidar from 'chokidar'
 import { WebSocket, WebSocketServer } from 'ws'
@@ -24,7 +25,8 @@ import type { GitStatus, SearchFileEdits, SearchRequest } from './types.ts'
 import { watchIgnore, workspaceWatchIgnores } from './watch-ignore.ts'
 import { isStaleManifest } from './workspace-watch.ts'
 import { createWorkspaceWatcher } from './workspace-watch-host.ts'
-import { connectSsh, disconnectSsh, getLiveSshConnection, liveSshConnections, listSshHosts, shellQuote, sshEnvironment, sshGit, sshListFiles, sshOpenFilePreview, sshReadDocument, sshReadPreviewFile, sshReplaceSearchResults, sshSaveDocument, sshSearchWorkspace, sshStatus, sshTargetArguments, switchSshWorkspace } from './ssh.ts'
+import { connectSsh, disconnectSsh, getLiveSshConnection, liveSshConnections, listSshHosts, shellQuote, sshEnvironment, sshGit, sshCreateEntry, sshDeleteEntry, sshRenameEntry, sshUploadFile, sshListFiles, sshOpenFileDownload, sshOpenFilePreview, sshReadDocument, sshReadPreviewFile, sshReplaceSearchResults, sshSaveDocument, sshSearchWorkspace, sshStatus, sshTargetArguments, switchSshWorkspace } from './ssh.ts'
+import { SshChat, type ChatServices } from './ssh-chat.ts'
 import { readBinaryBody, readBody, send, sendError, stringField, authorize, WorkbenchError } from './wire.ts'
 
 export { WorkbenchError } from './wire.ts'
@@ -41,6 +43,38 @@ interface DesktopOpener {
   canOpenWorkspacePath?(): boolean
   openWorkspacePath?(request: { path: string; action?: 'reveal'; application?: string }, signal?: AbortSignal): Promise<{ opened: true }>
   workspacePathApplications?(request: { path: string }, signal?: AbortSignal): Promise<Array<{ id: string; name: string; default: boolean; icon: string | null }>>
+}
+
+async function stageRemoteDesktopFile(sessionId: string, connectionId: string, path: string, signal?: AbortSignal): Promise<string> {
+  const file = await sshOpenFileDownload(sessionId, connectionId, path, signal)
+  let directory: string | undefined
+  file.child.stderr.resume()
+  // Attach before opening the local file so an immediate spawn failure is observed.
+  const result = new Promise<number | null>(resolve => {
+    file.child.once('error', () => resolve(null))
+    file.child.once('close', resolve)
+  })
+  try {
+    if (file.size > 100 * 1024 * 1024) throw new WorkbenchError('too-large', '超过 100 MiB，请下载后打开。', 413)
+    directory = await mkdtemp(join(tmpdir(), 'dvw-ssh-copy-'))
+    const localPath = join(directory, file.name.replaceAll(/[/\\]/g, '_'))
+    let received = 0
+    await pipeline(file.child.stdout, async function* (stream) {
+      for await (const chunk of stream) {
+        received += chunk.length
+        if (received > file.size) throw new WorkbenchError('file-changed', '复制时远程文件发生变化，请重试。', 409)
+        yield chunk
+      }
+    }, createWriteStream(localPath, { flags: 'wx', mode: 0o600 }), { signal })
+    if (await result !== 0 || received !== file.size) throw new WorkbenchError('ssh-failed', '远程文件复制未完成。', 502)
+    const copiedDirectory = directory
+    setTimeout(() => { void rm(copiedDirectory, { recursive: true, force: true }).catch(() => undefined) }, 60 * 60 * 1000).unref()
+    return localPath
+  } catch (error) {
+    file.child.kill()
+    if (directory !== undefined) await rm(directory, { recursive: true, force: true }).catch(() => undefined)
+    throw error
+  }
 }
 
 const NATIVE_OPEN_TIMEOUT_MS = 15000
@@ -136,7 +170,7 @@ function traceDebug(text: string): void {
   try { appendFileSync(joinPath(tmpdir(), 'dvw-api.log'), `${new Date().toISOString()} ${text}\n`) } catch { /* diagnosis only */ }
 }
 
-async function dispatch(ctx: HostContext, method: string, body: Record<string, unknown>, signal?: AbortSignal, site?: WorkspaceSite): Promise<unknown> {
+async function dispatch(ctx: HostContext, method: string, body: Record<string, unknown>, signal?: AbortSignal, site?: WorkspaceSite, sshChat?: SshChat): Promise<unknown> {
   if (method === 'commit.models') {
     const llm: LlmRuntime | undefined = ctx.get('llm')
     if (llm === undefined) throw new WorkbenchError('llm-unavailable', 'DSH 的模型服务当前不可用。', 503)
@@ -209,9 +243,29 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
       if (remote !== undefined) return { ...await sshSaveDocument(sessionId, remote.sessionIdConnection, remote.remotePath, stringField(body, 'content'), stringField(body, 'revision'), signal), path }
       return saveDocument(cwd, path, stringField(body, 'content'), stringField(body, 'revision'))
     }
-    case 'fs.create': return createEntry(cwd, stringField(body, 'path'), body.kind === 'directory' ? 'directory' : 'file').then(() => ({ ok: true }))
-    case 'fs.rename': return renameEntry(cwd, stringField(body, 'path'), stringField(body, 'nextPath')).then(() => ({ ok: true }))
-    case 'fs.delete': return deleteEntry(cwd, stringField(body, 'path')).then(() => ({ ok: true }))
+    case 'fs.create':
+    case 'fs.rename':
+    case 'fs.delete': {
+      const path = stringField(body, 'path')
+      const remote = remoteFileRef(path)
+      const connectionId = remote?.sessionIdConnection
+      if (method === 'fs.create') {
+        const kind = body.kind === 'directory' ? 'directory' : 'file'
+        if (remote !== undefined && connectionId !== undefined) await sshCreateEntry(sessionId, connectionId, remote.remotePath, kind, signal)
+        else await createEntry(cwd, path, kind)
+      } else if (method === 'fs.delete') {
+        if (remote !== undefined && connectionId !== undefined) await sshDeleteEntry(sessionId, connectionId, remote.remotePath, signal)
+        else await deleteEntry(cwd, path)
+      } else {
+        const nextPath = stringField(body, 'nextPath')
+        const next = remoteFileRef(nextPath)
+        if (remote !== undefined && connectionId !== undefined && next?.sessionIdConnection === connectionId) {
+          await sshRenameEntry(sessionId, connectionId, remote.remotePath, next.remotePath, signal)
+        } else if (remote === undefined && next === undefined) await renameEntry(cwd, path, nextPath)
+        else throw new WorkbenchError('path-invalid', '无法跨工作区移动文件')
+      }
+      return { ok: true }
+    }
     case 'fs.applications': {
       const target = await workspacePath(cwd, stringField(body, 'path'))
       const opener = ctx.get('sessionController') as unknown as DesktopOpener | undefined
@@ -222,16 +276,20 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
       return { available: true, applications }
     }
     case 'fs.openExternal': {
-      const target = await workspacePath(cwd, stringField(body, 'path'))
+      const path = stringField(body, 'path')
+      const remote = remoteFileRef(path)
       const opener = ctx.get('sessionController') as unknown as DesktopOpener | undefined
       if (opener?.canOpenWorkspacePath?.() !== true || opener.openWorkspacePath === undefined) {
         throw new WorkbenchError('open-unavailable', '当前 DSH 没有提供用本地应用打开文件的能力。', 503)
       }
       const application = typeof body.application === 'string' && body.application !== '' ? body.application : undefined
       const reveal = body.action === 'reveal'
+      const absolute = remote === undefined
+        ? (await workspacePath(cwd, path)).absolute
+        : await stageRemoteDesktopFile(sessionId, remote.sessionIdConnection, remote.remotePath, signal)
       try {
         await opener.openWorkspacePath({
-          path: target.absolute,
+          path: absolute,
           ...(reveal ? { action: 'reveal' as const } : {}),
           ...(reveal || application === undefined ? {} : { application }),
         }, AbortSignal.timeout(NATIVE_OPEN_TIMEOUT_MS))
@@ -254,12 +312,19 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     case 'search.replace':
       if (cwd !== stringField(body, 'cwd')) throw new WorkbenchError('workspace-changed', '工作区已切换，请重新搜索', 409)
       return replaceSearchResults(cwd, body.files as SearchFileEdits[])
+    case 'ssh.chat.status': return sshChat?.status(sessionId) ?? { available: false }
+    case 'ssh.chat.select': {
+      if (!sshChat) throw new WorkbenchError('ssh-chat-unavailable', '当前 DSH 没有提供 SSH 对话接口。', 503)
+      return sshChat.select(sessionId, body.connectionId === null ? null : stringField(body, 'connectionId'))
+    }
     case 'ssh.hosts': return listSshHosts()
     case 'ssh.connections': return liveSshConnections(sessionId)
     case 'ssh.connect': return connectSsh(sessionId, {
       host: stringField(body, 'host'),
       ...(typeof body.user === 'string' && body.user !== '' ? { user: body.user } : {}),
       ...(typeof body.password === 'string' && body.password !== '' ? { password: body.password } : {}),
+      ...(body.savePassword === true ? { savePassword: true } : {}),
+      ...(body.useSavedPassword === true ? { useSavedPassword: true } : {}),
       ...(typeof body.port === 'number' || typeof body.port === 'string' ? { port: Number(body.port) } : {}),
       ...(typeof body.identityFile === 'string' && body.identityFile !== '' ? { identityFile: body.identityFile } : {}),
       ...(typeof body.workspace === 'string' && body.workspace !== '' ? { workspace: body.workspace } : {}),
@@ -267,7 +332,11 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     })
     case 'ssh.status': return sshStatus(sessionId, stringField(body, 'connectionId'))
     case 'ssh.disconnect': return disconnectSsh(sessionId, stringField(body, 'connectionId'))
-    case 'ssh.workspace': return switchSshWorkspace(sessionId, stringField(body, 'connectionId'), stringField(body, 'path'))
+    case 'ssh.workspace': {
+      const connectionId = stringField(body, 'connectionId')
+      const keepCurrent = sshChat?.status(sessionId).target?.id === connectionId
+      return switchSshWorkspace(sessionId, connectionId, stringField(body, 'path'), keepCurrent)
+    }
     case 'ssh.list': return sshListFiles(sessionId, stringField(body, 'connectionId'), stringField(body, 'path'), signal)
     case 'ssh.read': return sshReadDocument(sessionId, stringField(body, 'connectionId'), stringField(body, 'path'), signal)
     case 'ssh.save': return sshSaveDocument(sessionId, stringField(body, 'connectionId'), stringField(body, 'path'), stringField(body, 'content'), stringField(body, 'revision'), signal)
@@ -357,6 +426,12 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
 
 export function apply(ctx: HostContext): void {
   const site = new WorkspaceSite(ctx)
+  const sshChat = new SshChat()
+  ctx.effect(() => {
+    if (typeof ctx.inject !== 'function') return
+    const fiber = ctx.inject(['tools', 'agents', 'sandboxPolicy', 'fileReferences'], child => sshChat.install(child as unknown as ChatServices))
+    return () => { void fiber.dispose?.() }
+  }, 'dsh-vscode-workbench: optional SSH chat tools')
   ctx.effect(() => () => site.dispose(), 'dsh-vscode-workbench: workspace sites')
   ctx.effect(() => {
     if (typeof ctx.inject !== 'function') return
@@ -445,8 +520,8 @@ export function apply(ctx: HostContext): void {
         // while the work kept running in the background. Everything else is bounded inside itself.
         const deadline = API_DEADLINES[method]
         const value = deadline === undefined
-          ? await dispatch(ctx, method, body, controller.signal, site)
-          : await withDeadline(dispatch(ctx, method, body, controller.signal, site), deadline, method)
+          ? await dispatch(ctx, method, body, controller.signal, site, sshChat)
+          : await withDeadline(dispatch(ctx, method, body, controller.signal, site, sshChat), deadline, method)
         send(res, 200, { ok: true, value })
       } catch (error) { sendError(res, error) }
     },
@@ -461,7 +536,15 @@ export function apply(ctx: HostContext): void {
         const url = new URL(req.url ?? '/', 'http://dsh.local')
         const sessionId = url.searchParams.get('sessionId'); const directory = url.searchParams.get('directory'); const name = url.searchParams.get('name')
         if (sessionId === null || directory === null || name === null) throw new WorkbenchError('bad-request', 'sessionId, directory and name are required')
-        send(res, 201, { ok: true, value: await uploadFile(cwdFor(ctx, sessionId), directory, name, await readBinaryBody(req)) })
+        const cwd = cwdFor(ctx, sessionId)
+        const remote = remoteFileRef(directory)
+        const controller = new AbortController()
+        res.once('close', () => { if (!res.writableEnded) controller.abort() })
+        const content = await readBinaryBody(req)
+        const value = remote === undefined
+          ? await uploadFile(cwd, directory, name, content)
+          : await sshUploadFile(sessionId, remote.sessionIdConnection, remote.remotePath, name, content, controller.signal)
+        send(res, 201, { ok: true, value })
       } catch (error) { sendError(res, error) }
     },
     auth: 'required',
@@ -526,7 +609,38 @@ export function apply(ctx: HostContext): void {
   }), 'dsh-vscode-workbench: file preview')
 
   ctx.effect(() => ctx.webServer.register({
-    kind:'exact',path:'/dsh-vscode/download',handler:async(req,res)=>{if(!authorize(req,res,ctx.connection))return;try{const url=new URL(req.url??'/','http://dsh.local');const sessionId=url.searchParams.get('sessionId');const path=url.searchParams.get('path');if(sessionId===null||path===null)throw new WorkbenchError('bad-request','sessionId and path are required');const file=await workspaceDownloadFile(cwdFor(ctx,sessionId),path);res.writeHead(200,{'content-type':'application/octet-stream','content-length':file.size,'content-disposition':`attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`,'x-content-type-options':'nosniff','cache-control':'no-store'});createReadStream(file.path).on('error',error=>res.destroy(error)).pipe(res)}catch(error){sendError(res,error)}},
+    kind: 'exact', path: '/dsh-vscode/download', handler: async (req, res) => {
+      if (!authorize(req, res, ctx.connection)) return
+      try {
+        const url = new URL(req.url ?? '/', 'http://dsh.local')
+        const sessionId = url.searchParams.get('sessionId')
+        const path = url.searchParams.get('path')
+        if (sessionId === null || path === null) throw new WorkbenchError('bad-request', 'sessionId and path are required')
+        const cwd = cwdFor(ctx, sessionId)
+        const remote = remoteFileRef(path)
+        const controller = new AbortController()
+        res.once('close', () => { if (!res.writableEnded) controller.abort() })
+        const file = remote === undefined
+          ? await workspaceDownloadFile(cwd, path)
+          : await sshOpenFileDownload(sessionId, remote.sessionIdConnection, remote.remotePath, controller.signal)
+        const stream = 'child' in file ? file.child.stdout : createReadStream(file.path)
+        if ('child' in file) {
+          file.child.stderr.resume()
+          file.child.once('error', error => res.destroy(error))
+        }
+        res.writeHead(200, {
+          'content-type': 'application/octet-stream',
+          'content-length': file.size,
+          'content-disposition': `attachment; filename*=UTF-8''${encodeURIComponent(file.name)}`,
+          'x-content-type-options': 'nosniff',
+          'cache-control': 'no-store',
+        })
+        stream.once('error', (error: Error) => res.destroy(error)).pipe(res)
+      } catch (error) {
+        if (res.headersSent) res.destroy(error instanceof Error ? error : undefined)
+        else sendError(res, error)
+      }
+    },
     auth: 'required',
   }), 'dsh-vscode-workbench: file download')
 

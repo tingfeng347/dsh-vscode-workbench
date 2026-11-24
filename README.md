@@ -44,7 +44,7 @@ dsh plugin --profile web add dsh-vscode-workbench
 | Git 与文件审核 | 源代码管理支持暂存、提交、修改提交、推送和同步。暂存文件可按 `HEAD ↔ 暂存区` 对比，提交后自动刷新图表。并排差异的变更块可将对应行作为引用添加到 DSH 对话。默认使用 IDEA / PyCharm 并排差异，也可切回 VS Code 内联样式。 |
 | 语言智能与调试 | 按语言安装和重启语言服务，使用补全、定义、引用、修复、格式化与问题面板。调试面板支持断点、单步、调用栈和变量。 |
 | AI 辅助 | 提供关闭、手动和自动三种代码补全模式。可审阅全部或最新 AI 改动，逐块、按文件或批量处理，并自动跟随新改动。 |
-| SSH 远程开发 | 从 `~/.ssh/config` 或手动填写主机，使用本机 OpenSSH、ssh-agent、密钥或一次性密码连接。支持远程文件编辑、搜索替换、Git 暂存与提交、差异对比和远程终端。 |
+| SSH 远程开发 | 通过 `~/.ssh/config` 别名或手动填写主机，使用 OpenSSH、ssh-agent、私钥或密码连接。支持远程文件编辑、下载、拖放上传、搜索替换、Git 和终端。对话输入框下方的「选择 SSH」可切换已连接的工作区，支持远程文件和行号引用。 |
 | 文档与网页 | 在标签页预览 Markdown、图片、PDF、Excel、Word 和 PowerPoint，并用内置或系统浏览器打开网页与本地 HTML。 |
 | 终端与 DSH 对话 | 使用官方 Harness 终端的多会话、重命名和分屏，可从文件或编辑器向 DSH 添加内容，并打开会话中的生成文件链接。 |
 | 工作区、布局与窗口 | 管理 Workspace 和 Session，调整活动栏、侧栏、对话栏与终端布局及主题字号。浮动窗口支持拖动、缩放、全屏，并记住位置和尺寸。 |
@@ -114,7 +114,7 @@ dsh plugin --profile web add dsh-vscode-workbench
 
 ## 安全
 
-所有插件接口要求 Harness 登录认证。Host 只接受当前 DSH 会话工作目录内的相对路径，并阻止目录穿越与符号链接越界。保存使用版本校验与原子替换；Git 与 ripgrep 使用参数数组启动，不拼接 Shell 命令。SSH 使用本机 OpenSSH，密码只保留在连接内存中，并在远端通过 `realpath` 再次校验路径位于连接时确认的工作区根目录内。终端使用 Harness 官方控制器、连接认证和执行环境，在 Session 当前工作目录启动；凭据环境变量过滤由官方 subprocess provider 负责。
+所有插件接口要求 Harness 登录认证。Host 只接受当前 DSH 会话工作目录内的相对路径，并阻止目录穿越与符号链接越界。保存使用版本校验与原子替换；Git 与 ripgrep 使用参数数组启动，不拼接 Shell 命令。SSH 使用本机 OpenSSH，可将密码保存在系统凭据存储中。Linux 上的密码保存依赖 Secret Service。远程文件操作会通过 `realpath` 校验路径位于工作区内。对话中的远程命令从该工作区启动，以 SSH 用户权限运行。终端使用 Harness 官方控制器、连接认证和执行环境，在 Session 当前工作目录启动；凭据环境变量过滤由官方 subprocess provider 负责。
 
 ## 开发
 

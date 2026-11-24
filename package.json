@@ -74,6 +74,7 @@
   },
   "scripts": {
     "clean": "node scripts/clean.mjs lib dist",
+    "badges": "node scripts/update-badges.mjs",
     "build": "tsc -p tsconfig.build.json && tsdown",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

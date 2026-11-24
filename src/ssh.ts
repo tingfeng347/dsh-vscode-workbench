@@ -311,7 +311,7 @@ function sshFailure(result: ProcessResult): WorkbenchError {
 }
 
 function runSshOnce(target: Target, script: string, options: {
-  input?: string
+  input?: string | Buffer
   signal?: AbortSignal
   timeout?: number
   maxOutput?: number
@@ -365,7 +365,7 @@ function transientProcessClose(result: ProcessResult): boolean {
 }
 
 async function runSsh(target: Target, script: string, options: {
-  input?: string
+  input?: string | Buffer
   signal?: AbortSignal
   timeout?: number
   maxOutput?: number
@@ -546,22 +546,23 @@ export interface SshFilePreview {
   type: string
 }
 
-async function sshPreviewMetadata(
+async function sshFileMetadata(
   sessionId: string,
   connectionId: string,
   path: string,
   signal?: AbortSignal,
+  download = false,
 ): Promise<{ connection: LiveConnection; relative: string; name: string; size: number; type: string }> {
   const connection = connectionFor(sessionId, connectionId)
   const relative = remoteRelativePath(path)
-  const type = remotePreviewType(relative)
+  const type = download ? 'application/octet-stream' : remotePreviewType(relative)
   if (type === undefined) throw new WorkbenchError('unsupported-media', '远程文件不是支持的预览格式', 415)
   const script = [
     'set -eu',
     `cd -- ${shellQuote(connection.root)}`,
     ...remotePathGuard(relative),
     '[ -f "$p" ] || { echo "文件不存在" >&2; exit 20; }',
-    's=$(wc -c < "$p" | tr -d " ")',
+    's=$(stat -c %s -- "$p" 2>/dev/null) || s=$(stat -f %z -- "$p" 2>/dev/null) || s=$(wc -c < "$p" | tr -d " ")',
     'printf "PREVIEW\\t%s\\n" "$s"',
   ].join('\n')
   const result = await runSsh(connection.target, script, { signal, maxOutput: 16 * 1024, retryRead: true })
@@ -572,20 +573,21 @@ async function sshPreviewMetadata(
   if (marker !== 'PREVIEW' || !Number.isSafeInteger(size) || size < 0) {
     throw new WorkbenchError('ssh-response', '远程文件元数据无效', 502)
   }
-  if (size > REMOTE_PREVIEW_LIMIT) {
+  if (!download && size > REMOTE_PREVIEW_LIMIT) {
     throw new WorkbenchError('too-large', `远程文件超过 ${REMOTE_PREVIEW_LIMIT / 1024 / 1024} MiB，无法预览`, 413)
   }
   return { connection, relative, name: posix.basename(relative), size, type }
 }
 
 /** Start one binary-safe SSH stream after validating the remote path and preview size. */
-export async function sshOpenFilePreview(
+async function sshOpenFile(
   sessionId: string,
   connectionId: string,
   path: string,
   signal?: AbortSignal,
+  download = false,
 ): Promise<SshFilePreview> {
-  const file = await sshPreviewMetadata(sessionId, connectionId, path, signal)
+  const file = await sshFileMetadata(sessionId, connectionId, path, signal, download)
   const script = [
     'set -eu',
     `cd -- ${shellQuote(file.connection.root)}`,
@@ -607,6 +609,14 @@ export async function sshOpenFilePreview(
   child.stdin.on('error', () => undefined)
   child.stdin.end()
   return { child, name: file.name, size: file.size, type: file.type }
+}
+
+export function sshOpenFilePreview(sessionId: string, connectionId: string, path: string, signal?: AbortSignal): Promise<SshFilePreview> {
+  return sshOpenFile(sessionId, connectionId, path, signal)
+}
+
+export function sshOpenFileDownload(sessionId: string, connectionId: string, path: string, signal?: AbortSignal): Promise<SshFilePreview> {
+  return sshOpenFile(sessionId, connectionId, path, signal, true)
 }
 
 /** Read one remote preview file into memory for a converter such as LibreOffice. */
@@ -677,6 +687,93 @@ export async function sshSaveDocument(
   if (result.code === 23) throw new WorkbenchError('revision-conflict', '远程文件已在其他位置更改，请重新打开后再保存', 409)
   if (result.code !== 0) throwRemotePathFailure(result)
   return sshReadDocument(sessionId, connectionId, relative, signal)
+}
+
+function newRemotePath(directory: string, name: string): string {
+  if (name === '' || name === '.' || name === '..' || /[\\/\0]/.test(name)) {
+    throw new WorkbenchError('filename-invalid', '远程文件名无效')
+  }
+  const parent = remoteRelativePath(directory)
+  return parent === '' ? name : `${parent}/${name}`
+}
+
+function remoteEntryTarget(path: string): string[] {
+  const parent = posix.dirname(path)
+  return [
+    ...remotePathGuard(parent),
+    '[ -d "$real" ] || { echo "远程目录不存在" >&2; exit 20; }',
+    `dest="$real"/${shellQuote(posix.basename(path))}`,
+    'if [ -e "$dest" ] || [ -L "$dest" ]; then echo "目标已存在" >&2; exit 24; fi',
+  ]
+}
+
+async function changeRemoteEntry(
+  sessionId: string, connectionId: string, lines: string[], signal?: AbortSignal, input?: Buffer,
+): Promise<void> {
+  const connection = connectionFor(sessionId, connectionId)
+  const script = ['set -eu', `cd -- ${shellQuote(connection.root)}`, ...lines].join('\n')
+  const result = await runSsh(connection.target, script, { signal, input, maxOutput: 16 * 1024 })
+  if (result.code === 24) throw new WorkbenchError('target-exists', '远程目标已存在', 409)
+  if (result.code !== 0) throwRemotePathFailure(result)
+}
+
+export async function sshUploadFile(
+  sessionId: string, connectionId: string, directory: string, name: string, content: Buffer, signal?: AbortSignal,
+): Promise<FileEntry> {
+  const path = newRemotePath(directory, name)
+  await changeRemoteEntry(sessionId, connectionId, [
+    ...remoteEntryTarget(path),
+    'cd -- "$real"',
+    'tmp=$(mktemp ./.dvw-upload.XXXXXX)',
+    "trap 'rm -f -- \"$tmp\"' EXIT HUP INT TERM",
+    'cat > "$tmp"',
+    // Linking the complete file ensures that concurrent uploads cannot overwrite each other.
+    'if ln --help 2>/dev/null | grep -q -- --no-target-directory; then',
+    '  ln -T -- "$tmp" "$dest" 2>/dev/null || { if [ -e "$dest" ] || [ -L "$dest" ]; then exit 24; fi; exit 1; }',
+    'else',
+    '  ln -h -- "$tmp" "$dest" 2>/dev/null || { if [ -e "$dest" ] || [ -L "$dest" ]; then exit 24; fi; exit 1; }',
+    '  if ! [ "$tmp" -ef "$dest" ]; then',
+    `    nested="$dest"/${'${tmp##*/}'}`,
+    '    if [ "$tmp" -ef "$nested" ]; then rm -- "$nested"; fi',
+    '    exit 24',
+    '  fi',
+    'fi',
+  ], signal, content)
+  return { name, path, kind: 'file', size: content.length }
+}
+
+export async function sshCreateEntry(
+  sessionId: string, connectionId: string, path: string, kind: 'file' | 'directory', signal?: AbortSignal,
+): Promise<void> {
+  const relative = remoteRelativePath(path)
+  if (relative === '') throw new WorkbenchError('filename-invalid', '远程文件名无效')
+  await changeRemoteEntry(sessionId, connectionId, [
+    ...remoteEntryTarget(relative),
+    kind === 'directory' ? 'mkdir -- "$dest"' : '(set -C; : > "$dest")',
+  ], signal)
+}
+
+export async function sshRenameEntry(
+  sessionId: string, connectionId: string, path: string, nextPath: string, signal?: AbortSignal,
+): Promise<void> {
+  const source = remoteRelativePath(path)
+  const destination = remoteRelativePath(nextPath)
+  if (source === '' || destination === '' || destination.startsWith(`${source}/`)) {
+    throw new WorkbenchError('path-invalid', '无法移动远程工作区根目录或把文件夹移到自身内部')
+  }
+  await changeRemoteEntry(sessionId, connectionId, [
+    ...remotePathGuard(source),
+    'src="$p"',
+    ...remoteEntryTarget(destination),
+    'if mv --help 2>/dev/null | grep -q -- --no-target-directory; then mv -nT -- "$src" "$dest"; else mv -nh -- "$src" "$dest"; fi',
+    'if [ -e "$src" ] || [ -L "$src" ]; then exit 24; fi',
+  ], signal)
+}
+
+export async function sshDeleteEntry(sessionId: string, connectionId: string, path: string, signal?: AbortSignal): Promise<void> {
+  const relative = remoteRelativePath(path)
+  if (relative === '') throw new WorkbenchError('root-delete', '无法删除远程工作区根目录', 403)
+  await changeRemoteEntry(sessionId, connectionId, [...remotePathGuard(relative), 'rm -r -- "$p"'], signal)
 }
 
 export async function sshListFiles(

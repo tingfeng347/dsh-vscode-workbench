@@ -1,12 +1,15 @@
+import { ApiError } from './api.ts'
 import type { SshConnectRequest, SshConnection, SshHost } from '../types.ts'
 
 const HISTORY_KEY = 'dvw:ssh-hosts:v1'
 
 export type { SshConnectRequest, SshConnection, SshHost }
 
-export interface SshHistoryEntry extends Omit<SshConnectRequest, 'password'> {
+export interface SshHistoryEntry extends Omit<SshConnectRequest, 'password' | 'savePassword' | 'useSavedPassword'> {
   label: string
   lastUsed: string
+  authMethod?: 'password' | 'key'
+  passwordSaved?: boolean
 }
 
 /** Encode a remote file as an editor path without making its directory structure ambiguous. */
@@ -61,14 +64,20 @@ export function readSshHistory(): SshHistoryEntry[] {
   }
 }
 
-export function rememberSshHost(request: SshConnectRequest, label: string): SshHistoryEntry[] {
-  const { password: _password, ...safeRequest } = request
+export function rememberSshHost(request: SshConnectRequest, label: string, authMethod?: SshHistoryEntry['authMethod'], passwordSaved?: boolean): SshHistoryEntry[] {
+  const { password: _password, savePassword: _save, useSavedPassword: _use, ...safeRequest } = request
+  const previous = readSshHistory()
+  const last = previous.find(row => row.host === request.host && row.user === request.user)
+  const method = authMethod ?? (request.password ? 'password' : last?.authMethod)
+  const saved = passwordSaved ?? last?.passwordSaved
   const entry: SshHistoryEntry = {
+    ...(method === undefined ? {} : { authMethod: method }),
+    ...(method === 'password' && saved !== undefined ? { passwordSaved: saved } : {}),
     ...safeRequest,
     label,
     lastUsed: new Date().toISOString(),
   }
-  const next = [entry, ...readSshHistory().filter(row => !(row.host === entry.host && row.user === entry.user && row.workspace === entry.workspace))].slice(0, 20)
+  const next = [entry, ...previous.filter(row => !(row.host === entry.host && row.user === entry.user && row.workspace === entry.workspace))].slice(0, 20)
   try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)) } catch { /* Private browsing can still use the current connection. */ }
   return next
 }
@@ -77,4 +86,19 @@ export function forgetSshHost(host: string): SshHistoryEntry[] {
   const next = readSshHistory().filter(row => row.host !== host)
   try { localStorage.setItem(HISTORY_KEY, JSON.stringify(next)) } catch { /* Keep the in-memory form usable. */ }
   return next
+}
+
+export function errorText(error: unknown): string {
+  return error instanceof Error ? error.message : String(error)
+}
+
+
+export function sshDisconnected(error: unknown): boolean {
+  return error instanceof ApiError && error.code === 'ssh-disconnected'
+}
+
+
+export function fileParts(path: string): { directory: string; name: string } {
+  const index = path.lastIndexOf('/')
+  return index < 0 ? { directory: '', name: path } : { directory: path.slice(0, index), name: path.slice(index + 1) }
 }

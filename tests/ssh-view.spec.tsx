@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, expect, it, onTestFinished, vi } from 'vitest'
 import { SSHView } from '../src/client/SSHView.tsx'
 import type { SshConnection } from '../src/types.ts'
 
@@ -147,7 +147,19 @@ it('shows the remote explorer heading and runs an explicit remote search', async
   expect(JSON.parse(fileRequests.at(-1)!)).toMatchObject({ connectionId: connection.id, path: '' })
 })
 
-it('opens the SSH terminal after a successful connection', async () => {
+it('opens SSH failure details outside the sidebar and retries the same host', async () => {
+  // jsdom does not implement the browser's modal-dialog lifecycle.
+  const dialogPrototype = HTMLDialogElement.prototype
+  if (typeof dialogPrototype.showModal !== 'function') {
+    Object.defineProperties(dialogPrototype, {
+      showModal: { configurable: true, value(this: HTMLDialogElement) { this.open = true } },
+      close: { configurable: true, value(this: HTMLDialogElement) { this.open = false } },
+    })
+    onTestFinished(() => {
+      Reflect.deleteProperty(dialogPrototype, 'showModal')
+      Reflect.deleteProperty(dialogPrototype, 'close')
+    })
+  }
   const host = { alias: 'build', hostName: 'build.example.com', user: 'deploy' }
   const connection: SshConnection = {
     id: 'connection-2',
@@ -158,8 +170,16 @@ it('opens the SSH terminal after a successful connection', async () => {
     root: '/srv/app',
     connectedAt: '2026-11-23T00:00:00Z',
   }
-  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+  const requests: unknown[] = []
+  const detail = 'ssh: connect to host build.example.com port 22: Connection refused'
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
     const method = url.split('/').at(-1)
+    if (method === 'ssh.connect') {
+      requests.push(JSON.parse(String(init?.body)))
+      if (requests.length <= 2) {
+        return Response.json({ ok: false, error: { code: 'ssh-network', message: detail } }, { status: 502 })
+      }
+    }
     const value = method === 'ssh.hosts'
       ? { hosts: [host], configPath: '/tmp/ssh/config' }
       : method === 'ssh.connections'
@@ -183,7 +203,122 @@ it('opens the SSH terminal after a successful connection', async () => {
     return value!
   })
   await act(async () => target.click())
-  await vi.waitFor(() => expect(onTerminal).toHaveBeenCalledWith(connection))
+  const failure = () => document.querySelector<HTMLDialogElement>('dialog[aria-label="SSH 连接失败"]')
+  expect(failure()?.open).toBe(true)
+  expect(document.querySelector('.dvw-ssh-error')).toBeNull()
+  expect(failure()?.textContent).toContain('无法连接到「build」')
+  expect(failure()?.querySelector('details')?.open).toBe(false)
+  await act(async () => failure()?.querySelector('summary')?.click())
+  expect(failure()?.querySelector('details')?.open).toBe(true)
+  expect(failure()?.querySelector('pre')?.textContent).toBe(detail)
+
+  const action = (label: string) => Array.from(failure()!.querySelectorAll('button')).find(button => button.textContent?.trim() === label)!
+  await act(async () => action('关闭').click())
+  expect(failure()).toBeNull()
+  expect(target.disabled).toBe(false)
+
+  await act(async () => target.click())
+  await act(async () => action('重试').click())
+  expect(requests).toHaveLength(3)
+  expect(requests[2]).toEqual(requests[1])
+  expect(failure()).toBeNull()
+  expect(onTerminal).toHaveBeenCalledWith(connection)
+})
+
+it('opens the SSH connection form in a top-level dialog layer', async () => {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    const method = url.split('/').at(-1)
+    const value = method === 'ssh.hosts' ? { hosts: [] } : []
+    return Response.json({ ok: true, value })
+  }))
+  const node = document.createElement('div')
+  document.body.append(node)
+  root = createRoot(node)
+  await act(async () => {
+    root!.render(<SSHView sessionId="s" visible isDirty={() => false} onOpen={() => {}} onDiff={() => {}} onChanged={() => {}} onTerminal={() => {}}/>)
+  })
+  await act(async () => document.querySelector<HTMLButtonElement>('[title="新建远程"]')!.click())
+
+  const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="新建 SSH 远程"]')!
+  const layer = dialog.parentElement
+  expect(layer?.parentElement).toBe(document.body)
+  expect(layer?.classList).toContain('dvw-ssh-dialog-layer')
+  expect(dialog.querySelector<HTMLDetailsElement>('details')?.open).toBe(true)
+  expect(dialog.querySelector<HTMLButtonElement>('button[type="submit"]')?.textContent).toBe('连接')
+})
+
+it.each([
+  ['password', true], ['password', false], ['key', false],
+] as const)('reopens a %s target with password saved = %s', async (method, passwordSaved) => {
+  const requests: Record<string, unknown>[] = []
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const action = url.split('/').at(-1)
+    if (action === 'ssh.connect') {
+      requests.push(JSON.parse(String(init?.body)))
+      if (requests.at(-1)?.useSavedPassword) {
+        return Response.json({ ok: false, error: { code: 'ssh-password-unavailable', message: 'unavailable' } }, { status: 409 })
+      }
+    }
+    const value = action === 'ssh.hosts' ? { hosts: [{ alias: 'build', hostName: 'build', identityFile: '/original/key' }] } : action === 'ssh.connect' ? {
+      id: 'password-login', label: 'build', host: 'build', hostName: 'build', root: '/srv', connectedAt: 'now', passwordSaved,
+    } : []
+    return Response.json({ ok: true, value })
+  }))
+  const node = document.createElement('div')
+  document.body.append(node)
+  root = createRoot(node)
+  await act(async () => root!.render(<SSHView sessionId="s" visible isDirty={() => false} onOpen={() => {}} onDiff={() => {}} onChanged={() => {}} onTerminal={() => {}}/>))
+  await act(async () => document.querySelector<HTMLButtonElement>('[title="新建远程"]')!.click())
+  const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="新建 SSH 远程"]')!
+  const set = async (label: string, value: string) => {
+    const input = [...dialog.querySelectorAll('label')].find(item => item.querySelector('span')?.textContent === label)?.querySelector('input')!
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(input, value)
+    await act(async () => input.dispatchEvent(new Event('input', { bubbles: true })))
+  }
+  const select = dialog.querySelector<HTMLSelectElement>('select')!
+  const changeMethod = async (value: string) => {
+    await act(async () => {
+      select.value = value
+      select.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+  }
+  await set('私钥路径', '/local/test key')
+  await changeMethod('password')
+  expect(dialog.textContent).toContain('登录用户')
+  expect(dialog.textContent).toContain('登录密码')
+  expect([...dialog.querySelectorAll('label span')].some(span => span.textContent === '私钥路径')).toBe(false)
+  await set('输入 SSH 主机', 'build')
+  await set('登录用户', 'root')
+  await set('登录密码', 'one-time-secret')
+  if (method === 'key') await changeMethod('key')
+  await act(async () => dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click())
+  await vi.waitFor(() => expect(requests).toHaveLength(1))
+  expect(requests[0]).toMatchObject({ host: 'build', user: 'root' })
+  if (method === 'password') {
+    expect(requests[0]).toMatchObject({ password: 'one-time-secret', savePassword: true })
+    expect(requests[0]).not.toHaveProperty('identityFile')
+  } else {
+    expect(requests[0]).toHaveProperty('identityFile', '/local/test key')
+    expect(requests[0]).not.toHaveProperty('password')
+  }
+  expect(localStorage.getItem('dvw:ssh-hosts:v1')).not.toContain('one-time-secret')
+
+  await act(async () => root!.unmount())
+  root = createRoot(node)
+  await act(async () => root!.render(<SSHView sessionId="s" visible isDirty={() => false} onOpen={() => {}} onDiff={() => {}} onChanged={() => {}} onTerminal={() => {}}/>))
+  await act(async () => document.querySelector<HTMLButtonElement>('.dvw-ssh-target-main')!.click())
+  if (method === 'password') {
+    expect(document.querySelector<HTMLSelectElement>('[aria-label="验证方式"]')?.value).toBe('password')
+    expect(document.querySelector<HTMLInputElement>('input[type="password"]')?.value).toBe('')
+    expect(requests).toHaveLength(passwordSaved ? 2 : 1)
+    if (passwordSaved) {
+      expect(requests[1]).toHaveProperty('useSavedPassword', true)
+      expect(requests[1]).not.toHaveProperty('password')
+      expect(document.querySelector('[role="alert"]')?.textContent).toContain('请重新输入')
+    }
+  } else {
+    expect(requests[1]).toMatchObject({ user: 'root', identityFile: '/local/test key' })
+  }
 })
 
 it('switches the connected SSH workspace without reconnecting', async () => {
@@ -357,4 +492,58 @@ it('retries a transient SSH connection close once after two seconds', async () =
   expect(connectAttempts).toBe(2)
   expect(document.querySelector('[role="alert"]')).toBeNull()
   expect(onTerminal).toHaveBeenCalledWith(connection)
+})
+
+it('downloads remote files and uploads drops to the directory under the pointer', async () => {
+  const connection: SshConnection = {
+    id: 'remote-transfer', host: 'transfer', hostName: 'transfer.invalid', label: 'transfer',
+    root: '/srv/project', connectedAt: '2026-11-23T00:00:00Z',
+  }
+  const directory = { name: 'docs', path: 'docs', kind: 'directory' }
+  const file = { name: 'index.txt', path: 'index.txt', kind: 'file' }
+  const upload = vi.fn()
+  vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+    const address = new URL(url, 'http://workspace.local')
+    if (address.pathname.endsWith('/upload')) {
+      upload(address.searchParams, init?.body)
+      return Response.json({ ok: true, value: { name: 'data.bin', path: 'docs/data.bin', kind: 'file' } })
+    }
+    const method = address.pathname.split('/').at(-1)
+    const value = method === 'ssh.hosts' ? { hosts: [] } : method === 'ssh.connections' ? [connection]
+      : method === 'ssh.list' && JSON.parse(String(init?.body)).path === '' ? [directory, file] : []
+    return Response.json({ ok: true, value })
+  }))
+  const onAddToDsh = vi.fn()
+  const node = document.createElement('div')
+  document.body.append(node)
+  root = createRoot(node)
+  await act(async () => root!.render(<SSHView sessionId="s" visible isDirty={() => false} onOpen={() => {}} onAddToDsh={onAddToDsh} onDiff={() => {}} onChanged={() => {}} onTerminal={() => {}}/>))
+  const rows = document.querySelectorAll<HTMLElement>('.dvw-ssh-tree-row')
+  expect(rows).toHaveLength(2)
+  const href = vi.fn()
+  const download = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { href(this.href) })
+  const menu = (label: string) => Array.from(document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')).find(button => button.textContent?.trim() === label)!
+  try {
+    await act(async () => rows[1]!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })))
+    expect(menu('下载')).toBeDefined()
+    expect(menu('重命名')).toBeDefined()
+    expect(menu('删除')).toBeDefined()
+    await act(async () => menu('下载').click())
+    const url = new URL(href.mock.calls[0]![0])
+    expect(url.pathname).toBe('/dsh-vscode/download')
+    expect(url.searchParams.get('path')).toBe('ssh://remote-transfer/index.txt')
+    await act(async () => rows[1]!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })))
+    await act(async () => menu('添加到 DSH 对话').click())
+    expect(onAddToDsh).toHaveBeenCalledWith(connection, file)
+  } finally { download.mockRestore() }
+
+  const binary = new File([new Uint8Array([0, 255])], 'data.bin')
+  const drop = new Event('drop', { bubbles: true, cancelable: true })
+  Object.defineProperty(drop, 'dataTransfer', { value: { types: ['Files'], files: [binary] } })
+  await act(async () => rows[0]!.dispatchEvent(drop))
+  expect(drop.defaultPrevented).toBe(true)
+  const [params, body] = upload.mock.calls[0]!
+  expect(params.get('directory')).toBe('ssh://remote-transfer/docs')
+  expect(params.get('name')).toBe('data.bin')
+  expect(body).toBe(binary)
 })

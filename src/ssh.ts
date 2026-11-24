@@ -457,6 +457,12 @@ export function sshTargetArguments(connection: Pick<LiveConnection, 'target'>): 
   return sshArguments(connection.target, true)
 }
 
+export async function sshExecute(sessionId: string, connectionId: string, command: string, signal: AbortSignal, timeout = 30_000): Promise<ProcessResult> {
+  const connection = connectionFor(sessionId, connectionId)
+  const script = `cd -- ${shellQuote(connection.root)} || exit $?\n${command}`
+  return runSsh(connection.target, script, { signal, timeout, maxOutput: 512 * 1024 })
+}
+
 async function resolveRemoteWorkspace(target: Target, workspace: string): Promise<string> {
   const requestedWorkspace = optionalText(workspace, '远程工作区', 8192)?.trim() || '.'
   const cd = requestedWorkspace === '~'
@@ -520,9 +526,11 @@ export async function switchSshWorkspace(
   sessionId: string,
   connectionId: string,
   workspace: string,
+  keepCurrent = false,
 ): Promise<SshConnection> {
   const current = connectionFor(sessionId, connectionId)
   const root = await resolveRemoteWorkspace(current.target, workspace)
+  connectionFor(sessionId, connectionId)
   const next: LiveConnection = {
     ...current,
     id: randomUUID(),
@@ -530,7 +538,7 @@ export async function switchSshWorkspace(
     connectedAt: new Date().toISOString(),
   }
   connections.set(keyFor(sessionId, next.id), next)
-  connections.delete(keyFor(sessionId, connectionId))
+  if (!keepCurrent) connections.delete(keyFor(sessionId, connectionId))
   return publicSshConnection(next)
 }
 

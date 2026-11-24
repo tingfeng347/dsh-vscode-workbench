@@ -26,6 +26,7 @@ import { watchIgnore, workspaceWatchIgnores } from './watch-ignore.ts'
 import { isStaleManifest } from './workspace-watch.ts'
 import { createWorkspaceWatcher } from './workspace-watch-host.ts'
 import { connectSsh, disconnectSsh, getLiveSshConnection, liveSshConnections, listSshHosts, shellQuote, sshEnvironment, sshGit, sshCreateEntry, sshDeleteEntry, sshRenameEntry, sshUploadFile, sshListFiles, sshOpenFileDownload, sshOpenFilePreview, sshReadDocument, sshReadPreviewFile, sshReplaceSearchResults, sshSaveDocument, sshSearchWorkspace, sshStatus, sshTargetArguments, switchSshWorkspace } from './ssh.ts'
+import { SshChat, type ChatServices } from './ssh-chat.ts'
 import { readBinaryBody, readBody, send, sendError, stringField, authorize, WorkbenchError } from './wire.ts'
 
 export { WorkbenchError } from './wire.ts'
@@ -169,7 +170,7 @@ function traceDebug(text: string): void {
   try { appendFileSync(joinPath(tmpdir(), 'dvw-api.log'), `${new Date().toISOString()} ${text}\n`) } catch { /* diagnosis only */ }
 }
 
-async function dispatch(ctx: HostContext, method: string, body: Record<string, unknown>, signal?: AbortSignal, site?: WorkspaceSite): Promise<unknown> {
+async function dispatch(ctx: HostContext, method: string, body: Record<string, unknown>, signal?: AbortSignal, site?: WorkspaceSite, sshChat?: SshChat): Promise<unknown> {
   if (method === 'commit.models') {
     const llm: LlmRuntime | undefined = ctx.get('llm')
     if (llm === undefined) throw new WorkbenchError('llm-unavailable', 'DSH 的模型服务当前不可用。', 503)
@@ -311,6 +312,11 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     case 'search.replace':
       if (cwd !== stringField(body, 'cwd')) throw new WorkbenchError('workspace-changed', '工作区已切换，请重新搜索', 409)
       return replaceSearchResults(cwd, body.files as SearchFileEdits[])
+    case 'ssh.chat.status': return sshChat?.status(sessionId) ?? { available: false }
+    case 'ssh.chat.select': {
+      if (!sshChat) throw new WorkbenchError('ssh-chat-unavailable', '当前 DSH 没有提供 SSH 对话接口。', 503)
+      return sshChat.select(sessionId, body.connectionId === null ? null : stringField(body, 'connectionId'))
+    }
     case 'ssh.hosts': return listSshHosts()
     case 'ssh.connections': return liveSshConnections(sessionId)
     case 'ssh.connect': return connectSsh(sessionId, {
@@ -326,7 +332,11 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
     })
     case 'ssh.status': return sshStatus(sessionId, stringField(body, 'connectionId'))
     case 'ssh.disconnect': return disconnectSsh(sessionId, stringField(body, 'connectionId'))
-    case 'ssh.workspace': return switchSshWorkspace(sessionId, stringField(body, 'connectionId'), stringField(body, 'path'))
+    case 'ssh.workspace': {
+      const connectionId = stringField(body, 'connectionId')
+      const keepCurrent = sshChat?.status(sessionId).target?.id === connectionId
+      return switchSshWorkspace(sessionId, connectionId, stringField(body, 'path'), keepCurrent)
+    }
     case 'ssh.list': return sshListFiles(sessionId, stringField(body, 'connectionId'), stringField(body, 'path'), signal)
     case 'ssh.read': return sshReadDocument(sessionId, stringField(body, 'connectionId'), stringField(body, 'path'), signal)
     case 'ssh.save': return sshSaveDocument(sessionId, stringField(body, 'connectionId'), stringField(body, 'path'), stringField(body, 'content'), stringField(body, 'revision'), signal)
@@ -416,6 +426,12 @@ async function dispatch(ctx: HostContext, method: string, body: Record<string, u
 
 export function apply(ctx: HostContext): void {
   const site = new WorkspaceSite(ctx)
+  const sshChat = new SshChat()
+  ctx.effect(() => {
+    if (typeof ctx.inject !== 'function') return
+    const fiber = ctx.inject(['tools', 'agents', 'sandboxPolicy', 'fileReferences'], child => sshChat.install(child as unknown as ChatServices))
+    return () => { void fiber.dispose?.() }
+  }, 'dsh-vscode-workbench: optional SSH chat tools')
   ctx.effect(() => () => site.dispose(), 'dsh-vscode-workbench: workspace sites')
   ctx.effect(() => {
     if (typeof ctx.inject !== 'function') return
@@ -504,8 +520,8 @@ export function apply(ctx: HostContext): void {
         // while the work kept running in the background. Everything else is bounded inside itself.
         const deadline = API_DEADLINES[method]
         const value = deadline === undefined
-          ? await dispatch(ctx, method, body, controller.signal, site)
-          : await withDeadline(dispatch(ctx, method, body, controller.signal, site), deadline, method)
+          ? await dispatch(ctx, method, body, controller.signal, site, sshChat)
+          : await withDeadline(dispatch(ctx, method, body, controller.signal, site, sshChat), deadline, method)
         send(res, 200, { ok: true, value })
       } catch (error) { sendError(res, error) }
     },

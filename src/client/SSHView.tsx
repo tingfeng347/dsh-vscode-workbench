@@ -1,22 +1,29 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import type { FileEntry, GitDiff, GitStatus, SearchMatch, SearchReplaceResult, SshConnection, SshHost } from '../types.ts'
 import { ApiError, api, waitForDelay } from './api.ts'
 import { FileIcon } from './FileIcon.tsx'
+import { RemoteTree } from './SSHRemoteTree.tsx'
 import { Icon } from './Icon.tsx'
 import { PanelResizer } from './PanelResizer.tsx'
-import { forgetSshHost, readSshHistory, rememberSshHost, remoteFileUri, type SshConnectRequest, type SshHistoryEntry } from './ssh.ts'
+import { errorText, fileParts, forgetSshHost, sshDisconnected, readSshHistory, rememberSshHost, remoteFileUri, type SshConnectRequest, type SshHistoryEntry } from './ssh.ts'
 
 interface Props {
   sessionId: string
   visible: boolean
+  chatConnectionId?: string
   isDirty(path: string): boolean
+  onOpenSource?(path: string): void
   onOpen(path: string, line?: number, column?: number, match?: string): void
+  onAddToDsh?(connection: SshConnection, entry: FileEntry): void
   onDiff(key: string, diff: GitDiff, title: string, sourcePath: string): void
   onChanged(paths: string[]): void
   onTerminal(connection: SshConnection, options?: { open?: boolean }): void
 }
 
 interface HostForm {
+  authMethod: 'password' | 'key'
+  savePassword: boolean
   host: string
   user: string
   password: string
@@ -26,7 +33,7 @@ interface HostForm {
   label: string
 }
 
-const EMPTY_FORM: HostForm = { host: '', user: '', password: '', port: '', identityFile: '', workspace: '.', label: '' }
+const EMPTY_FORM: HostForm = { authMethod: 'key', savePassword: true, host: '', user: '', password: '', port: '', identityFile: '', workspace: '.', label: '' }
 const SSH_TARGETS_FRACTION_KEY = 'dvw:ssh-targets-fraction-v2'
 type RemotePanel = 'files' | 'search' | 'git'
 
@@ -40,121 +47,12 @@ function readTargetsFraction(): number {
   }
 }
 
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
-
-function sshDisconnected(error: unknown): boolean {
-  return error instanceof ApiError && error.code === 'ssh-disconnected'
-}
-
 function transientSshClose(error: unknown): boolean {
   return /connection closed by .+ port \d+|connection reset by peer|broken pipe/i.test(errorText(error))
 }
 
-function fileParts(path: string): { directory: string; name: string } {
-  const index = path.lastIndexOf('/')
-  return index < 0 ? { directory: '', name: path } : { directory: path.slice(0, index), name: path.slice(index + 1) }
-}
-
 function Toggle({ pressed, label, icon, onClick }: { pressed: boolean; label: string; icon: 'case-sensitive' | 'whole-word' | 'regex'; onClick(): void }) {
   return <button type="button" className="dvw-icon" title={label} aria-label={label} aria-pressed={pressed} onClick={onClick}><Icon name={icon}/></button>
-}
-
-function RemoteTree({ sessionId, connection, visible, onOpen, onDisconnected }: {
-  sessionId: string
-  connection: SshConnection
-  visible: boolean
-  onOpen(path: string): void
-  onDisconnected(connectionId: string): void
-}) {
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set(['']))
-  const [rows, setRows] = useState<ReadonlyMap<string, FileEntry[]>>(new Map())
-  const [loading, setLoading] = useState<ReadonlySet<string>>(new Set())
-  const [errors, setErrors] = useState<ReadonlyMap<string, string>>(new Map())
-  const requests = useRef(new Map<string, AbortController>())
-
-  const load = useCallback(async (path: string) => {
-    if (requests.current.has(path)) return
-    const request = new AbortController()
-    requests.current.set(path, request)
-    setLoading(current => new Set(current).add(path))
-    setErrors(current => {
-      if (!current.has(path)) return current
-      const next = new Map(current)
-      next.delete(path)
-      return next
-    })
-    try {
-      const entries = await api<FileEntry[]>('ssh.list', { sessionId, connectionId: connection.id, path }, request.signal)
-      if (!request.signal.aborted) setRows(current => new Map(current).set(path, entries))
-    } catch (cause) {
-      if (request.signal.aborted) return
-      if (sshDisconnected(cause)) onDisconnected(connection.id)
-      else setErrors(current => new Map(current).set(path, errorText(cause)))
-    } finally {
-      if (!request.signal.aborted) {
-        requests.current.delete(path)
-        setLoading(current => {
-          const next = new Set(current)
-          next.delete(path)
-          return next
-        })
-      }
-    }
-  }, [connection.id, onDisconnected, sessionId])
-
-  useEffect(() => {
-    const active = requests.current
-    return () => {
-      for (const request of active.values()) request.abort()
-      active.clear()
-    }
-  }, [])
-
-  useEffect(() => {
-    if (visible) void load('')
-  }, [visible, load])
-
-  const retry = (path: string) => {
-    const error = errors.get(path)
-    return error === undefined ? null : <div key={`error:${path}`} className="dvw-ssh-tree-error" role="alert">
-      <span>{error}</span>
-      <button type="button" className="dvw-icon" aria-label={path === '' ? '重试读取工作区' : `重试读取 ${path}`} title="重试读取目录" onClick={() => void load(path)}><Icon name="refresh"/></button>
-    </div>
-  }
-
-  const toggle = (path: string) => {
-    const opening = !expanded.has(path)
-    setExpanded(current => {
-      const next = new Set(current)
-      if (opening) next.add(path)
-      else next.delete(path)
-      return next
-    })
-    if (opening && !rows.has(path)) void load(path)
-  }
-
-  const render = (path: string, depth: number): React.ReactNode[] => (rows.get(path) ?? []).flatMap(entry => {
-    const isDirectory = entry.kind === 'directory'
-    const open = expanded.has(entry.path)
-    const header = <div key={`${isDirectory ? 'd' : 'f'}:${entry.path}`} className="dvw-ssh-tree-row" style={{ paddingLeft: 8 + depth * 14 }} role="treeitem" aria-expanded={isDirectory ? open : undefined} onClick={() => isDirectory ? toggle(entry.path) : onOpen(remoteFileUri(connection.id, entry.path))}>
-      <span className="dvw-chevron">{isDirectory ? <Icon name={open ? 'chevron-down' : 'chevron-right'}/> : null}</span>
-      <FileIcon name={entry.name} directory={isDirectory} expanded={open}/>
-      <span className="dvw-ssh-tree-name" title={entry.path}>{entry.name}</span>
-      {loading.has(entry.path) && <span className="dvw-ssh-spinner" aria-label="正在读取目录"/>}
-    </div>
-    return isDirectory ? [header, ...(open ? [retry(entry.path), ...render(entry.path, depth + 1)] : [])] : [header]
-  })
-
-  return <section className="dvw-ssh-section dvw-ssh-tree-section" hidden={!visible}>
-    {retry('')}
-    {!rows.has('') && loading.has('') && <div className="dvw-ssh-empty" role="status">正在读取远程文件…</div>}
-    <div className="dvw-ssh-tree" role="tree" aria-busy={loading.has('')}>
-      {rows.get('')?.length === 0 && <div className="dvw-ssh-empty">工作区为空</div>}
-      {render('', 0)}
-    </div>
-  </section>
 }
 
 function RemoteSearch({ sessionId, connection, isDirty, onOpen, onChanged, onDisconnected }: Pick<Props, 'sessionId' | 'isDirty' | 'onOpen' | 'onChanged'> & { connection: SshConnection; onDisconnected(): void }) {
@@ -419,6 +317,8 @@ function RemoteWorkspacePicker({ sessionId, connection, onClose, onSelect }: {
 }
 
 interface SshTarget {
+  passwordSaved?: boolean
+  authMethod?: SshHistoryEntry['authMethod']
   key: string
   host: string
   label: string
@@ -447,9 +347,52 @@ function parseRemoteAddress(value: string): Pick<HostForm, 'host' | 'user' | 'po
   return { host, user, port }
 }
 
-export function SSHView({ sessionId, visible, isDirty, onOpen, onDiff, onChanged, onTerminal }: Props) {
+function ConnectionFailureDialog({ host, detail, retrying, onRetry, onClose }: {
+  host: string
+  detail: string
+  retrying: boolean
+  onRetry(): void
+  onClose(): void
+}) {
+  const dialog = useRef<HTMLDialogElement>(null)
+  useEffect(() => {
+    const node = dialog.current
+    node?.showModal()
+    return () => node?.close()
+  }, [])
+
+  return <dialog
+    ref={dialog}
+    className="dvw-ssh-connection-dialog"
+    aria-label="SSH 连接失败"
+    onCancel={event => {
+      event.preventDefault()
+      if (!retrying) onClose()
+    }}
+  >
+    <div className="dvw-ssh-quickpick">
+      <div className="dvw-ssh-quickpick-head"><strong>SSH 连接失败</strong></div>
+      <div className="dvw-ssh-quickpick-body">
+        <p className="dvw-ssh-connection-message">无法连接到「{host}」。</p>
+        <details className="dvw-ssh-quickpick-options">
+          <summary>连接详情</summary>
+          <pre className="dvw-ssh-connection-detail">{detail}</pre>
+        </details>
+      </div>
+      <div className="dvw-ssh-quickpick-actions">
+        <button type="button" disabled={retrying} onClick={onClose}>关闭</button>
+        <button type="button" className="dvw-ssh-primary" disabled={retrying} onClick={onRetry}>
+          {retrying ? '正在连接…' : '重试'}
+        </button>
+      </div>
+    </div>
+  </dialog>
+}
+
+export function SSHView({ sessionId, visible, chatConnectionId, isDirty, onOpen, onOpenSource, onAddToDsh, onDiff, onChanged, onTerminal }: Props) {
   const [hosts, setHosts] = useState<SshHost[]>([])
   const [history, setHistory] = useState<SshHistoryEntry[]>(readSshHistory)
+  const [passwordPrompt, setPasswordPrompt] = useState<string>()
   const [form, setForm] = useState<HostForm>(EMPTY_FORM)
   const [connection, setConnection] = useState<SshConnection>()
   const [newRemoteOpen, setNewRemoteOpen] = useState(false)
@@ -462,6 +405,7 @@ export function SSHView({ sessionId, visible, isDirty, onOpen, onDiff, onChanged
   const [sshHeight, setSshHeight] = useState(0)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
+  const [connectionFailure, setConnectionFailure] = useState<{ request: SshConnectRequest; detail: string; authMethod?: HostForm['authMethod']; promptTarget?: SshTarget }>()
   const activeConnectionId = useRef(connection?.id)
   activeConnectionId.current = connection?.id
   const formRef = useRef<HTMLInputElement>(null)
@@ -487,8 +431,8 @@ export function SSHView({ sessionId, visible, isDirty, onOpen, onDiff, onChanged
   }, [visible, sessionId])
 
   useEffect(() => {
-    if (newRemoteOpen) requestAnimationFrame(() => formRef.current?.focus())
-  }, [newRemoteOpen])
+    if (newRemoteOpen && connectionFailure === undefined) requestAnimationFrame(() => formRef.current?.focus())
+  }, [connectionFailure, newRemoteOpen])
 
   useEffect(() => {
     const node = rootRef.current
@@ -527,10 +471,13 @@ export function SSHView({ sessionId, visible, isDirty, onOpen, onDiff, onChanged
     for (const entry of history.slice(0, 8)) {
       const configured = [...result.values()].find(target => target.host === entry.host || target.label === entry.host)
       if (configured !== undefined) {
+        if (configured.fromHistory) continue
         configured.workspace = entry.workspace ?? configured.workspace
-        if (configured.user === undefined && entry.user !== undefined) configured.user = entry.user
-        if (configured.port === undefined && entry.port !== undefined) configured.port = entry.port
-        if (configured.identityFile === undefined && entry.identityFile !== undefined) configured.identityFile = entry.identityFile
+        if (entry.user !== undefined) configured.user = entry.user
+        if (entry.port !== undefined) configured.port = entry.port
+        if (entry.identityFile !== undefined) configured.identityFile = entry.identityFile
+        if (entry.authMethod !== undefined) configured.authMethod = entry.authMethod
+        if (entry.passwordSaved !== undefined) configured.passwordSaved = entry.passwordSaved
         configured.fromHistory = true
         continue
       }
@@ -539,6 +486,8 @@ export function SSHView({ sessionId, visible, isDirty, onOpen, onDiff, onChanged
         key,
         host: entry.host,
         label: entry.label,
+        ...(entry.passwordSaved === undefined ? {} : { passwordSaved: entry.passwordSaved }),
+        ...(entry.authMethod === undefined ? {} : { authMethod: entry.authMethod }),
         hostName: entry.host,
         ...(entry.user === undefined ? {} : { user: entry.user }),
         ...(entry.port === undefined ? {} : { port: entry.port }),
@@ -559,7 +508,8 @@ export function SSHView({ sessionId, visible, isDirty, onOpen, onDiff, onChanged
     label: target.label,
   })
 
-  const openConnection = async (request: SshConnectRequest) => {
+  const openConnection = async (request: SshConnectRequest, authMethod?: HostForm['authMethod'], promptTarget?: SshTarget) => {
+    if (busy) return
     setBusy(true)
     setError(undefined)
     try {
@@ -572,16 +522,26 @@ export function SSHView({ sessionId, visible, isDirty, onOpen, onDiff, onChanged
         await waitForDelay(2000)
         opened = await connect()
       }
+      setConnectionFailure(undefined)
       setConnection(opened)
-      setHistory(rememberSshHost(request, opened.label))
+      window.dispatchEvent(new Event('dvw-ssh-connections-changed'))
+      setHistory(rememberSshHost({
+        ...request,
+        ...(opened.identityFile === undefined ? {} : { identityFile: opened.identityFile }),
+      }, opened.label, authMethod, opened.passwordSaved))
       setForm(current => ({ ...current, password: '' }))
       setNewRemoteOpen(false)
-      setError(undefined)
+      setError(request.savePassword && !opened.passwordSaved ? 'SSH 已连接，但系统未能保存密码。' : undefined)
       onTerminal(opened)
-      return true
     } catch (cause) {
-      setError(errorText(cause))
-      return false
+      if (promptTarget && cause instanceof ApiError && ['ssh-password-unavailable', 'ssh-auth'].includes(cause.code)) {
+        setConnectionFailure(undefined)
+        editTarget(promptTarget)
+        setPasswordPrompt('已保存的密码不可用，请重新输入。')
+        return
+      }
+      const detail = errorText(cause)
+      setConnectionFailure({ request, ...(authMethod === undefined ? {} : { authMethod }), ...(promptTarget === undefined ? {} : { promptTarget }), detail: request.password ? detail.split(request.password).join('•••') : detail })
     } finally {
       setBusy(false)
     }
@@ -589,10 +549,20 @@ export function SSHView({ sessionId, visible, isDirty, onOpen, onDiff, onChanged
 
   const connectTarget = async (target: SshTarget) => {
     if (busy || (connection !== undefined && connection.host === target.host)) return
-    if (connection !== undefined) {
+    if (target.authMethod === 'password') {
+      if (target.passwordSaved) {
+        const { identityFile: _identityFile, ...request } = requestFromTarget(target)
+        await openConnection({ ...request, useSavedPassword: true }, 'password', target)
+      } else {
+        editTarget(target)
+      }
+      return
+    }
+    if (connection !== undefined && connection.id !== chatConnectionId) {
       try {
         await api('ssh.disconnect', { sessionId, connectionId: connection.id })
         setConnection(undefined)
+        window.dispatchEvent(new Event('dvw-ssh-connections-changed'))
       } catch (cause) {
         setError(errorText(cause))
         return
@@ -611,17 +581,20 @@ export function SSHView({ sessionId, visible, isDirty, onOpen, onDiff, onChanged
     const request: SshConnectRequest = {
       host: parsed.host,
       ...(form.user.trim() === '' && parsed.user === '' ? {} : { user: form.user.trim() || parsed.user }),
-      ...(form.password === '' ? {} : { password: form.password }),
+      ...(form.authMethod === 'password' ? { password: form.password, savePassword: form.savePassword } : {}),
       ...(form.port.trim() === '' && parsed.port === '' ? {} : { port: Number(form.port || parsed.port) }),
-      ...(form.identityFile.trim() === '' ? {} : { identityFile: form.identityFile.trim() }),
+      ...(form.authMethod === 'key' && form.identityFile.trim() !== '' ? { identityFile: form.identityFile.trim() } : {}),
       workspace: form.workspace.trim() || '.',
       ...(form.label.trim() === '' ? {} : { label: form.label.trim() }),
     }
-    await openConnection(request)
+    await openConnection(request, form.authMethod)
   }
 
   const editTarget = (target: SshTarget) => {
+    setPasswordPrompt(undefined)
     setForm({
+      authMethod: target.authMethod ?? 'key',
+      savePassword: true,
       host: target.host,
       user: target.user ?? '',
       password: '',
@@ -639,6 +612,7 @@ export function SSHView({ sessionId, visible, isDirty, onOpen, onDiff, onChanged
     try {
       await api('ssh.disconnect', { sessionId, connectionId: connection.id })
       setConnection(undefined)
+      window.dispatchEvent(new Event('dvw-ssh-connections-changed'))
     } catch (cause) {
       setError(errorText(cause))
     } finally {
@@ -648,10 +622,12 @@ export function SSHView({ sessionId, visible, isDirty, onOpen, onDiff, onChanged
   const connectionLost = useCallback((connectionId: string) => {
     if (activeConnectionId.current !== connectionId) return
     setConnection(undefined)
+    window.dispatchEvent(new Event('dvw-ssh-connections-changed'))
     setError('SSH 连接已断开，请重新连接。')
   }, [])
   const changeWorkspace = (selected: SshConnection) => {
     setConnection(selected)
+    window.dispatchEvent(new Event('dvw-ssh-connections-changed'))
     setWorkspacePickerOpen(false)
     setHistory(rememberSshHost({
       host: selected.host,
@@ -681,7 +657,7 @@ export function SSHView({ sessionId, visible, isDirty, onOpen, onDiff, onChanged
           <Icon name={targetsCollapsed ? 'chevron-right' : 'chevron-down'}/><Icon name="server"/><span>SSH 目标</span>
         </button>
         <button className="dvw-icon" title="刷新 SSH 目标" onClick={refreshHosts}><Icon name="refresh"/></button>
-        <button className="dvw-icon" title="新建远程" onClick={() => { setForm(EMPTY_FORM); setNewRemoteOpen(true) }}><Icon name="add"/></button>
+        <button className="dvw-icon" title="新建远程" onClick={() => { setPasswordPrompt(undefined); setForm(EMPTY_FORM); setNewRemoteOpen(true) }}><Icon name="add"/></button>
         {connection && <button className="dvw-icon" title="断开 SSH" disabled={busy} onClick={() => void disconnect()}><Icon name="debug-disconnect"/></button>}
       </div>
       {!targetsCollapsed && <div className="dvw-ssh-target-list" role="tree" aria-label="SSH 目标">
@@ -753,13 +729,13 @@ export function SSHView({ sessionId, visible, isDirty, onOpen, onDiff, onChanged
           ><Icon name={tab.icon}/></button>)}
         </div>
         <div className="dvw-ssh-panel" hidden={!workspaceExpanded}>
-          <RemoteTree key={`tree:${connection.id}`} sessionId={sessionId} connection={connection} visible={visible && workspaceExpanded && showingFiles} onOpen={onOpen} onDisconnected={connectionLost}/>
+          <RemoteTree key={`tree:${connection.id}`} sessionId={sessionId} connection={connection} visible={visible && workspaceExpanded && showingFiles} onOpen={onOpen} onOpenSource={onOpenSource} onAddToDsh={onAddToDsh} onDisconnected={connectionLost}/>
           {workspaceExpanded && workspacePanel === 'search' && <RemoteSearch key={`search:${connection.id}`} sessionId={sessionId} connection={connection} isDirty={isDirty} onOpen={onOpen} onChanged={onChanged} onDisconnected={() => connectionLost(connection.id)}/>}
           {workspaceExpanded && workspacePanel === 'git' && <RemoteGit key={`git:${connection.id}`} sessionId={sessionId} connection={connection} onDiff={onDiff} onDisconnected={() => connectionLost(connection.id)}/>}
         </div>
       </section>
     </div>}
-    {newRemoteOpen && <div className="dvw-ssh-quickpick-backdrop" onMouseDown={event => { if (event.target === event.currentTarget && !busy) setNewRemoteOpen(false) }}>
+    {newRemoteOpen && connectionFailure === undefined && createPortal(<div className="dvw-ssh-quickpick-backdrop dvw-ssh-dialog-layer" onMouseDown={event => { if (event.target === event.currentTarget && !busy) setNewRemoteOpen(false) }}>
       <form className="dvw-ssh-quickpick" role="dialog" aria-modal="true" aria-label="新建 SSH 远程" onSubmit={event => { event.preventDefault(); void connectForm() }} onKeyDown={event => { if (event.key === 'Escape' && !busy) setNewRemoteOpen(false) }}>
         <div className="dvw-ssh-quickpick-head"><strong>新建 SSH 远程</strong><button type="button" className="dvw-icon" title="关闭" disabled={busy} onClick={() => setNewRemoteOpen(false)}><Icon name="close"/></button></div>
         <div className="dvw-ssh-quickpick-body">
@@ -768,24 +744,50 @@ export function SSHView({ sessionId, visible, isDirty, onOpen, onDiff, onChanged
             <input ref={formRef} value={form.host} placeholder="[user@]hostname[:port]" required onChange={event => setForm(current => ({ ...current, host: event.target.value }))}/>
           </label>
           <small>可使用 ~/.ssh/config 中的别名，或输入 SSH 主机地址。</small>
-          <details className="dvw-ssh-quickpick-options">
-            <summary>更多连接选项</summary>
+          <div className="dvw-ssh-auth-method">
+            <label htmlFor="dvw-ssh-auth-method"><strong>验证方式</strong><small>{form.authMethod === 'password' ? '使用登录用户和密码完成认证。' : '使用本机私钥完成认证。'}</small></label>
+            <select id="dvw-ssh-auth-method" aria-label="验证方式" value={form.authMethod} onChange={event => setForm(current => ({ ...current, authMethod: event.target.value === 'password' ? 'password' : 'key', password: '' }))}>
+              <option value="password">密码</option>
+              <option value="key">私钥</option>
+            </select>
+          </div>
+          {passwordPrompt && <p role="alert">{passwordPrompt}</p>}
+          <div className="dvw-ssh-credentials">
             <div className="dvw-ssh-form-grid">
-              <label><span>用户名</span><input className="dvw-input" value={form.user} placeholder="可选" onChange={event => setForm(current => ({ ...current, user: event.target.value }))}/></label>
-              <label><span>端口</span><input className="dvw-input" inputMode="numeric" value={form.port} placeholder="22" onChange={event => setForm(current => ({ ...current, port: event.target.value.replace(/\D/g, '') }))}/></label>
+              <label className="dvw-ssh-quickpick-input"><span>登录用户</span><input value={form.user} placeholder="root" autoComplete="username" onChange={event => setForm(current => ({ ...current, user: event.target.value }))}/></label>
+              <label className="dvw-ssh-quickpick-input"><span>端口</span><input inputMode="numeric" value={form.port} placeholder="22" onChange={event => setForm(current => ({ ...current, port: event.target.value.replace(/\D/g, '') }))}/></label>
             </div>
+            {form.authMethod === 'key'
+              ? <label className="dvw-ssh-quickpick-input"><span>私钥路径</span><input value={form.identityFile} placeholder="SSH 配置 / ssh-agent / 默认密钥" onChange={event => setForm(current => ({ ...current, identityFile: event.target.value }))}/></label>
+              : <label className="dvw-ssh-quickpick-input"><span>登录密码</span><input type="password" required autoComplete="off" value={form.password} onChange={event => setForm(current => ({ ...current, password: event.target.value }))}/></label>}
+            {form.authMethod === 'password' && <label className="dvw-ssh-remember-password">
+              <input type="checkbox" checked={form.savePassword} onChange={event => setForm(current => ({ ...current, savePassword: event.target.checked }))}/>
+              <span>连接成功后安全保存密码</span>
+            </label>}
+          </div>
+          <details className="dvw-ssh-quickpick-options" open>
+            <summary>更多连接选项</summary>
             <label><span>远程目录</span><input className="dvw-input" value={form.workspace} placeholder="." onChange={event => setForm(current => ({ ...current, workspace: event.target.value }))}/></label>
-            <label><span>私钥路径</span><input className="dvw-input" value={form.identityFile} placeholder="ssh-agent / 默认密钥" onChange={event => setForm(current => ({ ...current, identityFile: event.target.value }))}/></label>
-            <label><span>密码</span><input className="dvw-input" type="password" autoComplete="current-password" value={form.password} placeholder="仅保留在本次连接内" onChange={event => setForm(current => ({ ...current, password: event.target.value }))}/></label>
             <label><span>连接名称</span><input className="dvw-input" value={form.label} placeholder="可选" onChange={event => setForm(current => ({ ...current, label: event.target.value }))}/></label>
           </details>
+          {form.authMethod === 'key' && <small className="dvw-ssh-save-hint">连接成功后自动记住私钥路径。</small>}
         </div>
         <div className="dvw-ssh-quickpick-actions">
           <button type="button" disabled={busy} onClick={() => setNewRemoteOpen(false)}>取消</button>
-          <button type="submit" className="dvw-ssh-primary" disabled={busy || form.host.trim() === ''}><Icon name={busy ? 'refresh' : 'remote'}/>{busy ? '正在连接…' : '连接'}</button>
+          <button type="submit" className="dvw-ssh-primary" disabled={busy || form.host.trim() === '' || (form.authMethod === 'password' && form.password === '')}><Icon name={busy ? 'refresh' : 'remote'}/>{busy ? '正在连接…' : '连接'}</button>
         </div>
       </form>
-    </div>}
+    </div>, document.body)}
+    {visible && connectionFailure !== undefined && <ConnectionFailureDialog
+      host={connectionFailure.request.host}
+      detail={connectionFailure.detail}
+      retrying={busy}
+      onRetry={() => void openConnection(connectionFailure.request, connectionFailure.authMethod, connectionFailure.promptTarget)}
+      onClose={() => {
+        setConnectionFailure(undefined)
+        setForm(current => ({ ...current, password: '' }))
+      }}
+    />}
     {workspacePickerOpen && connection !== undefined && <RemoteWorkspacePicker sessionId={sessionId} connection={connection} onClose={() => setWorkspacePickerOpen(false)} onSelect={changeWorkspace}/>}
   </section>
 }

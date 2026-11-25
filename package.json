@@ -1,6 +1,6 @@
 {
   "name": "dsh-vscode-workbench",
-  "version": "0.2.17",
+  "version": "0.4.1",
   "description": "VS Code-style workbench for DeepSeek Harness: editor, search, Git, terminal, document and web preview",
   "keywords": [
     "dsh",
@@ -74,6 +74,7 @@
   },
   "scripts": {
     "clean": "node scripts/clean.mjs lib dist",
+    "badges": "node scripts/update-badges.mjs",
     "build": "tsc -p tsconfig.build.json && tsdown",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -147,5 +148,8 @@
     "typescript": "^5.9.0",
     "vitest": "^4.0.0",
     "zustand": "~4.5.7"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring": "2.1.2"
   }
 }

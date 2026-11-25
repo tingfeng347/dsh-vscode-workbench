@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import type { GenerateOptions } from '@deepseek-ai/dsh-llm'
 import { evaluatePluginCompatibility } from '@deepseek-ai/dsh-app-boot'
 import { readFile } from 'node:fs/promises'
 import { apply as applyConnection, type HostConnectionService } from '@deepseek-ai/dsh-client-connection'
@@ -39,6 +40,47 @@ describe('Harness plugin installation compatibility', () => {
 })
 
 describe('Harness 0.2 host integration', () => {
+  it('serves the real routes when Harness owns route authentication', async () => {
+    const directory = resolve('modern-runtime')
+    const routes: Parameters<WorkbenchWebServer['register']>[0][] = []
+    const upgrades: Parameters<WorkbenchWebServer['registerUpgrade']>[0][] = []
+    const ctx = {
+      connection: {},
+      sessions: { get: () => undefined },
+      workingDirectory: { get: () => directory },
+      webServer: {
+        register: (route: Parameters<WorkbenchWebServer['register']>[0]) => {
+          expect(route.auth).toBe('required')
+          routes.push(route)
+          return () => {}
+        },
+        registerUpgrade: (route: Parameters<WorkbenchWebServer['registerUpgrade']>[0]) => {
+          expect(route.auth).toBe('required')
+          upgrades.push(route)
+          return () => {}
+        },
+      },
+      effect(callback: () => void | (() => void)) { const dispose = callback(); if (dispose) cleanup.push(dispose) },
+    } as unknown as HostContext
+    apply(ctx)
+    expect(routes.length).toBeGreaterThan(10)
+    expect(upgrades.map(route => route.path).sort()).toEqual(['/dsh-vscode/ws/debug', '/dsh-vscode/ws/files', '/dsh-vscode/ws/lsp', '/dsh-vscode/ws/ssh'])
+
+    const request = createServer((req, res) => {
+      const path = new URL(req.url ?? '/', 'http://localhost').pathname
+      const route = routes.find(route => route.kind === 'exact' ? route.path === path : path.startsWith(route.path))
+      if (!route) { res.writeHead(404); res.end(); return }
+      void route.handler(req, res)
+    })
+    await new Promise<void>(resolve => request.listen(0, '127.0.0.1', resolve))
+    cleanup.push(() => new Promise<void>((resolve, reject) => request.close(error => error ? reject(error) : resolve())))
+    const base = `http://127.0.0.1:${(request.address() as AddressInfo).port}`
+    expect((await fetch(`${base}/dsh-vscode/codicons/codicon.ttf`)).status).toBe(200)
+    expect((await fetch(`${base}/dsh-vscode/api/workspace`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: 'missing' }),
+    })).status).toBe(404)
+  })
+
   it('uses real Harness cookies for every HTTP route and rejects unauthenticated upgrades', async () => {
     const auth = new Context()
     let record: unknown
@@ -63,6 +105,9 @@ describe('Harness 0.2 host integration', () => {
       listModels: async (provider: string) => provider === 'deepseek-official'
         ? [{ provider, id: 'deepseek-flash', name: 'DeepSeek-V4.1-Flash' }]
         : [{ provider, id: 'team-coder-v1', name: 'Team Coder' }],
+      stream: vi.fn(async function* (_options: GenerateOptions) {
+        yield { type: 'text-delta', index: 0, text: '  return value' }
+      }),
     }
     const sessionController = {
       canOpenWorkspacePath: () => true,
@@ -157,6 +202,19 @@ describe('Harness 0.2 host integration', () => {
     expect((await workspace('missing')).status).toBe(404)
     expect((await fetch(`${base}/dsh-vscode/api/workspace`, { method: 'POST', headers: { ...headers, origin: 'https://evil.example' }, body: '{}' })).status).toBe(403)
     directory = process.cwd()
+    const complete = (body: Record<string, unknown>) => fetch(`${base}/dsh-vscode/api/editor.inlineCompletion`, {
+      method: 'POST', headers, body: JSON.stringify({ sessionId: 'main', path: 'package.json', language: 'typescript', prefix: 'unsaved draft', suffix: '\n}', ...body }),
+    })
+    expect(await (await complete({})).json()).toEqual({ ok: true, value: { text: '  return value' } })
+    expect(llm.stream).toHaveBeenLastCalledWith(expect.objectContaining({ provider: 'deepseek-official', model: 'deepseek-v4-pro' }))
+    const prompt = llm.stream.mock.calls.at(-1)?.[0].messages[0]?.content[0]
+    expect(prompt).toMatchObject({ type: 'text', text: JSON.stringify({ path: 'package.json', language: 'typescript', prefix: 'unsaved draft', suffix: '\n}' }) })
+    expect((await complete({ provider: 'gateway', model: 'team-coder-v1' })).status).toBe(200)
+    expect(llm.stream).toHaveBeenLastCalledWith(expect.objectContaining({ provider: 'gateway', model: 'team-coder-v1' }))
+    expect(await (await complete({ path: '.env.local' })).json()).toEqual({ ok: true, value: { text: '' } })
+    expect((await complete({ path: '../package.json' })).status).toBe(403)
+    expect((await complete({ prefix: 'x'.repeat(6001) })).status).toBe(400)
+    expect(llm.stream).toHaveBeenCalledTimes(2)
     const applications = await fetch(`${base}/dsh-vscode/api/fs.applications`, {
       method: 'POST', headers, body: JSON.stringify({ sessionId: 'main', path: 'package.json' }),
     })

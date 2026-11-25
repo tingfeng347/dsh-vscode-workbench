@@ -203,7 +203,10 @@ function OfficePreview({ src, path }: { src: string; path: string }) {
     return () => { cancelled = true }
   }, [src])
   if (status === undefined) return <div className="dvw-message">正在准备 Office 预览…</div>
-  if (status.available) return <PdfPreview src={src.replace('/dsh-vscode/file?', '/dsh-vscode/office?')} path={path}/>
+  if (status.available) {
+    const converted = src.replace('/dsh-vscode/ssh/file?', '/dsh-vscode/ssh/office?').replace('/dsh-vscode/file?', '/dsh-vscode/office?')
+    return <PdfPreview src={converted} path={path}/>
+  }
   // Without LibreOffice, newer formats still render in the browser; legacy binaries fall back to a download.
   const extension = path.split('.').at(-1)?.toLowerCase()
   if (extension === 'docx') return <DocxPreview src={src}/>

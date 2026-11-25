@@ -97,6 +97,22 @@ describe('generated file interceptor', () => {
     })
   })
 
+  it('strips a selected line range from the path and preserves both endpoints', () => {
+    const host = createHost('session-1')
+    const listener = listen()
+    disposers.push(installGeneratedFileOpenInterceptor(host.sidebar, () => true))
+
+    host.sidebar.openResource(encodedAddress('session-1', 'src/commit-message.ts:20-25'))
+
+    expect(host.original).not.toHaveBeenCalled()
+    expect(listener.mock.calls[0]![0].detail).toEqual({
+      sessionId: 'session-1',
+      path: 'src/commit-message.ts',
+      line: 20,
+      endLine: 25,
+    })
+  })
+
   it('omits invalid line values from the event detail', () => {
     const host = createHost('session-1')
     const listener = listen()

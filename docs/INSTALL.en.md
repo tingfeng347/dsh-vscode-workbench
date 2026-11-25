@@ -1,11 +1,11 @@
 # Installation
 
-Plugin 0.2.17 supports DeepSeek Harness `0.2.1-rc.1` and newer (default baseline `0.2.2-rc.5`, Cordis `4.1.0`). Architecture and the full compatibility table are in [Architecture](ARCHITECTURE.en.md).
+The plugin requires DeepSeek Harness `0.2.1-rc.1` or newer. Install the npm `latest` version. The development and CI versions are pinned in `package.json` and `pnpm-lock.yaml`. Architecture and the full compatibility table are in [Architecture](ARCHITECTURE.en.md).
 
 ## Install
 
 ```bash
-npm i -g @deepseek-ai/dsh@0.2.2-rc.5
+npm i -g @deepseek-ai/dsh@latest
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
@@ -61,10 +61,10 @@ dsh: nothing was installed.
 
 The marketplace files this under the generic `plugin-side install failure`, so the auto-submitted issue keeps only the `pnpm.log` path.
 
-Update Harness to `0.2.1-rc.1` or newer before installing plugin 0.2.17:
+Update Harness to `0.2.1-rc.1` or newer before installing the plugin:
 
 ```bash
-npm i -g @deepseek-ai/dsh@0.2.2-rc.5
+npm i -g @deepseek-ai/dsh@latest
 ```
 
 `dsh plugin allow-version` only bypasses the version gate; it does not supply missing host services, so the plugin still fails to load on `0.2.0-rc.2`.

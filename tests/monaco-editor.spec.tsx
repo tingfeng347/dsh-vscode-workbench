@@ -41,6 +41,7 @@ function createModel(value: string, _language: unknown, uri: FakeModel['uri']): 
   fake.models.set(uri.toString(), model); return model
 }
 const monaco = {
+  languages: { getLanguages: () => [], register() {}, onLanguage() {} },
   Uri: { parse: (value: string) => ({ scheme: value.split(':')[0]!, toString: () => value }) },
   Range: class { constructor(public startLineNumber: number, public startColumn: number, public endLineNumber: number, public endColumn: number) {} },
   KeyMod: { CtrlCmd: 1 }, KeyCode: { KeyS: 2 },
@@ -169,6 +170,17 @@ it('reveals a new search hit in an open tab instead of its saved position', asyn
   expect(fake.editor!.selection).toMatchObject({ startLineNumber: 3, startColumn: 1, endColumn: 6 })
 })
 
+it('selects the full requested line range when following a DSH reference', async () => {
+  await render({ uri: '/w/a.ts', value: 'one\ntwo\nthree', line: 2, endLine: 3 })
+  expect(fake.editor!.scroll).toBe(200)
+  expect(fake.editor!.selection).toMatchObject({
+    startLineNumber: 2,
+    startColumn: 1,
+    endLineNumber: 3,
+    endColumn: 6,
+  })
+})
+
 it('can follow a review location without taking editor focus', async () => {
   await render({ uri: '/w/a.ts', value: 'one\ntwo\nthree', line: 2, focusOnReveal: false })
   expect(fake.editor!.focusCount).toBe(0)
@@ -199,6 +211,7 @@ it('paints AI additions and removed blocks with block-level keep and reject cont
   const onFocus = vi.fn()
   const onKeep = vi.fn()
   const onReject = vi.fn()
+  const onAsk = vi.fn()
   await render({
     uri: '/w/a.ts',
     value: 'head\nconst added = true\ntail',
@@ -215,6 +228,7 @@ it('paints AI additions and removed blocks with block-level keep and reject cont
       onFocus,
       onKeep,
       onReject,
+      onAsk,
     },
   })
 
@@ -235,7 +249,7 @@ it('paints AI additions and removed blocks with block-level keep and reject cont
   await act(async () => fake.onMouseDown!({ target: { position: { lineNumber: 2 } } }))
   await act(async () => removedZone.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })))
   const buttons = [...actionWidget.querySelectorAll<HTMLButtonElement>('button')]
-  expect(buttons.map(button => button.textContent)).toEqual(['^Y', '^N'])
+  expect(buttons.map(button => button.textContent)).toEqual(['允许', '拒绝', '询问 AI'])
   expect(actionWidget.hasAttribute('data-conflict')).toBe(false)
   const editorHost = document.createElement('div')
   const editorGesture = vi.fn()
@@ -247,10 +261,12 @@ it('paints AI additions and removed blocks with block-level keep and reject cont
   expect(editorGesture).not.toHaveBeenCalled()
   await act(async () => buttons[0]!.click())
   await act(async () => buttons[1]!.click())
+  await act(async () => buttons[2]!.click())
 
   expect(onFocus).toHaveBeenCalledWith('8:0')
   expect(onKeep).toHaveBeenCalledWith('8:0')
   expect(onReject).toHaveBeenCalledWith('8:0')
+  expect(onAsk).toHaveBeenCalledOnce()
 })
 
 it('allows reversing a tracked insertion and disables it while the file is busy', async () => {

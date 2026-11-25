@@ -52,7 +52,7 @@ export function sendError(res: ServerResponse, error: unknown): void {
 
 /** Reuse Harness authentication and its deployment-aware Host/Origin fence. */
 export function authorize(req: IncomingMessage, res: ServerResponse, connection: WorkbenchConnection): boolean {
-  const rejection = connection.requestRejection(req)
+  const rejection = connection.requestRejection?.(req)
   if (rejection === undefined) return true
   const code = rejection === 401 ? 'unauthorized' : 'forbidden'
   send(res, rejection, { ok: false, error: { code, message: code } })

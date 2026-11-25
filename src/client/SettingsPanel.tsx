@@ -1,10 +1,11 @@
 import type { GitDiffStyle } from './MonacoEditor.tsx'
 import { useEffect, useId, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
-import type { LspServerStatus } from './lsp.ts'
+import type { LspRuntimeStatus, LspServerStatus } from './lsp.ts'
 import type { ReviewMode } from './aiReview.ts'
 import { settingsHost } from './settingsHost.ts'
 import type { CommitModelCatalog, CommitModelOption, CommitModelSelection } from '../commit-message.ts'
+import type { InlineCompletionMode } from '../inline-completion.ts'
 
 type WorkbenchTheme = 'dsh' | 'dark' | 'light' | 'white' | 'eyecare'
 type MarkdownView = 'preview' | 'source'
@@ -55,16 +56,28 @@ export interface WorkbenchSettingsProps {
   commitModelUnavailable: CommitModelCatalog['unavailable']
   commitModelError: string
   refreshCommitModels(): void
+  chatModel?: CommitModelSelection
+  inlineCompletionMode: InlineCompletionMode
+  setInlineCompletionMode(value: InlineCompletionMode): void
+  inlineCompletionModel?: CommitModelSelection
+  setInlineCompletionModel(value: CommitModelSelection | undefined): void
   tsIntellisense: boolean
   setTsIntellisense(value: boolean): void
   tsIndex: TsIndex
   lspServers: LspServerStatus[]
   lspBusy?: string
   lspError: string
+  lspRuntime: Record<string, LspRuntimeStatus | undefined>
+  restartLsp(id: string): void
+  pythonPath: string
+  setPythonPath(value: string): void
   changeLsp(id: string, action: 'install' | 'uninstall'): void
   refreshLsp(): void
 }
 
+const LSP_STATUS_TEXT: Record<LspRuntimeStatus['state'] | 'idle', string> = {
+  idle: '已安装，打开对应文件时自动启动', starting: '语言服务启动中', ready: '语言服务运行中', reconnecting: '语言服务正在重连', failed: '语言服务启动失败',
+}
 const THEMES = [['dsh', '跟随 DSH'], ['dark', '深色'], ['light', '浅色'], ['white', '纯白'], ['eyecare', '护眼']] as const
 const MARKDOWN_VIEWS = [['preview', '预览'], ['source', '源码']] as const
 const REVIEW_MODES = [['all', '审阅全部改动'], ['latest', '审阅最新改动'], ['none', '无需审阅']] as const
@@ -72,6 +85,7 @@ const DEFAULT_BROWSERS = [['builtin', '内置浏览器'], ['system', '系统浏�
 const OPEN_MODES = [['current', '当前窗口'], ['floating', '浮动窗口']] as const
 const COMMIT_DETAILS = [['concise', '简洁'], ['standard', '标准'], ['detailed', '详细']] as const
 const COMMIT_LANGUAGES = [['auto', '跟随最近提交'], ['zh', '中文'], ['en', 'English']] as const
+const INLINE_COMPLETION_MODES = [['off', '关闭'], ['manual', '仅手动触发'], ['auto', '自动补全']] as const
 const FOLLOW_CHAT_MODEL = 'follow-chat'
 
 function modelKey(model: CommitModelSelection): string {
@@ -220,25 +234,46 @@ function DebouncedRange(props: { value: number; min: number; max: number; unit: 
   return <Range {...props} value={draft} onChange={setDraft}/>
 }
 
+function ModelSelector({ label, selection, onChange, catalog }: {
+  label: string
+  selection?: CommitModelSelection
+  onChange(value: CommitModelSelection | undefined): void
+  catalog: Pick<WorkbenchSettingsProps, 'commitModels' | 'chatModel' | 'commitModelStatus' | 'commitModelUnavailable' | 'refreshCommitModels'>
+}) {
+  const { commitModels: models, chatModel, commitModelStatus: status, commitModelUnavailable: unavailable, refreshCommitModels: refresh } = catalog
+  const followedModel = models.find(model => model.provider === chatModel?.provider && model.model === chatModel?.model)
+  // Several providers can expose the same display name; disambiguate those with the provider name.
+  const modelNameCount = new Map<string, number>()
+  for (const model of models) modelNameCount.set(model.name, (modelNameCount.get(model.name) ?? 0) + 1)
+  const options: Array<readonly [string, string]> = [
+    [FOLLOW_CHAT_MODEL, followedModel === undefined ? '跟随 DSH 聊天模型' : `跟随 DSH 聊天模型（${followedModel.name}）`],
+    ...models.map(model => [modelKey(model), (modelNameCount.get(model.name) ?? 0) > 1 ? `${model.name} · ${model.providerName}` : model.name] as const),
+  ]
+  const badges: Partial<Record<string, ModelBadge>> = Object.fromEntries(models.flatMap(model => model.badge === undefined ? [] : [[modelKey(model), model.badge]]))
+  if (followedModel?.badge !== undefined) badges[FOLLOW_CHAT_MODEL] = followedModel.badge
+  if (selection !== undefined && !models.some(model => modelKey(model) === modelKey(selection))) {
+    options.unshift([modelKey(selection), `${selection.model}（暂不可用）`])
+  }
+  if (status === 'error') return <button type="button" className="dvw-set-button" onClick={refresh}>重新读取模型</button>
+  if (status !== 'ready') return <span role="status" aria-live="polite"><button type="button" className="dvw-set-button" disabled>正在读取模型…</button></span>
+  return <><Selector label={label} value={selection === undefined ? FOLLOW_CHAT_MODEL : modelKey(selection)}
+    options={options} badges={badges} onChange={key => {
+      if (key === FOLLOW_CHAT_MODEL) { onChange(undefined); return }
+      const item = models.find(model => modelKey(model) === key)
+      if (item !== undefined) onChange({ provider: item.provider, model: item.model })
+    }}/>
+    {(unavailable.length > 0 || models.length === 0) && <button type="button" className="dvw-set-button" onClick={refresh}>刷新</button>}
+  </>
+}
+
 /** The page registered as `dsh-vscode-workbench` in DSH's settings navigation. */
 export function WorkbenchSettings(props: WorkbenchSettingsProps) {
   const { refreshLsp } = props
   useEffect(() => { refreshLsp() }, [refreshLsp])
-  const followedModel=props.commitModels.find(model=>model.provider===props.commitModel?.provider&&model.model===props.commitModel?.model)
-  // Several providers can expose the same display name; disambiguate those with the provider name.
-  const modelNameCount=new Map<string,number>()
-  for (const model of props.commitModels) modelNameCount.set(model.name,(modelNameCount.get(model.name)??0)+1)
-  const commitModelOptions: Array<readonly [string, string]> = [
-    [FOLLOW_CHAT_MODEL, followedModel===undefined?'跟随 DSH 聊天模型':`跟随 DSH 聊天模型（${followedModel.name}）`],
-    ...props.commitModels.map(model => [modelKey(model), (modelNameCount.get(model.name)??0)>1?`${model.name} · ${model.providerName}`:model.name] as const),
-  ]
-  const commitModelBadges: Partial<Record<string, ModelBadge>> = Object.fromEntries(props.commitModels.flatMap(model => model.badge === undefined ? [] : [[modelKey(model), model.badge]]))
-  if (followedModel?.badge!==undefined) commitModelBadges[FOLLOW_CHAT_MODEL]=followedModel.badge
-  const selectedModel=props.commitModel
-  if (props.commitModelConfigured&&selectedModel!==undefined&&!props.commitModels.some(model=>model.provider===selectedModel.provider&&model.model===selectedModel.model)) {
-    const unavailable=props.commitModelUnavailable.find(provider=>provider.provider===selectedModel.provider)
-    if (unavailable!==undefined) commitModelOptions.unshift([modelKey(selectedModel), `${selectedModel.model}（暂不可用）`])
-  }
+  const modelNotices = <>
+    {props.commitModelUnavailable.map(provider => <p className="dvw-set-footnote" role="status" aria-live="polite" key={provider.provider}>无法读取 {provider.providerName}：{provider.message}</p>)}
+    {props.commitModelError !== '' && <p className="dvw-set-footnote dvw-set-error" role="alert">读取 DSH 模型失败：{props.commitModelError}</p>}
+  </>
   return <div className="dvw-set-page">
     <section className="dvw-set-group">
       <h3 className="dvw-set-group-title">外观</h3>
@@ -298,8 +333,8 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
 
     <section className="dvw-set-group">
       <h3 className="dvw-set-group-title">Git</h3>
-      <Row title="Git 对比样式" description="VS Code 默认内联。IDEA / PyCharm 默认并排，使用改动连线和联动滚动。">
-        <Selector label="Git 对比样式" value={props.gitDiffStyle} options={[['classic', 'VS Code（默认）'], ['ribbon', 'IDEA / PyCharm']]} onChange={props.setGitDiffStyle}/>
+      <Row title="Git 对比样式" description="IDEA / PyCharm 使用并排差异、改动连线和联动滚动。VS Code 使用经典内联差异。">
+        <Selector label="Git 对比样式" value={props.gitDiffStyle} options={[['ribbon', 'IDEA / PyCharm（默认）'], ['classic', 'VS Code']]} onChange={props.setGitDiffStyle}/>
       </Row>
       <Row title="逐行提交信息" description="点击文件编辑器或 Git 对比中的代码行，在代码行尾显示提交作者、时间和摘要。">
         <Switch label="逐行提交信息" checked={props.gitLineBlame} onChange={props.setGitLineBlame}/>
@@ -312,54 +347,63 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
         <Selector label="提交信息语言" value={props.commitLanguage} options={COMMIT_LANGUAGES} onChange={props.setCommitLanguage}/>
       </Row>
       <Row title="生成模型" description="未手动选择时跟随 DSH 聊天当前使用的模型，不需要先与 AI 对话即可生成提交信息。">
-        {props.commitModelStatus==='ready'&&commitModelOptions.length>0
-          ? <><Selector
-                label="提交信息生成模型"
-                value={props.commitModelConfigured&&props.commitModel!==undefined?modelKey(props.commitModel):FOLLOW_CHAT_MODEL}
-                options={commitModelOptions}
-                badges={commitModelBadges}
-                onChange={key=>{if(key===FOLLOW_CHAT_MODEL){props.setCommitModel(undefined);return}const item=props.commitModels.find(model=>modelKey(model)===key);if(item!==undefined)props.setCommitModel({provider:item.provider,model:item.model})}}
-              />{props.commitModelUnavailable.length>0&&<button type="button" className="dvw-set-button" onClick={props.refreshCommitModels}>刷新</button>}</>
-          : props.commitModelStatus==='error'
-            ? <button type="button" className="dvw-set-button" onClick={props.refreshCommitModels}>重新读取模型</button>
-            : <span role="status" aria-live="polite"><button type="button" className="dvw-set-button" disabled={props.commitModelStatus!=='ready'} onClick={props.commitModelStatus==='ready'?props.refreshCommitModels:undefined}>{props.commitModelStatus==='ready'?'没有可用模型':'正在读取模型…'}</button></span>}
+        <ModelSelector label="提交信息生成模型" selection={props.commitModelConfigured ? props.commitModel : undefined} onChange={props.setCommitModel} catalog={props}/>
       </Row>
-      {props.commitModelUnavailable.map(provider=><p className="dvw-set-footnote" role="status" aria-live="polite" key={provider.provider}>无法读取 {provider.providerName}：{provider.message}</p>)}
-      {props.commitModelError!==''&&<p className="dvw-set-footnote dvw-set-error" role="alert">读取 DSH 模型失败：{props.commitModelError}</p>}
+      {modelNotices}
+    </section>
+
+    <section className="dvw-set-group">
+      <h3 className="dvw-set-group-title">AI 代码补全</h3>
+      <Row title="触发方式" description="编辑器内按 Alt/Option + \ 手动触发，自动模式也会在输入停顿后显示灰字。按 Tab 接受，按 Esc 隐藏。">
+        <Selector label="AI 代码补全触发方式" value={props.inlineCompletionMode} options={INLINE_COMPLETION_MODES} onChange={props.setInlineCompletionMode}/>
+      </Row>
+      <Row title="补全模型" description="补全时会向所选的 DSH 模型发送当前文件的相对路径和光标附近的代码，包括未保存的内容。">
+        <ModelSelector label="AI 代码补全模型" selection={props.inlineCompletionModel} onChange={props.setInlineCompletionModel} catalog={props}/>
+      </Row>
     </section>
 
     <section className="dvw-set-group">
       <h3 className="dvw-set-group-title">语言智能</h3>
-      <div className="dvw-set-row">
+      <p className="dvw-set-footnote">编辑代码无需安装语言服务。按需安装后，可以补全代码、跳转到定义、查找引用，并在编辑时查看错误提示。</p>
+      {!props.lspServers.some(server => server.id === 'typescript' && server.installed) && <div className="dvw-set-row">
         <div className="dvw-set-text">
-          <span className="dvw-set-title">TypeScript / JavaScript</span>
-          <span className="dvw-set-desc">内置 · {props.tsIntellisense
+          <span className="dvw-set-title">TypeScript / JavaScript（内置索引）</span>
+          <span className="dvw-set-desc">{props.tsIntellisense
             ? props.tsIndex.state === 'loading' ? '正在索引工作区…'
               : props.tsIndex.state === 'error' ? `索引失败：${props.tsIndex.error}`
                 : props.tsIndex.state === 'ready' ? `已索引 ${props.tsIndex.files} 个文件${props.tsIndex.truncated ? '（已达上限）' : ''}`
-                  : '已安装，转到定义、查找引用、Peek、补全、签名帮助'
-            : '点击安装'}</span>
+                  : '已启用，可在工作区中跳转到定义和查找引用'
+            : '启用后可在工作区中跳转到定义和查找引用'}</span>
         </div>
         <div className="dvw-set-control">
-          <button type="button" className="dvw-set-button" onClick={() => props.setTsIntellisense(!props.tsIntellisense)}>{props.tsIntellisense ? '卸载' : '安装'}</button>
+          <button type="button" className="dvw-set-button" onClick={() => props.setTsIntellisense(!props.tsIntellisense)}>{props.tsIntellisense ? '停用索引' : '启用索引'}</button>
         </div>
-      </div>
+      </div>}
       {props.lspServers.map(server => <div className="dvw-set-row" key={server.id}>
         <div className="dvw-set-text">
-          <span className="dvw-set-title">{server.name}</span>
+          <span className="dvw-set-title">{server.name}{server.id === 'typescript' ? '（项目语言服务）' : ''}</span>
           <span className="dvw-set-desc dvw-set-chips">
-            <span className="dvw-set-chip" data-installed={server.language === undefined || server.language.installed} data-action={server.language !== undefined && !server.language.installed}>{server.language === undefined ? '语言：无需安装' : server.language.installed ? '语言：已安装' : '安装语言'}</span>
-            <span className="dvw-set-chip" data-installed={server.installed}>{server.installed ? 'LSP：已安装' : 'LSP：未安装'}</span>
+            <span className="dvw-set-chip" data-installed={server.installed && (!props.lspRuntime[server.id] || props.lspRuntime[server.id]?.state === 'ready')} title={props.lspRuntime[server.id]?.message}>
+              {server.installed ? LSP_STATUS_TEXT[props.lspRuntime[server.id]?.state ?? 'idle']
+                : server.installable ? '语言服务未安装（可选）' : `未检测到 ${server.command ?? server.name}（可手动安装）`}
+            </span>
+            {server.language && !server.language.installed && <span className="dvw-set-hint">未检测到 {server.language.name} 环境</span>}
             {!server.installed && server.hint !== undefined && <span className="dvw-set-hint">{server.hint}</span>}
           </span>
         </div>
         <div className="dvw-set-control">
-          {server.language !== undefined && !server.language.installed
-            ? <button type="button" className="dvw-set-button" disabled title="先安装语言工具链，再安装 LSP">等待</button>
-            : server.installable && <button type="button" className="dvw-set-button" disabled={props.lspBusy === server.id} onClick={() => props.changeLsp(server.id, server.installed ? 'uninstall' : 'install')}>{props.lspBusy === server.id ? '处理中…' : server.installed ? '卸载 LSP' : '安装 LSP'}</button>}
+          {server.installable && <button type="button" className="dvw-set-button" disabled={props.lspBusy !== undefined} onClick={() => props.changeLsp(server.id, server.installed ? 'uninstall' : 'install')}>
+            {props.lspBusy === server.id ? (server.installed ? '正在卸载…' : '正在安装…') : (server.installed ? '卸载语言服务' : '安装语言服务')}
+          </button>}
+          {server.installed && props.lspRuntime[server.id] !== undefined && <button type="button" className="dvw-set-button" onClick={() => props.restartLsp(server.id)}>重启服务</button>}
         </div>
       </div>)}
-      <p className="dvw-set-footnote">每种语言使用该生态里最活跃的语言服务器；能自动安装的会装进本插件的私有目录，需要手动安装的会分别检查语言工具链和服务器本身。</p>
+      {props.lspServers.some(server => server.id === 'python' && server.installed) && <Row title="Python 解释器" description="当前工作区。留空时优先使用项目中的虚拟环境。">
+        <input key={props.pythonPath} className="dvw-input" aria-label="Python 解释器路径" defaultValue={props.pythonPath}
+          placeholder={props.lspServers.find(server => server.id === 'python')?.pythonPath ?? '输入 Python 解释器的完整路径'}
+          onBlur={event => props.setPythonPath(event.currentTarget.value)}
+          onKeyDown={event => { if (event.key === 'Enter') event.currentTarget.blur() }} />
+      </Row>}
       {props.lspError !== '' && <p className="dvw-set-footnote dvw-set-error">{props.lspError}</p>}
     </section>
   </div>

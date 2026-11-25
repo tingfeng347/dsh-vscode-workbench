@@ -5,14 +5,14 @@
 <p align="center">中文 · <a href="README.en.md">English</a></p>
 
 <p align="center"><strong>DSH VS Code Workbench</strong><br>
-  DeepSeek Harness 里的 VS Code 风格工作台，集成编辑、搜索、Git、终端、文档与网页预览。</p>
+  DeepSeek Harness 里的 VS Code 风格工作台，集成编辑、搜索、Git、SSH 远程开发、终端、文档与网页预览。</p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/v/dsh-vscode-workbench/latest?logo=npm&label=npm" alt="npm 版本"></a>
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/dm/dsh-vscode-workbench?label=monthly%20downloads" alt="npm 月下载量"></a>
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.npmjs.org%2Fdownloads%2Fpoint%2F2026-08-24%3A2099-12-31%2Fdsh-vscode-workbench&query=%24.downloads&label=total+downloads&color=blue" alt="npm 总下载量"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-version.svg" alt="npm 版本"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-monthly-downloads.svg" alt="npm 月下载量"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-total-downloads.svg" alt="npm 总下载量"></a>
   <a href="https://github.com/tingfeng347/dsh-vscode-workbench/stargazers"><img src="https://img.shields.io/github/stars/tingfeng347/dsh-vscode-workbench?logo=github&label=Stars" alt="GitHub Stars"></a>
-  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/commits/main"><img src="https://img.shields.io/github/last-commit/tingfeng347/dsh-vscode-workbench?label=last%20commit" alt="最近提交"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/commits/main"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/last-commit.svg" alt="最近提交"></a>
   <a href="https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tingfeng347/dsh-vscode-workbench?label=license" alt="MIT 许可证"></a>
   <br>
   <a href="https://awesome-dsh-plugin.com/p/tingfeng347/dsh-vscode-workbench/"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
@@ -26,10 +26,10 @@
 
 ## 安装
 
-插件的安装版本要求是 DeepSeek Harness `>=0.2.1-rc.1`，当前验证基线为 `0.2.2-rc.5`（Cordis `4.1.0`）。
+建议安装 npm 上的 DeepSeek Harness `latest`。插件要求 Harness `>=0.2.1-rc.1`。
 
 ```bash
-npm i -g @deepseek-ai/dsh@0.2.2-rc.5
+npm i -g @deepseek-ai/dsh@latest
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
@@ -39,35 +39,15 @@ dsh plugin --profile web add dsh-vscode-workbench
 
 | 功能 | 可以做什么 |
 | --- | --- |
-| 资源管理器 | 新建、重命名、移动和删除文件或目录。支持拖放上传、文件拖出下载、多选批量删除、复制相对或绝对路径，也能用系统应用打开文件或显示文件位置。 |
-| 编辑与分屏 | Monaco 编辑器支持语法高亮和中文菜单。拖标签到编辑区边缘创建分屏，拖到另一窗格移动或交换文件。工作台按工作区恢复标签和布局。编辑器会提示文件的外部修改，保存时校验版本并原子写入。 |
-| 语言智能 | 在「DSH 设置 → 工作台 → 语言智能」启用内置的 TypeScript / JavaScript 工作区索引，或配置 Python、Go、Rust、C / C++ 等语言的 LSP。补全、定义跳转、引用、签名帮助和诊断取决于所启用的语言服务。设置页分别显示工具链和语言服务器的状态。 |
-| 文档与网页 | Markdown 支持源码、预览和大纲。图片、PDF 和 Excel 等表格可在标签页预览。Word 和 PowerPoint 可通过 LibreOffice 转成 PDF 预览，未安装时 `.docx` 仍可在浏览器内预览。网页链接和本地 HTML 用设置里选定的内置或系统浏览器打开。 |
-| 终端与 DSH 对话 | 使用 Harness 官方终端，支持多会话、重命名和分屏。可从资源管理器把选中的单个文件或目录添加到 DSH 对话，也可在编辑器中添加选中的代码。点击当前会话中的生成文件链接可在工作台打开对应文件。 |
-| 工作区与布局 | 从活动栏进入工作区切换器，可打开或新建工作区、创建或切换会话。活动栏可拖动排序，侧栏、对话栏和终端区域可调整尺寸。设置支持跟随 DSH、深色、浅色、纯白和护眼主题，可调整编辑器字号。 |
-
-在「DSH 设置 → 工作台 → 窗口」中选择「浮动窗口」，可拖动标题栏移动、拖边缘缩放，或用标题栏按钮进入全屏。位置和尺寸会被记住，可在设置中重置。
-
-## 工作区搜索与替换
-
-打开侧栏「搜索」，点击搜索框左侧箭头展开替换，或按 `Ctrl+Shift+H`（macOS 也可用 `⌘⇧H`）。结果按文件分组，点击匹配项可跳到编辑器内的对应位置。
-
-- 搜索支持区分大小写、全字匹配和正则表达式。点击「…」可填写包含和排除路径，例如 `src/**` 和 `**/*.test.ts`。
-- 输入替换文字后，可预览删除和新增内容。替换支持正则捕获组（如 `$1`）及「保留大小写」。可替换单处、单个文件或全部结果，文件级和全部替换会先确认。
-- 替换框为空时只显示普通搜索高亮，主动点击替换会删除对应匹配。目标文件有未保存的修改时，请先保存。超过 2,000 处匹配时，请缩小搜索范围再批量替换。
-
-## Git 工作流
-
-- **源代码管理**支持暂存、取消暂存、放弃修改、提交、修改上次提交、提交后推送或同步。AI 可根据工作区改动生成提交信息，默认使用当前 DSH 对话模型，也可在设置中指定模型、语言和详细程度。点击停止可取消生成并保留草稿。
-- **提交图**可展开每次提交的改动文件，点击文件可打开差异，支持从历史预览图片和文档。悬停在提交上可查看作者、时间、改动统计并复制哈希。已知的 GitHub 远程跟踪分支包含该提交时，卡片也会提供 GitHub 链接。「更改」和「图表」之间的分隔线可拖动，双击恢复默认高度。
-- 在「DSH 设置 → 工作台 → Git」可选择 **VS Code 或 IDEA / PyCharm 差异样式**。差异视图支持改动导航、折叠未改动行，并记住内联或并排选择。飘带式并排视图中，滚动左栏时右栏同帧跟随。蓝色表示修改、绿色表示新增、红色表示删除，定位线延伸到两侧。点击编辑器或差异视图里的代码行，可在行尾查看提交归属。
-- 从「源代码管理 → Git 工具」可筛选提交和文件历史，比较分支、标签、提交或工作区的已跟踪文件，拣选或撤销提交，管理 Stash 和本地分支、标签。同步页支持抓取、仅快进拉取、推送、合并和变基。冲突页可查看三方内容、采纳一侧或编辑、保存并暂存合并结果。
-
-## AI 改动审阅
-
-在「DSH 设置 → 工作台 → AI 改动审阅」选择「审阅全部改动」或「审阅最新改动」。审阅默认关闭，开启后可在 Monaco 中逐块处理、在编辑器顶部按文件处理，或在 DSH 输入框上方一次处理全部待审阅文件。可启用「自动跟随 AI 修改」，在操作停下后定位到新改动。
-
-接受会保留 AI 已写入的内容。拒绝会尝试还原对应改动，遇到内容冲突时会提示。审阅针对 DSH 文件工具的改动，详见 [AI 改动审阅](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/ai-review.md)。
+| 文件与编辑 | 新建、重命名、移动、删除和拖放文件，支持批量选择、分屏和 Monaco 编辑，并按工作区恢复布局。保存时校验版本并原子写入。 |
+| 工作区搜索与替换 | 支持区分大小写、全字匹配、正则、包含或排除路径，并可预览后替换单处、单个文件或全部结果。 |
+| Git 与文件审核 | 源代码管理支持暂存、提交、修改提交、推送和同步。暂存文件可按 `HEAD ↔ 暂存区` 对比，提交后自动刷新图表。并排差异的变更块可将对应行作为引用添加到 DSH 对话。默认使用 IDEA / PyCharm 并排差异，也可切回 VS Code 内联样式。 |
+| 语言智能与调试 | 按语言安装和重启语言服务，使用补全、定义、引用、修复、格式化与问题面板。调试面板支持断点、单步、调用栈和变量。 |
+| AI 辅助 | 提供关闭、手动和自动三种代码补全模式。可审阅全部或最新 AI 改动，逐块、按文件或批量处理，并自动跟随新改动。 |
+| SSH 远程开发 | 通过 `~/.ssh/config` 别名或手动填写主机，使用 OpenSSH、ssh-agent、私钥或密码连接。支持远程文件编辑、下载、拖放上传、搜索替换、Git 和终端。对话输入框下方的「选择 SSH」可切换已连接的工作区，支持远程文件和行号引用。 |
+| 文档与网页 | 在标签页预览 Markdown、图片、PDF、Excel、Word 和 PowerPoint，并用内置或系统浏览器打开网页与本地 HTML。 |
+| 终端与 DSH 对话 | 使用官方 Harness 终端的多会话、重命名和分屏，可从文件或编辑器向 DSH 添加内容，并打开会话中的生成文件链接。 |
+| 工作区、布局与窗口 | 管理 Workspace 和 Session，调整活动栏、侧栏、对话栏与终端布局及主题字号。浮动窗口支持拖动、缩放、全屏，并记住位置和尺寸。 |
 
 ## 演示
 
@@ -127,12 +107,14 @@ dsh plugin --profile web add dsh-vscode-workbench
 | `` Ctrl+Shift+` `` | 新建终端 |
 | `Ctrl+T` / `⌘T` | 新建内置浏览器标签 |
 | `Ctrl/⌘+Alt+K` | 将当前文件或选中的代码添加到 DSH 对话（编辑器内） |
+| `Alt/Option+\` | 手动触发 AI 代码补全（启用后） |
+| `Tab` / `Esc` | 接受或隐藏 AI 行内建议 |
 | `Ctrl/⌘+Enter` | 从提交消息框提交 |
 | `F11` / `Ctrl+Command+F` | 浮动窗口进入或退出全屏（后者用于 macOS） |
 
 ## 安全
 
-所有插件接口要求 Harness 登录认证。Host 只接受当前 DSH 会话工作目录内的相对路径，并阻止目录穿越与符号链接越界。保存使用版本校验与原子替换；Git 与 ripgrep 使用参数数组启动，不拼接 Shell 命令。终端使用 Harness 官方控制器、连接认证和执行环境，在 Session 当前工作目录启动；凭据环境变量过滤由官方 subprocess provider 负责。
+所有插件接口要求 Harness 登录认证。Host 只接受当前 DSH 会话工作目录内的相对路径，并阻止目录穿越与符号链接越界。保存使用版本校验与原子替换；Git 与 ripgrep 使用参数数组启动，不拼接 Shell 命令。SSH 使用本机 OpenSSH，可将密码保存在系统凭据存储中。Linux 上的密码保存依赖 Secret Service。远程文件操作会通过 `realpath` 校验路径位于工作区内。对话中的远程命令从该工作区启动，以 SSH 用户权限运行。终端使用 Harness 官方控制器、连接认证和执行环境，在 Session 当前工作目录启动；凭据环境变量过滤由官方 subprocess provider 负责。
 
 ## 开发
 

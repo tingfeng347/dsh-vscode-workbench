@@ -5,14 +5,14 @@
 <p align="center"><a href="README.md">中文</a> · English</p>
 
 <p align="center"><strong>DSH VS Code Workbench</strong><br>
-  A VS Code-style workspace for DeepSeek Harness with editing, search, Git, a terminal, and document and web previews.</p>
+  A VS Code-style workspace for DeepSeek Harness with editing, search, Git, remote SSH development, a terminal, and document and web previews.</p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/v/dsh-vscode-workbench/latest?logo=npm&label=npm" alt="npm version"></a>
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/npm/dm/dsh-vscode-workbench?label=monthly%20downloads" alt="npm monthly downloads"></a>
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fapi.npmjs.org%2Fdownloads%2Fpoint%2F2026-08-24%3A2099-12-31%2Fdsh-vscode-workbench&query=%24.downloads&label=total+downloads&color=blue" alt="npm total downloads"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-version.svg" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-monthly-downloads.svg" alt="npm monthly downloads"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-total-downloads.svg" alt="npm total downloads"></a>
   <a href="https://github.com/tingfeng347/dsh-vscode-workbench/stargazers"><img src="https://img.shields.io/github/stars/tingfeng347/dsh-vscode-workbench?logo=github&label=Stars" alt="GitHub stars"></a>
-  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/commits/main"><img src="https://img.shields.io/github/last-commit/tingfeng347/dsh-vscode-workbench?label=last%20commit" alt="Last commit"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/commits/main"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/last-commit.svg" alt="Last commit"></a>
   <a href="https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tingfeng347/dsh-vscode-workbench?label=license" alt="MIT license"></a>
   <br>
   <a href="https://awesome-dsh-plugin.com/p/tingfeng347/dsh-vscode-workbench/"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
@@ -26,10 +26,10 @@
 
 ## Installation
 
-The plugin requires DeepSeek Harness `>=0.2.1-rc.1` at install time. The current test baseline is `0.2.2-rc.5` (Cordis `4.1.0`).
+Install the npm `latest` version of DeepSeek Harness. The plugin requires Harness `>=0.2.1-rc.1`.
 
 ```bash
-npm i -g @deepseek-ai/dsh@0.2.2-rc.5
+npm i -g @deepseek-ai/dsh@latest
 dsh plugin --profile web add dsh-vscode-workbench
 ```
 
@@ -39,35 +39,15 @@ Installing from the DSH Plugins page or a marketplace enables the plugin automat
 
 | Area | What you can do |
 | --- | --- |
-| Explorer | Create, rename, move, and delete files or folders. Upload by dropping files into the tree, drag files out to download, and select multiple entries to delete or copy relative or absolute paths. Open a file in a system app or reveal its location. |
-| Editing and split panes | Use Monaco with syntax highlighting and Chinese menus. Drag a tab to an editor edge to split the view, or into another pane to move or swap files. The workbench restores tabs and layout per workspace, flags external file changes, and uses revision checks and atomic saves. |
-| Language intelligence | Enable built-in TypeScript and JavaScript workspace indexing or configure language servers for Python, Go, Rust, C / C++, and more under DSH Settings → Workbench → Language Intelligence. Completion, definitions, references, signature help, and diagnostics depend on the language service you enable. The settings show toolchain and server status separately. |
-| Documents and web pages | Switch between Markdown source and preview, and navigate with the outline. Preview images, PDFs, and Excel workbooks in tabs. LibreOffice converts Word and PowerPoint files to PDF for preview. Without LibreOffice, `.docx` can still preview in the browser. Web links and local HTML open in the built-in or system browser selected in settings. |
-| Terminal and DSH chat | Use the official Harness terminal with multiple sessions, renaming, and splits. Add a selected file or folder from Explorer, or selected code from the editor, to DSH chat. Open generated file links for the current session in the workbench. |
-| Workspaces and layout | Use the activity bar to open or create workspaces and create or switch sessions. Reorder activity buttons by dragging and resize the sidebars and terminal. Choose light, dark, pure white, or eye-care colors, or follow the DSH theme. Editor font size is configurable. |
-
-Select Floating window under DSH Settings → Workbench → Window. Drag the title bar to move the window, drag an edge to resize it, or use the title bar button to enter fullscreen. The workbench remembers the position and size, which can be reset in settings.
-
-## Workspace search and replace
-
-Open Search in the sidebar and click the arrow beside the search box, or press `Ctrl+Shift+H` (`⌘⇧H` also works on macOS). Results are grouped by file. Select a match to reveal it in the editor.
-
-- Use case-sensitive, whole-word, or regular-expression search. Open the search details menu to set include and exclude globs such as `src/**` and `**/*.test.ts`.
-- Enter replacement text to preview deletions and additions. Replacement supports regex capture groups such as `$1` and a Preserve Case option. Replace one match, all matches in a file, or every result. File-wide and workspace-wide replacements ask for confirmation.
-- An empty replacement field shows regular match highlighting. Clicking Replace with an empty field deletes the match. Save unsaved changes in target files first. If there are more than 2,000 matches, narrow the search before replacing in bulk.
-
-## Git workflow
-
-- **Source Control** supports staging, unstaging, discarding changes, committing, amending, and committing followed by push or sync. AI can draft a commit message from the changes using the current DSH chat model or a model selected in settings. Choose the language and level of detail in settings, or stop generation and keep the draft.
-- **The commit graph** expands to show changed files. Open a diff or preview an image or document from history. Hover over a commit for author, time, change statistics, and a copyable hash. The card links to GitHub when a known remote-tracking branch contains the commit. Drag the divider between Changes and Graph to resize, or double-click to reset it.
-- Choose the **VS Code or IDEA / PyCharm diff style** under DSH Settings → Workbench → Git. Diff views support change navigation and folding of unchanged lines. The workbench remembers the inline or side-by-side selection. In the side-by-side ribbon view, the right pane follows the left in the same frame, and guides extend into both panes. Blue means modified, green added, and red deleted. Click a line in a file or diff to see its commit attribution.
-- Open Source Control → **Git Tools** to filter commit or file history, compare branches, tags, commits, or tracked working tree files, cherry-pick or revert commits, and manage stashes, local branches, and tags. Fetch, fast-forward pull, push, merge, and rebase from the sync view. In the conflict view, inspect all three versions, take a side, or edit and stage the merged result.
-
-## AI change review
-
-In DSH Settings → Workbench → AI Change Review, choose to review all changes or only the latest task. Review is off by default. Once enabled, review individual blocks in Monaco, review a file from the editor toolbar, or act on all pending files above the DSH chat input. Auto-follow can reveal new changes once you stop interacting.
-
-Accepting keeps changes already written by the AI. Rejecting attempts to restore the affected content and reports conflicts. Review covers edits made by DSH file tools. See [AI change review](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/ai-review.md) for details in Chinese.
+| Files and editing | Create, rename, move, delete, and drag files, with multi-selection, split panes, Monaco editing, and per-workspace layout restoration. Saves use revision checks and atomic writes. |
+| Workspace search and replace | Search with case, whole-word, regular-expression, and include or exclude path options. Preview and replace one match, one file, or all results. |
+| Git and file review | Stage, commit, amend, push, and sync from Source Control. Compare staged files with `HEAD` and browse the automatically refreshed commit graph. Change blocks in split diffs can add a file reference with the affected lines to the DSH conversation. IDEA / PyCharm split diffs are the default, with VS Code inline diffs available as an alternative. |
+| Language intelligence and debugging | Install and restart language servers for completion, definitions, references, fixes, formatting, and Problems. The Debug panel supports breakpoints, stepping, call stacks, and variables. |
+| AI assistance | Use Off, Manual, or Automatic code completion. Review all or the latest AI changes by block, file, or batch, with optional auto-follow. |
+| Remote SSH development | Connect with an OpenSSH alias or address using ssh-agent, a private key, or a password. Edit, download, and drag and drop remote files. Use search and replace, Git, and the terminal. The SSH selector below the DSH composer switches between connected workspaces and supports remote file and line references. |
+| Documents and web pages | Preview Markdown, images, PDFs, Excel, Word, and PowerPoint in tabs, and open web links or local HTML in the built-in or system browser. |
+| Terminal and DSH chat | Use the official Harness terminal with multiple sessions, renaming, and splits. Add files or editor selections to DSH chat and open generated file links from the current session. |
+| Workspaces, layout, and window | Manage workspaces and sessions, arrange the activity bar, sidebars, chat, terminal, themes, and font size. Floating windows support dragging, resizing, fullscreen, and remembered geometry. |
 
 ## Demo
 
@@ -127,12 +107,14 @@ Accepting keeps changes already written by the AI. Rejecting attempts to restore
 | `` Ctrl+Shift+` `` | Create a terminal |
 | `Ctrl+T` / `⌘T` | Open a built-in browser tab |
 | `Ctrl/Cmd+Alt+K` | Add the current file or selected code to DSH chat from the editor |
+| `Alt/Option+\` | Trigger AI code completion when enabled |
+| `Tab` / `Esc` | Accept or dismiss an AI inline suggestion |
 | `Ctrl/Cmd+Enter` | Commit from the commit message field |
 | `F11` / `Ctrl+Command+F` | Toggle floating-window fullscreen (second shortcut on macOS) |
 
 ## Security
 
-All plugin routes require Harness authentication. The host accepts only paths relative to the active DSH session workspace and rejects traversal and symlink escape. Saves use revision checks and atomic replacement. Git and ripgrep run with argument arrays rather than shell-concatenated commands. Terminals use the official Harness controller, connection authentication and execution environment. Credential filtering belongs to the official subprocess provider.
+All plugin routes require Harness authentication. The host accepts only paths relative to the active DSH session workspace and rejects traversal and symlink escape. Saves use revision checks and atomic replacement. Git and ripgrep run with argument arrays rather than shell-concatenated commands. Remote SSH uses the local OpenSSH client with optional password storage in the system credential store. On Linux, password storage requires Secret Service. File operations validate paths against the remote workspace with `realpath`. Remote commands in chat start in the selected workspace and run with the SSH account permissions. Terminals use the official Harness controller, connection authentication and execution environment. Credential filtering belongs to the official subprocess provider.
 
 ## Development
 

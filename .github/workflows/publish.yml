@@ -150,4 +150,11 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
-        run: npm publish ./dist/*.tgz --access public --provenance
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          tag_args=()
+          # Restore latest even if the accidental 0.2.31 release is still listed by npm.
+          if [[ "$RELEASE_TAG" == "v0.2.18" ]]; then
+            tag_args=(--tag latest)
+          fi
+          npm publish ./dist/*.tgz --access public --provenance "${tag_args[@]}"

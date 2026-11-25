@@ -22,7 +22,7 @@ describe('workbench settings section', () => {
 
   it('keeps the workbench layout untouched while settings are open', () => {
     const workbench = read('src/client/Workbench.tsx')
-    expect(workbench).toContain('const chatShown=chatVisible&&!showingDshPanel&&!floating')
+    expect(workbench).toContain('const chatShown=chatVisible&&!showingDshPanel')
     expect(workbench).toContain('const showingDshPanel=dshTabId!==undefined&&dshTabActive')
     expect(workbench).toContain('active={browserId===tab.id&&!dshTabActive&&!switcherOpen&&!nativeSidebar.shown&&snapshot.visible}')
   })
@@ -91,7 +91,7 @@ describe('workbench settings section', () => {
   it('leaves browser tabs out of the activity bar', () => {
     const workbench = read('src/client/Workbench.tsx')
     expect(workbench).not.toContain("id:'browser',label:'新建浏览器'")
-    expect(workbench).toContain("const ACTIVITY_VIEW_IDS = ['explorer','search','git','terminal','chat'] as const")
+    expect(workbench).toContain("const ACTIVITY_VIEW_IDS = ['explorer','search','git','ssh','debug','terminal','chat'] as const")
     expect(workbench).not.toContain("label:'新建浏览器'")
   })
 })

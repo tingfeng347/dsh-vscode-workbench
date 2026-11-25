@@ -6,7 +6,7 @@
  * asserted through chokidar-internal bookkeeping.
  */
 import { lstatSync, realpathSync } from 'node:fs'
-import { join, sep } from 'node:path'
+import { basename, dirname, join, sep } from 'node:path'
 import chokidar from 'chokidar'
 import { applyManifest, escapesWorkspace, type WatchBackend, type WatchManifest, type WatchRules } from './workspace-watch.ts'
 
@@ -83,11 +83,17 @@ export function createWorkspaceWatcher(options: WorkspaceWatcherOptions): Worksp
    */
   const waitArmed = async (absolutes: readonly string[], timeoutMs = 2000): Promise<void> => {
     const normalise = (value: string) => value.replace(/\\/g, '/').replace(/\/+$/, '')
-    const wanted = absolutes.map(normalise)
+    const wanted = absolutes.map(path => {
+      let directory: boolean | undefined
+      // External deletion, replacement or permission changes can race manifest validation.
+      try { directory = lstatSync(path).isDirectory() } catch { /* Keep the bounded readiness wait. */ }
+      return { path: normalise(path), directory, parent: normalise(dirname(path)), name: basename(path) }
+    })
     const deadline = Date.now() + timeoutMs
     while (Date.now() < deadline) {
-      const keys = new Set(Object.keys(instance.getWatched()).map(normalise))
-      if (wanted.every(path => keys.has(path))) return
+      const watched = new Map(Object.entries(instance.getWatched()).map(([path, entries]) => [normalise(path), entries]))
+      // Chokidar keys are directories; an individually watched file appears in its parent's list.
+      if (wanted.every(item => item.directory !== undefined && (item.directory ? watched.has(item.path) : watched.get(item.parent)?.includes(item.name)))) return
       await sleep(10)
     }
   }

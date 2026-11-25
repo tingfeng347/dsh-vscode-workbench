@@ -12,7 +12,7 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('--dvw-side:#191a1b')
     expect(styles).toContain('--dvw-accent:#307e9f')
     expect(styles).toContain('.dvw-side{grid-column:2;grid-row:1/3;min-width:0;width:100%;background:var(--dvw-side)')
-    expect(styles).toContain('.dvw-status{grid-column:1/4;grid-row:3;background:var(--dvw-base);color:var(--dvw-text);display:flex;align-items:center;padding:6px 8px 0;')
+    expect(styles).toContain('.dvw-status{grid-column:1/4;grid-row:3;background:var(--dvw-base);color:var(--dvw-text);display:flex;align-items:center;padding:0 8px;')
     expect(read('src/client/Workbench.tsx')).toContain("body.toggleAttribute('data-ds-dark-theme',theme==='dark')")
     expect(read('src/client/Workbench.tsx')).toContain('data-dvw-theme={colorScheme}')
     expect(read('src/client/Workbench.tsx')).toContain('followDsh={false}')
@@ -83,9 +83,8 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('.dvw-branch-menu{')
   })
 
-  it('keeps the explorer loaded when switching sessions in one workspace', () => {
+  it('keeps the workbench mounted when switching sessions in one workspace', () => {
     expect(read('src/client/index.tsx')).toContain("key={cwd ?? 'no-workspace'}")
-    expect(read('src/client/Workbench.tsx')).toContain('loadedWorkspaceCwd.current === cwd')
   })
 
   it('offers a centered workspace switcher below the DSH conversation button', () => {
@@ -180,7 +179,7 @@ describe('workbench dark theme', () => {
   it('lists TypeScript with the other languages in one block', () => {
     const panel = read('src/client/SettingsPanel.tsx')
     expect(panel).not.toContain('未安装。安装后会索引工作区中的 TS/JS 文件。')
-    expect(panel).toContain("内置 · {props.tsIntellisense")
+    expect(panel).toContain('TypeScript / JavaScript（内置索引）')
     expect(panel).toContain("props.tsIndex.state === 'loading'")
   })
 
@@ -197,7 +196,7 @@ describe('workbench dark theme', () => {
     expect(workbench).not.toContain('dvw:watch-ignore')
     expect(workbench).not.toContain('<h3>文件监听</h3>')
     expect(read('src/client/typescriptProject.ts')).toContain("localStorage.getItem(TS_INTELLISENSE_KEY) === 'on'")
-    expect(panel).toContain("{props.tsIntellisense ? '卸载' : '安装'}")
+    expect(panel).toContain("{props.tsIntellisense ? '停用索引' : '启用索引'}")
     expect(workbench).toContain('monaco.editor.registerEditorOpener(')
     expect(monaco).toContain("multipleDefinitions: 'gotoAndPeek'")
     expect(monaco).toContain("alternativeDefinitionCommand: 'editor.action.goToReferences'")

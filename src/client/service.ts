@@ -1,6 +1,6 @@
 import type { ComponentType } from 'react'
 
-export type WorkbenchView = 'explorer' | 'search' | 'git'
+export type WorkbenchView = 'explorer' | 'search' | 'git' | 'ssh'
 export interface BottomPanelProps { sessionId: string; cwd: string; visible: boolean; colorScheme: 'dark' | 'light' | 'white' | 'eyecare' }
 export interface BottomPanelContribution { id: string; title: string; component: ComponentType<BottomPanelProps> }
 export interface WorkbenchCommand { id: string; run(): void }
@@ -10,7 +10,7 @@ interface WorkbenchStorage { getItem(key:string):string|null; setItem(key:string
 const SNAPSHOT_KEY='dvw:workbench:snapshot:v1'
 const DEFAULT_SNAPSHOT:WorkbenchSnapshot={visible:false,view:'explorer'}
 function browserStorage():WorkbenchStorage|undefined{try{return globalThis.localStorage}catch{return undefined}}
-function restoreSnapshot(storage:WorkbenchStorage|undefined):WorkbenchSnapshot{if(storage===undefined)return {...DEFAULT_SNAPSHOT};try{const raw=storage.getItem(SNAPSHOT_KEY);if(raw===null)return {...DEFAULT_SNAPSHOT};const value=JSON.parse(raw) as Partial<WorkbenchSnapshot>;const view=value.view==='explorer'||value.view==='search'||value.view==='git'?value.view:'explorer';return {visible:value.visible===true,view,...(typeof value.bottomPanel==='string'?{bottomPanel:value.bottomPanel}:{})}}catch{return {...DEFAULT_SNAPSHOT}}}
+function restoreSnapshot(storage:WorkbenchStorage|undefined):WorkbenchSnapshot{if(storage===undefined)return {...DEFAULT_SNAPSHOT};try{const raw=storage.getItem(SNAPSHOT_KEY);if(raw===null)return {...DEFAULT_SNAPSHOT};const value=JSON.parse(raw) as Partial<WorkbenchSnapshot>;const view=value.view==='explorer'||value.view==='search'||value.view==='git'||value.view==='ssh'?value.view:'explorer';return {visible:value.visible===true,view,...(typeof value.bottomPanel==='string'?{bottomPanel:value.bottomPanel}:{})}}catch{return {...DEFAULT_SNAPSHOT}}}
 
 /** Client service exposed by the workbench to small feature adapters. */
 export interface VscodeWorkbench {

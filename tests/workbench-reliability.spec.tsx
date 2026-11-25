@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { act } from 'react'
+import { act, useEffect } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
 import { Workbench } from '../src/client/Workbench.tsx'
@@ -7,7 +7,7 @@ import type { MonacoDiffEditor, MonacoEditor } from '../src/client/MonacoEditor.
 import { settingsHost } from '../src/client/settingsHost.ts'
 import { WorkbenchController } from '../src/client/service.ts'
 import { disposeTypeScriptProject } from '../src/client/typescriptProject.ts'
-import type { GitChange } from '../src/types.ts'
+import type { FileEntry, GitChange } from '../src/types.ts'
 
 type EditorProps = Parameters<typeof MonacoEditor>[0]
 type DiffProps = Parameters<typeof MonacoDiffEditor>[0]
@@ -66,12 +66,11 @@ let reviewChanges: Array<{
   created: boolean
 }> = []
 const sockets: FakeSocket[] = []
-class FakeSocket {
-  onmessage?: (event: { data: string }) => void
-  onopen?: () => void
-  constructor() { sockets.push(this) }
+class FakeSocket extends EventTarget {
+  static OPEN = 1
+  constructor() { super(); sockets.push(this) }
   close() {}
-  change(paths: string[]) { this.onmessage?.({ data: JSON.stringify({ paths }) }) }
+  change(paths: string[]) { this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ paths }) })) }
 }
 afterEach(async () => {
   await act(async () => { root?.unmount() }); root = undefined
@@ -101,7 +100,15 @@ const defaultModelCatalog: FakeModelCatalog = {
   unavailable: [],
   defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' },
 }
-async function setup(binary = false, saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' }, changes: typeof reviewChanges = [], gitChanges: GitChange[] = [], modelCatalog: FakeModelCatalog = defaultModelCatalog) {
+async function setup(
+  binary = false,
+  saved: Record<string, unknown> = { paths: ['a.txt'], active: 'a.txt' },
+  changes: typeof reviewChanges = [],
+  gitChanges: GitChange[] = [],
+  modelCatalog: FakeModelCatalog = defaultModelCatalog,
+  files: FileEntry[] = [],
+  readFailure?: (path: string) => { code: string; message: string; status?: number } | undefined,
+) {
   disk = 'disk'; revision = 'r1'; completeSave = undefined; state.editor = undefined
   projectSource = 'export const a = 1'; projectReads = 0; reviewChanges = changes
   localStorage.setItem('dvw:/tmp/audit', JSON.stringify(saved))
@@ -109,16 +116,28 @@ async function setup(binary = false, saved: Record<string, unknown> = { paths: [
   vi.stubGlobal('fetch', vi.fn(async (url: string, options: { body: string }) => {
     const method = url.split('/').at(-1)
     const body = JSON.parse(options.body) as Record<string, unknown>
-    const doc = () => ({ path: 'a.txt', content: binary ? '' : disk, revision, size: binary ? 0 : disk.length, binary, tooLarge: false })
+    const doc = () => ({ path: typeof body.path === 'string' ? body.path : 'a.txt', content: binary ? '' : disk, revision, size: binary ? 0 : disk.length, binary, tooLarge: false })
     let value: unknown
     if (method === 'workspace') value = { cwd: '/tmp/audit', name: 'audit' }
-    else if (method === 'fs.list' || method === 'lsp.status') value = []
+    else if (method === 'fs.list') value = files
+    else if (method === 'lsp.status' || method === 'ssh.connections') value = []
+    else if (method === 'ssh.hosts') value = { hosts: [] }
     else if (method === 'git.status') value = { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
     else if (method === 'git.action' && body.action === 'diff') value = { diff: '', original: 'before', modified: 'after' }
     else if (method === 'git.action') value = body.action === 'log' ? [] : { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
     else if (method === 'commit.models') value = modelCatalog
     else if (method === 'git.commitMessage') value = { message: 'feat(git): generate the message directly' }
-    else if (method === 'fs.read') value = doc()
+    else if (method === 'fs.read') {
+      const path = typeof body.path === 'string' ? body.path : 'a.txt'
+      const failure = readFailure?.(path)
+      if (failure !== undefined) {
+        return Response.json({
+          ok: false,
+          error: { code: failure.code, message: failure.message },
+        }, { status: failure.status ?? 409 })
+      }
+      value = doc()
+    }
     else if (method === 'project.sources') { projectReads++; value = { files: [{ path: 'a.ts', content: projectSource }], truncated: false } }
     else if (method === 'review.feed') value = { cursor: 9, changes: reviewChanges, busy: false }
     else if (method === 'review.inspect') value = {
@@ -153,11 +172,50 @@ it('opens a DSH generated-file link at its requested line in the workbench edito
   await setup()
   await act(async () => {
     window.dispatchEvent(new CustomEvent('dvw-open-generated-file', {
-      detail: { sessionId: 's', path: 'a.txt', line: 2 },
+      detail: { sessionId: 's', path: 'a.txt', line: 2, endLine: 3 },
     }))
   })
-  expect(state.editor).toMatchObject({ value: 'disk', line: 2, focusOnReveal: true })
+  expect(state.editor).toMatchObject({ value: 'disk', line: 2, endLine: 3, focusOnReveal: true })
   expect(document.querySelector<HTMLElement>('.dvw-tab[data-active="true"]')?.textContent).toContain('a.txt')
+})
+
+it('closes stale remote tabs instead of surfacing a disconnected SSH error', async () => {
+  const stale = 'ssh://dead/root/stale.txt'
+  const live = 'ssh://live/root/live.txt'
+  await setup(
+    false,
+    { paths: [stale, live], active: stale },
+    [],
+    [],
+    defaultModelCatalog,
+    [],
+    path => path === stale
+      ? { code: 'ssh-disconnected', message: 'SSH 连接已断开，请重新连接' }
+      : undefined,
+  )
+
+  await vi.waitFor(() => {
+    expect(document.querySelector(`[data-tab-path="${stale}"]`)).toBeNull()
+  })
+  expect(document.querySelector(`[data-tab-path="${live}"]`)).not.toBeNull()
+  expect(document.querySelector('.dvw-error')).toBeNull()
+  expect(document.body.textContent).not.toContain('SSH 连接已断开')
+})
+
+it('renders SSH images through the remote file preview route', async () => {
+  const image = 'ssh://live/images/orchard.jpg'
+  await setup(false, { paths: [image], active: image })
+
+  const preview = await vi.waitFor(() => {
+    const value = document.querySelector<HTMLImageElement>('.dvw-image-preview img')
+    expect(value).not.toBeNull()
+    return value!
+  })
+  expect(preview.src).toContain('/dsh-vscode/ssh/file?')
+  expect(preview.src).toContain('connectionId=live')
+  expect(preview.src).toContain(`path=${encodeURIComponent('images/orchard.jpg')}`)
+  expect(state.editor).toBeUndefined()
+  expect(document.body.textContent).not.toContain('该格式文件暂时无法预览')
 })
 
 it('follows a newly discovered AI change after the one and a half second idle delay', async () => {
@@ -207,39 +265,183 @@ it('postpones AI follow while the user is typing or scrolling', async () => {
   expect(state.editor).toMatchObject({ line: 1, focusOnReveal: false })
 })
 
-it('uses the file review bar to accept or reject every block in the active file', async () => {
+it('opens the DSH conversation with a file reference when asking from a change block', async () => {
   localStorage.setItem('dvw:ai-review-mode', 'all')
   localStorage.setItem('dvw:ai-review-follow', 'off')
+  localStorage.setItem('dvw:dsh-chat-visible', 'closed')
   await setup(false, { paths: ['a.txt'], active: 'a.txt' }, [
     { id: '8:0', seq: 8, path: 'a.txt', before: 'old', after: 'disk', created: false },
     { id: '8:1', seq: 8, path: 'a.txt', before: 'before', after: 'tail', created: false },
   ])
-  await vi.waitFor(() => expect(document.querySelector('.dvw-review-filebar')).not.toBeNull())
-  const bar = document.querySelector('.dvw-review-filebar')!
-  expect(bar.textContent).toContain('AI 改动 · 2 处')
-  const buttons = [...bar.querySelectorAll<HTMLButtonElement>('button')]
-  expect(buttons.map(button => button.textContent)).toEqual(['接受', '拒绝'])
-  expect(buttons[0]!.title).toContain('Ctrl+Enter')
-  expect(buttons[1]!.title).toContain('Ctrl+Backspace')
-  await act(async () => buttons[0]!.click())
+  await vi.waitFor(() => expect(state.editor?.review?.changes).toHaveLength(2))
   expect(document.querySelector('.dvw-review-filebar')).toBeNull()
+  const review = state.editor!.review!
+  expect(review.onAsk).toBeTypeOf('function')
+  const composer = document.createElement('textarea')
+  const card = document.createElement('div')
+  card.dataset.composerCard = ''
+  card.append(composer)
+  const panel = document.createElement('div')
+  panel.dataset.dvwConversationPanel = ''
+  panel.append(card)
+  document.body.append(panel)
+  await act(async () => review.onAsk!(review.changes[0]!))
+  await vi.waitFor(() => expect(composer.value).toBe('`a.txt:1` '))
+  expect(document.querySelector('.dvw-chat')).not.toBeNull()
+  expect(document.querySelector('.dvw-file-ai-menu')).toBeNull()
+  await act(async () => review.onKeep('8:0'))
+})
+
+it('asks about a Git diff by inserting its reference into the visible DSH composer', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  localStorage.setItem('dvw:dsh-chat-visible', 'closed')
+  await setup(false, { paths: [], view: 'git' }, [], [
+    { path: 'a.txt', index: '.', worktree: 'M', staged: false, untracked: false },
+  ])
+  const row = await vi.waitFor(() => {
+    const value = document.querySelector<HTMLElement>('.dvw-git .dvw-change')
+    expect(value).not.toBeNull()
+    return value!
+  })
+  await act(async () => row.click())
+  const composer = document.createElement('textarea')
+  const card = document.createElement('div')
+  card.dataset.composerCard = ''
+  card.append(composer)
+  const panel = document.createElement('div')
+  panel.dataset.dvwConversationPanel = ''
+  panel.append(card)
+  document.body.append(panel)
+  await act(async () => state.diff!.reviewActions!.onAsk({ startLine: 3, endLine: 5 }))
+  await vi.waitFor(() => expect(composer.value).toBe('`a.txt:3-5` '))
+  expect(document.querySelector('.dvw-chat')).not.toBeNull()
+  expect(document.querySelector('.dvw-file-ai-menu')).toBeNull()
 })
 
 it('applies and persists the Git comparison style through Workbench settings', async () => {
   localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
   await setup(false, { paths: [], view: 'git' }, [], [{ path: 'a.txt', index: '.', worktree: 'M', staged: false, untracked: false }])
   await act(async () => document.querySelector<HTMLElement>('.dvw-change')!.click())
-  expect(state.diff).toMatchObject({ mode: 'inline', style: 'classic' })
+  expect(state.diff).toMatchObject({ mode: 'split', style: 'ribbon' })
   const settings = document.createElement('div')
   document.body.append(settings)
   await act(async () => settingsHost.set(settings))
   const selector = settings.querySelector<HTMLButtonElement>('button[aria-label^="Git 对比样式："]')!
-  expect(selector.textContent).toContain('VS Code（默认）')
+  expect(selector.textContent).toContain('IDEA / PyCharm（默认）')
   await act(async () => selector.click())
-  const jetBrainsStyle = Array.from(settings.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]')).find(button=>button.textContent?.trim()==='IDEA / PyCharm')!
-  await act(async () => jetBrainsStyle.click())
-  expect(state.diff).toMatchObject({ mode: 'split', style: 'ribbon' })
-  expect(localStorage.getItem('dvw:git-diff-style')).toBe('ribbon')
+  const options = Array.from(settings.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]'))
+  expect(options.map(option => option.textContent?.trim())).toEqual(['IDEA / PyCharm（默认）', 'VS Code'])
+  const vsCodeStyle = options.find(button => button.textContent?.trim() === 'VS Code')!
+  await act(async () => vsCodeStyle.click())
+  expect(state.diff).toMatchObject({ mode: 'inline', style: 'classic' })
+  expect(localStorage.getItem('dvw:git-diff-style')).toBe('classic')
+})
+
+it('compares a staged file against HEAD from the staged changes group', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: [], view: 'git' }, [], [{
+    path: 'a.txt', index: 'M', worktree: '.', staged: true, untracked: false,
+  }])
+
+  const row = await vi.waitFor(() => {
+    const value = document.querySelector<HTMLElement>('.dvw-git .dvw-change')
+    expect(value?.textContent).toContain('a.txt')
+    return value!
+  })
+  await act(async () => row.click())
+
+  expect(state.diff).toMatchObject({
+    original: 'before',
+    modified: 'after',
+    sourcePath: 'a.txt',
+    versions: ['HEAD', '暂存区'],
+  })
+  expect(document.querySelector('[data-tab-path="diff:staged:a.txt"]')).not.toBeNull()
+  const request = vi.mocked(fetch).mock.calls
+    .map(([, options]) => JSON.parse(String(options?.body)) as Record<string, unknown>)
+    .find(body => body.action === 'diff')
+  expect(request).toMatchObject({ action: 'diff', path: 'a.txt', value: 'staged' })
+})
+
+it('shows a new commit before the commit action finishes', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: [], view: 'git' }, [], [{
+    path: 'a.txt', index: 'M', worktree: '.', staged: true, untracked: false,
+  }])
+  const input = await vi.waitFor(() => {
+    const value = document.querySelector<HTMLTextAreaElement>('.dvw-commit-input')
+    expect(value).not.toBeNull()
+    return value!
+  })
+
+  const originalFetch = vi.mocked(fetch).getMockImplementation()!
+  let finishHistory!: (response: Response) => void
+  let historyStarted = false
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    const body = JSON.parse(String(options?.body)) as Record<string, unknown>
+    if (body.action === 'commit') {
+      // The commit itself completed in Git. Reading the new history remains pending.
+      return Response.json({
+        ok: true,
+        value: { repository: '/tmp/audit', branch: 'master', ahead: 1, behind: 0, changes: [] },
+      })
+    }
+    if (body.action === 'log' && vi.mocked(fetch).mock.calls.some(([, request]) =>
+      (JSON.parse(String(request?.body)) as Record<string, unknown>).action === 'commit')) {
+      historyStarted = true
+      return new Promise<Response>(resolve => { finishHistory = resolve })
+    }
+    return originalFetch(url, options)
+  })
+
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(input, 'feat(git): show immediately')
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () => document.querySelector<HTMLButtonElement>('.dvw-commit-button')!.click())
+
+  await vi.waitFor(() => expect(historyStarted).toBe(true))
+  expect(input.value).toBe('feat(git): show immediately')
+
+  await act(async () => finishHistory(Response.json({
+    ok: true,
+    value: [{
+      hash: 'abcdef123456', author: 'Test', date: '2026-11-23T00:00:00Z',
+      subject: 'feat(git): show immediately', parents: [], refs: ['HEAD -> master'],
+    }],
+  })))
+  await vi.waitFor(() => expect(document.querySelector('.dvw-graph-subject')?.textContent).toBe('feat(git): show immediately'))
+  expect(input.value).toBe('')
+})
+
+it('closes a stale Git diff after the file leaves the change list', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: [], view: 'git' }, [], [{
+    path: 'a.txt', index: '.', worktree: 'M', staged: false, untracked: false,
+  }])
+
+  const change = await vi.waitFor(() => {
+    const row = document.querySelector<HTMLElement>('.dvw-git .dvw-change')
+    expect(row?.textContent).toContain('a.txt')
+    return row!
+  })
+  await act(async () => change.click())
+  expect(document.querySelector('[data-tab-path="diff:a.txt"]')).not.toBeNull()
+
+  const originalFetch = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (url, options) => {
+    const body = JSON.parse(String(options?.body)) as Record<string, unknown>
+    if (body.action === 'status') {
+      return Response.json({
+        ok: true,
+        value: { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: [] },
+      })
+    }
+    return originalFetch(url, options)
+  })
+
+  await act(async () => window.dispatchEvent(new Event('dvw-files-changed')))
+  await vi.waitFor(() => expect(document.querySelector('[data-tab-path="diff:a.txt"]')).toBeNull())
 })
 
 it('shares the diff layout across new and existing files and restores it after reopening', async () => {
@@ -272,6 +474,19 @@ it('shares the diff layout across new and existing files and restores it after r
   await mount(service)
   await openDiff('b.txt')
   expect(state.diff?.mode).toBe('inline')
+})
+
+it('only offers to launch the source file when switching between a file and its Git diff', async () => {
+  localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
+  await setup(false, { paths: ['a.js'], active: 'a.js' }, [], [
+    { path: 'a.js', index: '.', worktree: 'M', staged: false, untracked: false },
+  ])
+  const actions = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.dvw-status-action'))
+  expect(actions().map(button => button.disabled)).toEqual([false, false])
+  await act(async () => document.querySelector<HTMLElement>('.dvw-change')!.click())
+  expect(actions().map(button => button.disabled)).toEqual([true, true])
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-tab-path="a.js"]')!.click())
+  expect(actions().map(button => button.disabled)).toEqual([false, false])
 })
 
 it('uses one persisted switch for line blame in both the file editor and Git diffs', async () => {
@@ -413,6 +628,72 @@ it('resizes the graph split by pointer and keyboard and restores it after collap
   }
 })
 
+it('switches between Terminal and Problems from the bottom panel header', async () => {
+  const service = await setup()
+  await act(async () => {
+    service.registerBottomPanel({ id: 'terminal', title: '终端', component: () => <div data-test-terminal>终端内容</div> })
+    service.toggleBottomPanel('terminal')
+  })
+  const header = document.querySelector('.dvw-bottom-head')!
+  const buttons = header.querySelectorAll('button')
+  const [terminal, problems, close] = buttons
+  expect(Array.from(buttons, button => button.getAttribute('aria-label') ?? button.textContent)).toEqual(['终端', '问题', '关闭底部面板'])
+  expect(terminal!.getAttribute('aria-pressed')).toBe('true')
+  const terminalContent = document.querySelector('[data-test-terminal]')!
+  await act(async () => problems!.click())
+  expect(terminalContent.closest('[hidden]')).not.toBeNull()
+  expect(problems!.getAttribute('aria-pressed')).toBe('true')
+  expect(document.querySelector('.dvw-bottom-body')?.textContent).toContain('没有发现问题')
+  await act(async () => problems!.click())
+  expect(service.getSnapshot().bottomPanel).toBe('problems')
+  await act(async () => terminal!.click())
+  expect(document.querySelector('.dvw-bottom-body')?.textContent).toBe('终端内容')
+  await act(async () => close!.click())
+  expect(service.getSnapshot().bottomPanel).toBeUndefined()
+})
+
+it('keeps exactly one SSH explorer mounted when switching between Git and SSH', async () => {
+  const service = await setup()
+  const panel = document.querySelector('.dvw-ssh')
+  expect(panel).not.toBeNull()
+  for (const view of ['git', 'ssh', 'git', 'ssh'] as const) {
+    await act(async () => service.show(view))
+    expect([...document.querySelectorAll('.dvw-ssh')]).toEqual([panel])
+  }
+})
+
+it('keeps the SSH terminal mounted and reachable while debugging', async () => {
+  const service = await setup()
+  let mounts = 0
+  let unmounts = 0
+  function SshTerminal() {
+    useEffect(() => {
+      mounts += 1
+      return () => { unmounts += 1 }
+    }, [])
+    return <div data-test-ssh>SSH 会话内容</div>
+  }
+  await act(async () => {
+    service.registerBottomPanel({ id: 'ssh-terminal', title: 'SSH 终端', component: SshTerminal })
+    service.registerBottomPanel({ id: 'debug', title: '调试', component: () => <div data-test-debug>调试内容</div> })
+    service.toggleBottomPanel('ssh-terminal')
+  })
+  const sshTab = () => Array.from(document.querySelectorAll<HTMLElement>('.dvw-bottom-head .dvw-bottom-title')).find(tab => tab.textContent === 'SSH 终端')
+  const debugTab = () => Array.from(document.querySelectorAll<HTMLButtonElement>('.dvw-bottom-head button')).find(button => button.textContent === '调试')
+  expect(sshTab()?.textContent).toBe('SSH 终端')
+  expect(mounts).toBe(1)
+  await act(async () => debugTab()!.click())
+  expect(service.getSnapshot().bottomPanel).toBe('debug')
+  expect(sshTab()?.textContent).toBe('SSH 终端')
+  expect(document.querySelector('[data-test-ssh]')?.closest('[hidden]')).not.toBeNull()
+  expect(document.querySelector('[data-test-debug]')).not.toBeNull()
+  expect(unmounts).toBe(0)
+  await act(async () => sshTab()!.click())
+  expect(service.getSnapshot().bottomPanel).toBe('ssh-terminal')
+  expect(document.querySelector('[data-test-ssh]')?.closest('[hidden]')).toBeNull()
+  expect(mounts).toBe(1)
+})
+
 it('puts branch controls in the status bar and commit metadata in the hover card', async () => {
   localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({visible:true, view:'git'}))
   await setup(false, {}, [], [{path:'src/a.txt', index:'?', worktree:'?', staged:false, untracked:true}])
@@ -432,6 +713,8 @@ it('puts branch controls in the status bar and commit metadata in the hover card
     return row!
   })
   expect(document.querySelector('.dvw-status [title="切换分支"]')).not.toBeNull()
+  expect(document.querySelector('.dvw-scm-head .dvw-group-toggle')?.textContent).toBe('提交')
+  expect(document.querySelector('.dvw-git .dvw-group-head .dvw-group-toggle')?.textContent).toBe('更改')
   expect(document.querySelector('.dvw-graph .dvw-count')).toBeNull()
   expect(document.querySelector('.dvw-git .dvw-group-head')?.lastElementChild?.textContent).toBe('1')
   await act(async () => { row.focus(); await new Promise(resolve => setTimeout(resolve,350)) })
@@ -485,6 +768,37 @@ it('uses an explicitly configured commit model instead of the active chat model'
   })
 })
 
+it('uses the same model catalog with independent AI completion settings', async () => {
+  const service = await setup()
+  expect(state.editor?.aiCompletion).toBeUndefined()
+  const settings = document.createElement('div')
+  document.body.append(settings)
+  await act(async () => settingsHost.set(settings))
+  const selector = (label: string) => settings.querySelector<HTMLButtonElement>(`button[aria-label^="${label}："]`)
+  const pick = async (label: string, value: string) => {
+    const button = await vi.waitFor(() => {
+      expect(selector(label)).not.toBeNull()
+      return selector(label)!
+    })
+    await act(async () => button.click())
+    const option = [...settings.querySelectorAll<HTMLButtonElement>('[role=menuitemradio]')]
+      .find(item => item.textContent?.trim() === value)!
+    await act(async () => option.click())
+  }
+  await pick('AI 代码补全触发方式', '自动补全')
+  await pick('AI 代码补全模型', 'DeepSeek-V4-Pro')
+  expect(selector('提交信息生成模型')?.textContent).toContain('跟随 DSH 聊天模型')
+  expect(localStorage.getItem('dvw:commit-model')).toBeNull()
+  expect(localStorage.getItem('dvw:inline-completion-mode')).toBe('auto')
+  await act(async () => settingsHost.set(undefined))
+  expect(state.editor?.aiCompletion).toEqual({
+    mode: 'auto', sessionId: 's', cwd: '/tmp/audit', model: { provider: 'deepseek-official', model: 'deepseek-pro' },
+  })
+  await act(async () => root!.unmount())
+  await mount(service)
+  expect(state.editor?.aiCompletion?.model?.model).toBe('deepseek-pro')
+})
+
 it('keeps a saved generation model when its provider is temporarily unavailable', async () => {
   const saved = { provider: 'deepseek-official', model: 'deepseek-pro' }
   localStorage.setItem('dvw:commit-model', JSON.stringify(saved))
@@ -518,9 +832,52 @@ it('restores unsaved drafts after remounting and detects a changed disk version'
   await act(async () => root!.unmount()); root = undefined
   disk = 'external edit'; revision = 'external'
   await mount(service)
-  await act(async () => sockets.at(-1)!.onopen?.())
+  await act(async () => sockets.at(-1)!.dispatchEvent(new Event('open')))
   expect(state.editor!.value).toBe('recovered draft')
   expect(document.body.textContent).toContain('磁盘文件已变化')
+})
+
+it('keeps the explorer and unsaved document loaded when switching sessions in the same workspace', async () => {
+  const service = await setup(false, undefined, [], [], undefined, [{ path: 'a.txt', name: 'a.txt', kind: 'file' }])
+  await act(async () => state.editor!.onChange('same workspace draft'))
+  vi.mocked(fetch).mockClear()
+  await act(async () => { root!.render(<Workbench service={service} sessionId="other-session" cwd="/tmp/audit"/>) })
+  expect(state.editor?.value).toBe('same workspace draft')
+  expect(document.querySelector('[data-tree-path="a.txt"]')).not.toBeNull()
+  const reloads = vi.mocked(fetch).mock.calls.filter(([url]) => /\/(?:workspace|fs\.read)$/.test(String(url)))
+  expect(reloads).toHaveLength(0)
+})
+
+it('preserves other session drafts across consecutive switches while a workspace is still loading', async () => {
+  const service = await setup()
+  vi.useFakeTimers()
+  const otherDrafts = JSON.stringify([{ path: 'other.txt', content: 'saved', draft: 'other session precious draft', revision: 'r0' }])
+  localStorage.setItem('dvw:drafts:other-session:/tmp/audit', otherDrafts)
+  const originalFetch = fetch
+  vi.stubGlobal('fetch', (url: string, options: RequestInit) => url.endsWith('/workspace')
+    ? new Promise(() => {})
+    : originalFetch(url, options))
+  await act(async () => state.editor!.onChange('outgoing draft'))
+  await act(async () => { root!.render(<Workbench service={service} sessionId="other-session" cwd="/tmp/other"/>) })
+  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/third"/>) })
+  expect(localStorage.getItem('dvw:drafts:other-session:/tmp/audit')).toBe(otherDrafts)
+  expect(localStorage.getItem('dvw:drafts:s:/tmp/audit')).toContain('outgoing draft')
+})
+
+it.each(['s', 'other-session'])('flushes the outgoing draft before a fast workspace switch in %s', async nextSession => {
+  const service = await setup()
+  vi.useFakeTimers()
+  const originalFetch = fetch
+  let currentCwd = '/tmp/other'
+  vi.stubGlobal('fetch', (url: string, options: RequestInit) => url.endsWith('/workspace')
+    ? Promise.resolve(Response.json({ ok: true, value: { cwd: currentCwd, name: 'fixture' } }))
+    : originalFetch(url, options))
+  await act(async () => state.editor!.onChange('unsaved before switching'))
+  await act(async () => { root!.render(<Workbench service={service} sessionId={nextSession} cwd={currentCwd}/>) })
+  expect(localStorage.getItem('dvw:drafts:s:/tmp/audit')).toContain('unsaved before switching')
+  currentCwd = '/tmp/audit'
+  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd={currentCwd}/>) })
+  expect(state.editor?.value).toBe('unsaved before switching')
 })
 
 it('reloads a clean document when its path changes on disk', async () => {
@@ -528,6 +885,36 @@ it('reloads a clean document when its path changes on disk', async () => {
   disk = 'updated by DSH'; revision = 'external'
   await act(async () => sockets.at(-1)!.change(['a.txt']))
   expect(state.editor!.value).toBe('updated by DSH')
+})
+
+it('reloads external changes through the authenticated desktop socket carrier', async () => {
+  const carrier = Object.assign(new EventTarget(), { readyState: 1, send: vi.fn(), close: vi.fn() })
+  const createWebSocket = vi.fn(() => carrier)
+  vi.stubGlobal('__DSH_TRANSPORT__', { streamBaseUrl: 'http://127.0.0.1:4312', createWebSocket })
+  await setup()
+  await act(async () => carrier.dispatchEvent(new Event('open')))
+  expect(carrier.send).toHaveBeenCalledWith(JSON.stringify({ type: 'watch', version: 1, paths: ['', 'a.txt'] }))
+  disk = 'desktop external edit'; revision = 'external'
+  await act(async () => carrier.dispatchEvent(new MessageEvent('message', {
+    data: JSON.stringify({ type: 'files.changed', paths: ['a.txt'] }),
+  })))
+  expect(state.editor!.value).toBe('desktop external edit')
+  expect(createWebSocket).toHaveBeenCalledWith(expect.stringContaining('/dsh-vscode/ws/files?sessionId=s'))
+})
+
+it('shows a retry action after a local read fails and opens the recovered document', async () => {
+  let failed = true
+  await setup(false, undefined, [], [], undefined, [], () => failed
+    ? { code: 'unavailable', message: 'temporary read failure', status: 503 }
+    : undefined)
+  expect(document.querySelector('.dvw-editor-body')?.textContent).toContain('temporary read failure')
+  const retry = [...document.querySelectorAll<HTMLButtonElement>('.dvw-editor-body button')]
+    .find(button => button.textContent === '重试读取文件')
+  expect(retry).toBeDefined()
+  failed = false
+  await act(async () => retry!.click())
+  expect(state.editor?.value).toBe('disk')
+  expect(document.querySelector('.dvw-editor-body')?.textContent).not.toContain('正在加载文件')
 })
 
 it('preserves a dirty draft and only marks external changes for its own path', async () => {
@@ -706,6 +1093,21 @@ it('loads the active document in every visible pane', async () => {
   expect(document.body.textContent).not.toContain('正在加载文件')
 })
 
+it.each([
+  { paths: ['a.txt', 'b.txt', 'c.txt'], active: 'a.txt' },
+  { groups: [{ id: 'pane-1', paths: ['a.txt', 'b.txt', 'c.txt'], active: 'a.txt' }] },
+])('keeps inactive restored documents lazy until their tab is selected: %j', async saved => {
+  await setup(false, saved)
+  const reads = () => vi.mocked(fetch).mock.calls
+    .filter(([url]) => String(url).endsWith('/fs.read'))
+    .map(([, options]) => JSON.parse(String(options!.body)).path)
+  expect(reads()).toEqual(['a.txt'])
+  const tab = document.querySelector<HTMLButtonElement>('[data-tab-path="b.txt"]')!
+  await act(async () => tab.click())
+  expect(reads()).toEqual(['a.txt', 'b.txt'])
+  expect(document.body.textContent).not.toContain('正在加载文件')
+})
+
 it('keeps concurrent reads of the same file scoped to each pane', async () => {
   await setup(false, {
     groups: [
@@ -734,4 +1136,15 @@ it('reindexes retained TypeScript models after returning from hidden', async () 
 
   expect(projectReads).toBe(2)
   expect(model()?.getValue()).toBe('export const a = 2')
+})
+
+it('opens HTML source in a text editor through the Explorer menu', async () => {
+  await setup(false, { paths: [] }, [], [], defaultModelCatalog, [{ path: 'index.html', name: 'index.html', kind: 'file' }])
+  const row = document.querySelector('[data-tree-path="index.html"]')
+  expect(row).not.toBeNull()
+  await act(async () => row!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })))
+  const action = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(button => button.textContent === '打开 HTML 源码')
+  expect(action).toBeDefined()
+  await act(async () => action!.click())
+  expect(state.editor?.uri).toBe('file:///tmp/audit/index.html')
 })

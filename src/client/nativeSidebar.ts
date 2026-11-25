@@ -1,17 +1,7 @@
+import type { ISidebarRight } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import { useCallback, useLayoutEffect, useState, useSyncExternalStore } from 'react'
 
-/**
- * The slice of the host's right-sidebar service this plugin depends on.
- *
- * Declared structurally rather than imported so the plugin keeps working on DSH builds that predate
- * the `ISidebarRight` export: `ctx.sidebarRight` is absent there, the entry is hidden, and nothing
- * else changes.
- */
-export interface NativeSidebarApi {
-  readonly mounted: { subscribe(listener: () => void): () => void; getSnapshot(): string | undefined }
-  isExpanded(): boolean
-  toggleExpanded(): void
-}
+type NativeSidebarApi = Pick<ISidebarRight, 'mounted' | 'isExpanded' | 'toggleExpanded'>
 
 const ignoreMount = () => () => {}
 const noSession = () => undefined
@@ -19,10 +9,10 @@ const presentation = 'data-dvw-native-sidebar'
 const sidebarWidth = '--dvw-native-sidebar-width'
 
 /** Lift the host's current dock above the workbench without moving its React tree. */
-export function watchNativeSidebar(sessionId: string, onOpen: (open: boolean) => void): () => void {
+function watchNativeSidebar(sessionId: string, onWidth: (width: number | undefined) => void): () => void {
   let panel: HTMLElement | undefined
   let column: HTMLElement | null = null
-  let open: boolean | undefined
+  let measuredWidth: number | undefined
 
   const release = () => {
     resize?.disconnect()
@@ -30,12 +20,12 @@ export function watchNativeSidebar(sessionId: string, onOpen: (open: boolean) =>
     document.body.style.removeProperty(sidebarWidth)
   }
   const measure = () => {
-    if (panel === undefined) return
-    const width = panel.dataset.sidebarRightPanel === 'push' ? panel.getBoundingClientRect().width : 0
-    const cssWidth = `${width}px`
-    if (document.body.style.getPropertyValue(sidebarWidth) !== cssWidth) {
-      document.body.style.setProperty(sidebarWidth, cssWidth)
-    }
+    const width = panel === undefined ? undefined
+      : panel.dataset.sidebarRightPanel === 'push' ? panel.getBoundingClientRect().width : 0
+    if (width === measuredWidth) return
+    measuredWidth = width
+    if (width !== undefined) document.body.style.setProperty(sidebarWidth, `${width}px`)
+    onWidth(width)
   }
   const update = () => {
     const next = Array.from(document.querySelectorAll<HTMLElement>(
@@ -43,16 +33,14 @@ export function watchNativeSidebar(sessionId: string, onOpen: (open: boolean) =>
     )).find(node => node.dataset.sidebarRightSession === sessionId)
     if (next !== panel) {
       release()
+      // A replacement panel may have exactly the same width as its predecessor.
+      if (next !== undefined) measuredWidth = undefined
       panel = next
       column = panel?.closest<HTMLElement>('[data-rightbar-col]') ?? null
       column?.setAttribute(presentation, '')
       if (panel !== undefined) resize?.observe(panel)
     }
     measure()
-    if (open !== (panel !== undefined)) {
-      open = panel !== undefined
-      onOpen(open)
-    }
   }
 
   const resize = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure)
@@ -80,7 +68,7 @@ export function useNativeSidebar(sidebar: NativeSidebarApi | undefined, sessionI
   )
   const ready = sidebar !== undefined && sessionId !== undefined && mounted === sessionId
   const [requestedSession, setRequestedSession] = useState<string>()
-  const [openSession, setOpenSession] = useState<string>()
+  const [dock, setDock] = useState<{ sessionId: string; width: number }>()
   const dismiss = useCallback(() => setRequestedSession(undefined), [])
 
   useLayoutEffect(() => {
@@ -92,18 +80,19 @@ export function useNativeSidebar(sidebar: NativeSidebarApi | undefined, sessionI
     // Browser tabs can expand the DSH dock internally. Present it only after the workbench toggle
     // was used, and stop presenting when DSH's own collapse control closes it.
     let wasOpen = false
-    const stop = watchNativeSidebar(sessionId, open => {
-      setOpenSession(open ? sessionId : undefined)
+    const stop = watchNativeSidebar(sessionId, width => {
+      const open = width !== undefined
+      setDock(open ? { sessionId, width } : undefined)
       if (!open && wasOpen) setRequestedSession(undefined)
       wasOpen = open
     })
     return () => {
       stop()
-      setOpenSession(undefined)
+      setDock(undefined)
     }
   }, [visible, ready, requestedSession, sessionId])
 
-  const shown = visible && ready && requestedSession === sessionId && openSession === sessionId
+  const shown = visible && ready && requestedSession === sessionId && dock !== undefined && dock.sessionId === sessionId
   const toggle = () => {
     if (sidebar === undefined || sessionId === undefined || sidebar.mounted.getSnapshot() !== sessionId) return
     if (shown) {
@@ -114,5 +103,15 @@ export function useNativeSidebar(sidebar: NativeSidebarApi | undefined, sessionI
       if (!sidebar.isExpanded()) sidebar.toggleExpanded()
     }
   }
-  return { ready, shown, toggle, dismiss }
+  return { ready, shown, width: shown ? dock.width : 0, toggle, dismiss }
+}
+
+export function fitNativeSidebarLayout(viewportWidth: number, dockWidth: number, sideWidth: number, chatWidth: number, minChatWidth: number, chatVisible: boolean) {
+  if (dockWidth === 0) return { sideWidth, chatWidth, chatFits: true }
+  // Keep room for the 48px activity rail and at least 100px of editor space.
+  const available = Math.max(0, viewportWidth - dockWidth - 148)
+  const chatFits = available >= minChatWidth
+  const fittedChatWidth = Math.min(chatWidth, available)
+  const visibleChatWidth = chatVisible && chatFits ? fittedChatWidth : 0
+  return { sideWidth: Math.min(sideWidth, available - visibleChatWidth), chatWidth: fittedChatWidth, chatFits }
 }

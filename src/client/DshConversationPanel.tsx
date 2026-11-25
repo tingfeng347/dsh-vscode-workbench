@@ -1,5 +1,6 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { placeDshSurface, watchDshPlacement } from './dshPlacement.ts'
 
 /** Locate the resident DSH conversation without depending on generated CSS module names. */
 export function findDshConversationRoot(documentRoot: Document = document): HTMLElement | null {
@@ -27,40 +28,47 @@ export function findDshConversationRoot(documentRoot: Document = document): HTML
 }
 
 /** Keep the official conversation mounted while presenting it in the workbench's right column. */
-export function DshConversationPanel({ visible, width, statusHeight }: { visible: boolean; width: number; statusHeight: number }) {
+export function DshConversationPanel({ visible, width, statusHeight, floating = false, onRootChange }: {
+  visible: boolean
+  width: number
+  statusHeight: number
+  floating?: boolean
+  onRootChange?(root: HTMLElement | null): void
+}) {
   useLayoutEffect(() => {
     if (!visible) return
     let attached: HTMLElement | null = null
-    const attach = () => {
-      const next = findDshConversationRoot()
-      if (next === attached) return
+    let placement: ReturnType<typeof placeDshSurface> | undefined
+    const release = () => {
+      placement?.restore()
       attached?.removeAttribute('data-dvw-conversation-panel')
       attached?.style.removeProperty('--dvw-chat-width')
       attached?.style.removeProperty('--dvw-status-height')
-      attached = next
-      attached?.setAttribute('data-dvw-conversation-panel', '')
-      attached?.style.setProperty('--dvw-chat-width', `${width}px`)
-      attached?.style.setProperty('--dvw-status-height', `${statusHeight}px`)
     }
-    attach()
+    const stop = watchDshPlacement(
+      () => floating ? document.querySelector('.dvw-chat-body') : null,
+      rect => {
+        const next = findDshConversationRoot()
+        if (next !== attached) {
+          release()
+          attached = next
+          placement = attached !== null && floating ? placeDshSurface(attached, true) : undefined
+          attached?.setAttribute('data-dvw-conversation-panel', '')
+          attached?.style.setProperty('--dvw-chat-width', `${width}px`)
+          attached?.style.setProperty('--dvw-status-height', `${statusHeight}px`)
+          onRootChange?.(next)
+        }
+        placement?.place(rect)
+      },
+    )
     document.body.setAttribute('data-dvw-conversation-active', '')
-    // Monaco rebuilds its line DOM on every scroll frame; skip workbench-only
-    // mutations and coalesce the rest so the document-wide query runs at most once a frame.
-    let frame = 0
-    const observer = new MutationObserver(records => {
-      if (frame !== 0 || records.every(record => record.target instanceof Element && record.target.closest('.dvw-overlay') !== null)) return
-      frame = requestAnimationFrame(() => { frame = 0; attach() })
-    })
-    observer.observe(document.body, { childList: true, subtree: true })
     return () => {
-      observer.disconnect()
-      cancelAnimationFrame(frame)
+      stop()
+      release()
       document.body.removeAttribute('data-dvw-conversation-active')
-      attached?.removeAttribute('data-dvw-conversation-panel')
-      attached?.style.removeProperty('--dvw-chat-width')
-      attached?.style.removeProperty('--dvw-status-height')
+      onRootChange?.(null)
     }
-  }, [visible, width, statusHeight])
+  }, [visible, width, statusHeight, floating, onRootChange])
   return null
 }
 

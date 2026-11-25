@@ -14,6 +14,7 @@ afterEach(() => {
 })
 
 it('loads a complete Chinese message table before Monaco registers its commands', async () => {
+  const register = vi.fn()
   const loader = Object.assign((ids: string[], done: () => void) => {
     if (ids[0] === 'vs/nls.messages.zh-cn') {
       expect(bundle).toContain('Version: 0.52.2(')
@@ -26,13 +27,14 @@ it('loads a complete Chinese message table before Monaco registers its commands'
       expect(globals._VSCODE_NLS_MESSAGES![26]).toBe('共 {0} 个结果')
       expect(globals._VSCODE_NLS_MESSAGES![801]).toBe('显示或聚焦独立颜色选择器')
       expect(globals._VSCODE_NLS_MESSAGES![1099]).toBe('接受内联编辑')
-      Object.assign(window, { monaco: { editor: { defineTheme() {} } } })
+      Object.assign(window, { monaco: { languages: { getLanguages: () => [], register, onLanguage: vi.fn() }, editor: { defineTheme() {} } } })
     }
     done()
   }, { config: vi.fn() })
   Object.assign(window, { require: loader })
   const { loadMonaco } = await import('../src/client/MonacoEditor.tsx')
   await expect(loadMonaco()).resolves.toBe(window.monaco)
+  expect(register).toHaveBeenCalledWith({ id: 'vue', extensions: ['.vue'], aliases: ['Vue'] })
 })
 
 it('translates hard-coded inline-edit labels without replacing action behavior', async () => {

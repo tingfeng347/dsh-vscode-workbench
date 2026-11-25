@@ -4,11 +4,11 @@ import type { Context as CordisContext } from '@deepseek-ai/cordis'
 import type { Session } from '@deepseek-ai/dsh-session'
 
 export interface WorkbenchWebServer {
-  register(route: { kind: 'exact' | 'prefix'; path: string; handler(req: IncomingMessage, res: ServerResponse): void | Promise<void> }): () => void
-  registerUpgrade(route: { path: string; handler(req: IncomingMessage, socket: Duplex, head: Buffer): void | Promise<void> }): () => void
+  register(route: { kind: 'exact' | 'prefix'; path: string; auth?: 'required'; handler(req: IncomingMessage, res: ServerResponse): void | Promise<void> }): () => void
+  registerUpgrade(route: { path: string; auth?: 'required'; handler(req: IncomingMessage, socket: Duplex, head: Buffer): void | Promise<void> }): () => void
 }
 export interface WorkbenchSessions { get(id: string): Session | undefined }
-export interface WorkbenchConnection { requestRejection(req: IncomingMessage): 401 | 403 | undefined }
+export interface WorkbenchConnection { requestRejection?(req: IncomingMessage): 401 | 403 | undefined }
 /** Minimal shape of DSH's host directory chooser; only the native capability is usable here. */
 export interface DirectoryPickerLike {
   capability(): { kind: string; pick?(signal: AbortSignal): Promise<string | null> }

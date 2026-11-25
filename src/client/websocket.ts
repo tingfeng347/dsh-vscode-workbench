@@ -1,3 +1,5 @@
+import type { ConnectionWebSocket, ConnectionWebSocketFactory } from '@deepseek-ai/dsh-client-connection/client'
+
 /** Page facts needed to resolve a WebSocket URL. */
 export interface WebSocketPageLocation {
   readonly protocol: string
@@ -47,4 +49,14 @@ export function websocketUrl(
   const base = networkBase(streamBaseUrl)
   if (base === undefined) return undefined
   return `${base.protocol === 'https:' ? 'wss' : 'ws'}://${base.host}${route}`
+}
+
+/** Desktop sockets must use the shell's authenticated carrier, just like DSH's own channels. */
+export function openWorkbenchWebSocket(path: string): ConnectionWebSocket | undefined {
+  const url = websocketUrl(path)
+  if (url === undefined) return undefined
+  const transport = (globalThis as typeof globalThis & {
+    __DSH_TRANSPORT__?: { createWebSocket?: ConnectionWebSocketFactory }
+  }).__DSH_TRANSPORT__
+  return typeof transport?.createWebSocket === 'function' ? transport.createWebSocket(url) : new WebSocket(url)
 }

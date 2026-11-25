@@ -6,6 +6,8 @@ This page explains how `dsh-vscode-workbench` integrates with DeepSeek Harness a
 
 The workbench mounts through the official `sidebar.footer.action` and `shell.overlay` extension points. It does not replace or disable `ui-layout`. The entry sits in the DSH sidebar panel list next to Plugins and Scheduled Tasks, and the whale icon in the activity bar toggles the DSH conversation panel.
 
+In floating mode, the native DSH conversation docks to the right of the workbench. DSH pages dock to the focused editor. Both surfaces follow the window when it moves or resizes.
+
 ## Client integration
 
 - UI contributions use `ui-renderer` slots and select the current session through `ui-session`'s `mainView` retain count, replacing the removed `dsh-client-runtime`.
@@ -19,6 +21,8 @@ The install gate compares `engines.dsh` or the `@deepseek-ai/dsh*` peerDependenc
 
 | Plugin version | Required Harness |
 | --- | --- |
+| 0.3.0 | `0.2.1-rc.1` and newer (default baseline `0.2.2-rc.5`, Cordis `4.1.0`) |
+| 0.2.18 | `0.2.1-rc.1` and newer (default baseline `0.2.2-rc.5`, Cordis `4.1.0`) |
 | 0.2.17 | `0.2.1-rc.1` and newer (default baseline `0.2.2-rc.5`, Cordis `4.1.0`) |
 | 0.2.16 / 0.2.15 | `0.2.1-rc.1` and newer (default baseline `0.2.2-rc.3`, Cordis `4.1.0`) |
 | 0.2.14 | `0.2.1-rc.1` and newer (default baseline `0.2.2-rc.3`, Cordis `4.1.0`) |

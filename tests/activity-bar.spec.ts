@@ -18,11 +18,13 @@ describe('Activity bar order', () => {
     expect(moveActivity(KNOWN, 'missing', 'git')).toEqual(KNOWN)
   })
 
-  it('keeps one order for fixed, middle and bottom actions', () => {
+  it('restores older orders with all footer actions at the bottom', () => {
     expect(normalizeActivityLayout(['chat', 'workspaces', 'home'], ['workspaces'], KNOWN, ['home', 'settings']))
-      .toEqual(['chat', 'workspaces', 'home', 'explorer', 'search', 'git', 'terminal', 'settings'])
-    expect(normalizeActivityLayout(['home', 'workspaces', 'explorer'], ['workspaces'], KNOWN, ['home', 'settings']))
-      .toEqual(['home', 'workspaces', 'explorer', 'search', 'git', 'terminal', 'chat', 'settings'])
+      .toEqual(['chat', 'workspaces', 'explorer', 'search', 'git', 'terminal', 'home', 'settings'])
+    expect(normalizeActivityLayout(['settings', 'workspaces', 'home', 'explorer'], ['workspaces'], KNOWN, ['home', 'settings']))
+      .toEqual(['workspaces', 'explorer', 'search', 'git', 'terminal', 'chat', 'settings', 'home'])
+    expect(normalizeActivityLayout([...KNOWN, 'home', 'settings'], ['workspaces'], [...KNOWN, 'debug'], ['home', 'settings']))
+      .toEqual(['workspaces', ...KNOWN, 'debug', 'home', 'settings'])
   })
 
   it('toggles hidden views', () => {

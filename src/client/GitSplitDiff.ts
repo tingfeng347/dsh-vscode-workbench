@@ -5,10 +5,20 @@ type Span = Pair<number>
 export const GIT_DIFF_ACCENTS = { modified: '#647fc9', added: '#45a58e', deleted: '#cb4053' } as const
 type ChangeKind = keyof typeof GIT_DIFF_ACCENTS
 type Block = { lines: Pair<Span>; kind: ChangeKind | 'fold' }
-type Plot = { edges: Pair<Span>; endThrough: Pair<number>; startFrom: Pair<number>; kind: Block['kind']; start: number }
+type Plot = { edges: Pair<Span>; endThrough: Pair<number>; startFrom: Pair<number>; kind: Block['kind']; lines: Pair<Span>; start: number }
 type Point = { at: number; offsets: Pair<number> }
 type CodeEditor = editor.IStandaloneCodeEditor & { setHiddenAreas(ranges: IRange[], source?: object): void }
+export interface GitSplitReviewActions {
+  onAsk(range: GitDiffLineRange): void
+}
+export interface GitDiffLineRange {
+  startLine: number
+  endLine: number
+}
 const FOLD_HEIGHT = 20
+const GUIDE_HEIGHT = 2
+const ACTION_HIDE_DELAY = 700
+const ACTION_OFFSET_X = 4
 const NS = 'http://www.w3.org/2000/svg'
 
 function interpolate(points: Point[], pos: number, input: (point: Point) => number, output: (point: Point) => number): number {
@@ -99,11 +109,13 @@ export function connectGitSplit(
   overview: HTMLInputElement,
   marks: HTMLElement,
   preview: HTMLElement,
+  actionLayer?: HTMLElement,
+  reviewActions?: () => GitSplitReviewActions | undefined,
 ) {
   const sides = panes as Pair<CodeEditor>
+  const hosts = sides.map(side=>side.getContainerDomNode()) as Pair<HTMLElement>
   const models = sides.map(side=>side.getModel()!) as Pair<editor.ITextModel>
   const zones: Pair<string[]> = [[], []]
-  const decorations = sides.map(side=>side.createDecorationsCollection())
   const opened = new Set<string>()
   const foldSource = {}
   let changes: editor.ILineChange[] = []
@@ -115,11 +127,14 @@ export function connectGitSplit(
   let paneWidths: Pair<number> = [0, 0]
   let points: Point[] = []
   let plots: Plot[] = []
+  let selectedPlot: Plot | undefined
+  const actionGroups = new Map<Plot, HTMLElement>()
   let blocks: Block[] = []
   const paths: { element: SVGPathElement; kind: Block['kind']; shape: string }[] = []
   let visiblePaths = 0
   let writing = false
   let frame = 0
+  let hideTimer: number | undefined
   let geometryDirty = true
   let wheelDelta = 0
   let originalDrivesScroll = false
@@ -131,10 +146,103 @@ export function connectGitSplit(
     return line > length(side) ? sides[side]!.getBottomForLineNumber(length(side)) : sides[side]!.getTopForLineNumber(line)
   }
 
+  function createActionLayer() {
+    actionGroups.clear()
+    actionLayer?.replaceChildren()
+    if (actionLayer === undefined || reviewActions === undefined) return
+    for (const plot of plots) {
+      if (plot.kind === 'fold') continue
+      const group = document.createElement('div')
+      group.className = 'dvw-diff-hunk-actions'
+      group.dataset.kind = plot.kind
+      group.setAttribute('role', 'group')
+      group.setAttribute('aria-label', '变更 AI 操作')
+      group.hidden = true
+      group.addEventListener('pointerenter', cancelHideActions)
+      group.addEventListener('pointerleave', scheduleHideActions)
+      group.addEventListener('pointerdown', event => event.stopPropagation())
+      group.addEventListener('mousedown', event => event.stopPropagation())
+      const button = document.createElement('button')
+      button.type = 'button'
+      button.dataset.action = 'ask'
+      const label = '询问 AI，把此变更添加到 DSH 对话'
+      button.title = label
+      button.setAttribute('aria-label', label)
+      const mark = document.createElement('span')
+      mark.className = 'codicon codicon-sparkle'
+      mark.setAttribute('aria-hidden', 'true')
+      button.append(mark)
+      button.addEventListener('click', event => {
+        event.stopPropagation()
+        const current = reviewActions()
+        if (current === undefined) return
+        const side = plot.kind === 'deleted' ? 0 : 1
+        const [start, end] = plot.lines[side]
+        const lastLine = length(side)
+        const startLine = Math.max(1, Math.min(lastLine, start))
+        current.onAsk({ startLine, endLine: Math.max(startLine, Math.min(lastLine, end - 1)) })
+      })
+      group.append(button)
+      actionGroups.set(plot, group)
+      actionLayer.append(group)
+    }
+    refreshActions()
+  }
+
+  function refreshActions() {
+    const current = reviewActions?.()
+    for (const group of actionGroups.values()) {
+      for (const button of group.querySelectorAll<HTMLButtonElement>('button')) {
+        button.disabled = current === undefined
+      }
+    }
+  }
+
+  function selectPlot(side: number, line: number | undefined) {
+    const next = line === undefined ? undefined : plots.find(plot => {
+      if (plot.kind === 'fold') return false
+      const lines = plot.lines[side]
+      if (lines === undefined) return false
+      const [start, end] = lines
+      return line >= start && line < Math.max(start + 1, end)
+    })
+    if (next === undefined) {
+      scheduleHideActions()
+      return
+    }
+    cancelHideActions()
+    if (next === selectedPlot) return
+    selectedPlot = next
+    draw()
+  }
+
+  function scheduleHideActions() {
+    if (hideTimer !== undefined) return
+    hideTimer = window.setTimeout(() => {
+      hideTimer = undefined
+      selectedPlot = undefined
+      draw()
+    }, ACTION_HIDE_DELAY)
+  }
+
+  function cancelHideActions() {
+    if (hideTimer === undefined) return
+    window.clearTimeout(hideTimer)
+    hideTimer = undefined
+  }
+
   function draw() {
     if (!width) return
+    const currentActions = reviewActions?.()
+    for (const group of actionGroups.values()) group.hidden = true
     const mid = width / 2
     const [left, right] = appliedTop
+    const contentTop = Math.max(0, ...sides.map(side => {
+      const pane = side.getDomNode()
+      if (pane === null) return 0
+      const scroller = pane.querySelector<HTMLElement>('.monaco-scrollable-element')
+      return scroller === null ? 0 : scroller.getBoundingClientRect().top - pane.getBoundingClientRect().top
+    }))
     let low = 0, high = plots.length
     // A band can cross the viewport even when its two ends are both offscreen.
     while (low < high) {
@@ -145,16 +253,39 @@ export function connectGitSplit(
     }
     let used = 0
     for (let i = low; i < plots.length; i++) {
-      const { edges: [[l0,l1],[r0,r1]], startFrom: [nextLeft,nextRight], kind } = plots[i]!
+      const plot = plots[i]!
+      const { edges: [[l0,l1],[r0,r1]], startFrom: [nextLeft,nextRight], kind } = plot
       if (nextLeft > left + height && nextRight > right + height) break
       const a = l0 - left, b = l1 - left
       const c = r0 - right, d = r1 - right
       if (Math.max(b,d) < 0 || Math.min(a,c) > height) continue
-      const bottomLeft = Math.max(a+1,b)
-      const bottomRight = Math.max(c+1,d)
-      // Draw just outside the colored rows so even a one-line change has a visible edge.
-      const guides = kind === 'fold' ? '' : ` M0,${a} h-${paneWidths[0]} v-1 H0 Z M${width},${c} h${paneWidths[1]} v-1 H${width} Z`
-      const shape = `M0,${a} C${mid},${a} ${mid},${c} ${width},${c} L${width},${bottomRight} C${mid},${bottomRight} ${mid},${bottomLeft} 0,${bottomLeft} Z${guides}`
+      const group = actionGroups.get(plot)
+      if (plot === selectedPlot && group !== undefined && currentActions !== undefined) {
+        const leftMiddle = (a + b) / 2
+        const rightMiddle = (c + d) / 2
+        const visibleTop = Math.max(0, Math.min(height, Math.min(
+          Math.max(0, a), Math.max(0, b), Math.max(0, c), Math.max(0, d),
+        )))
+        const visibleBottom = Math.max(0, Math.min(height, Math.max(
+          Math.min(height, a), Math.min(height, b), Math.min(height, c), Math.min(height, d),
+        )))
+        const center = contentTop + (visibleTop + visibleBottom) / 2
+        group.hidden = false
+        const halfHeight = (group.offsetHeight || 78) / 2
+        const minimum = contentTop + halfHeight
+        const maximum = contentTop + height - halfHeight
+        group.hidden = center < minimum || center > maximum
+        if (!group.hidden) {
+          group.style.left = `${paneWidths[0] + width / 2 + ACTION_OFFSET_X}px`
+          group.style.top = `${contentTop + Math.max(visibleTop, Math.min(visibleBottom, (leftMiddle + rightMiddle) / 2))}px`
+        }
+      }
+      // Paint both panes and the connector as one fill under the editor text.
+      const guide = kind === 'fold' ? 0 : GUIDE_HEIGHT
+      const topLeft = a - guide
+      const topRight = c - guide
+      const shape = `M${-paneWidths[0]},${topLeft} H0 C${mid},${topLeft} ${mid},${topRight} ${width},${topRight} H${width+paneWidths[1]}`
+        + ` V${d} H${width} C${mid},${d} ${mid},${b} 0,${b} H${-paneWidths[0]} Z`
       let path = paths[used]
       if (path === undefined) {
         const element = document.createElementNS(NS, 'path')
@@ -255,9 +386,10 @@ export function connectGitSplit(
   function rebuildGeometry() {
     geometryDirty = false
     height = Math.min(...sides.map(side=>side.getLayoutInfo().height))
-    paneWidths = [sides[0].getLayoutInfo().width, sides[1].getLayoutInfo().width]
+    paneWidths = [hosts[0].getBoundingClientRect().width, hosts[1].getBoundingClientRect().width]
     points = [{at:0,offsets:[0,0]}]
     plots = []
+    selectedPlot = undefined
     function append(offsets: Pair<number>) {
       const last = points.at(-1)!
       const next: Pair<number> = [Math.max(last.offsets[0],offsets[0]),Math.max(last.offsets[1],offsets[1])]
@@ -282,7 +414,7 @@ export function connectGitSplit(
       append([edges[0][1],edges[1][1]])
       const previous = plots.at(-1)?.endThrough
       plots.push({
-        edges, kind: block.kind, start,
+        edges, kind: block.kind, lines: block.lines, start,
         endThrough: [Math.max(edges[0][1],previous?.[0] ?? 0),Math.max(edges[1][1],previous?.[1] ?? 0)],
         startFrom: [edges[0][0],edges[1][0]],
       })
@@ -294,6 +426,7 @@ export function connectGitSplit(
       start[1] = Math.min(start[1],right)
     }
     append([lineEdge(0,length(0)+1),lineEdge(1,length(1)+1)])
+    createActionLayer()
     const total = points.at(-1)!.at
     max = total > height ? total - height / 2 : 0
     overview.max = String(max)
@@ -335,19 +468,9 @@ export function connectGitSplit(
           node.className = 'dvw-diff-fold-row'
           node.textContent = `${end-start} 行未改动`
           node.onclick = ()=>{ opened.add(String(lines[0][0])); render() }
-          const margin = document.createElement('div')
-          margin.className = 'dvw-diff-fold-margin'
-          return accessor.addZone({afterLineNumber:start-1, heightInPx:FOLD_HEIGHT, domNode:node, marginDomNode:margin, showInHiddenAreas:true})
+          return accessor.addZone({afterLineNumber:start-1, heightInPx:FOLD_HEIGHT, domNode:node, showInHiddenAreas:true})
         })
       })
-      const fullLines = edits.flatMap(({lines,kind})=>{
-        const [start,end] = lines[index]!
-        if (start === end) return []
-        const className = `dvw-diff-line-${kind}`
-        return [{range:{startLineNumber:start,endLineNumber:end-1,startColumn:1,endColumn:1},
-          options:{isWholeLine:true,className,marginClassName:className}}]
-      })
-      decorations[index]!.set(fullLines)
     })
     writing = false
     invalidateGeometry()
@@ -372,6 +495,9 @@ export function connectGitSplit(
   const listeners = sides.flatMap((side,index)=>[
     side.onDidLayoutChange(invalidateGeometry),
     side.onDidContentSizeChange(event=>{ if (event.contentHeightChanged) invalidateGeometry() }),
+    side.onMouseDown(event=>selectPlot(index,event.target.position?.lineNumber)),
+    side.onMouseMove(event=>selectPlot(index,event.target.position?.lineNumber)),
+    side.onDidChangeCursorSelection(event=>selectPlot(index,event.selection.positionLineNumber)),
     side.onDidScrollChange(event=>{
       if (writing) return
       if (event.scrollLeftChanged) {
@@ -412,16 +538,23 @@ export function connectGitSplit(
     preview.style.top = `${Math.max(0,Math.min(rect.height-preview.offsetHeight,event.clientY-rect.top))}px`
   }
   const leave = () => { preview.hidden = true }
+  const leaveDiff = () => {
+    cancelHideActions()
+    selectedPlot = undefined
+    draw()
+  }
   root.addEventListener('wheel',wheel,{capture:true,passive:false})
+  root.addEventListener('pointerleave',leaveDiff)
   overview.addEventListener('input',slide)
   overview.addEventListener('pointermove',hover)
   overview.addEventListener('pointerleave',leave)
-  const resize = new ResizeObserver(([entry])=>{
-    if (entry === undefined || width === entry.contentRect.width) return
-    width = entry.contentRect.width
-    schedule()
+  const resize = new ResizeObserver(entries=>{
+    const gap = entries.find(entry=>entry.target===ribbons)
+    if (gap !== undefined) width = gap.contentRect.width
+    invalidateGeometry()
   })
   resize.observe(ribbons)
+  hosts.forEach(host=>resize.observe(host))
   rebuildGeometry()
   schedule()
   return {
@@ -429,6 +562,7 @@ export function connectGitSplit(
       if (folded !== collapse || changes !== next) opened.clear()
       changes = next
       folded = collapse
+      selectedPlot = undefined
       render()
     },
     navigate(direction: 'next' | 'previous') {
@@ -438,15 +572,19 @@ export function connectGitSplit(
         : [...diffs].reverse().find(plot=>plot.start<center-1) ?? diffs.at(-1)
       if (next) move(centerAt(next.start,height))
     },
+    refreshActions,
     dispose() {
       listeners.forEach(listener=>listener.dispose())
       cancelAnimationFrame(frame)
+      cancelHideActions()
       resize.disconnect()
       root.removeEventListener('wheel',wheel,true)
+      root.removeEventListener('pointerleave',leaveDiff)
       overview.removeEventListener('input',slide)
       overview.removeEventListener('pointermove',hover)
       overview.removeEventListener('pointerleave',leave)
       leave()
+      actionLayer?.replaceChildren()
       ribbons.replaceChildren()
       marks.replaceChildren()
     },

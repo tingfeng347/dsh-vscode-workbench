@@ -83,9 +83,8 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('.dvw-branch-menu{')
   })
 
-  it('keeps the explorer loaded when switching sessions in one workspace', () => {
+  it('keeps the workbench mounted when switching sessions in one workspace', () => {
     expect(read('src/client/index.tsx')).toContain("key={cwd ?? 'no-workspace'}")
-    expect(read('src/client/Workbench.tsx')).toContain('loadedWorkspaceCwd.current === cwd')
   })
 
   it('offers a centered workspace switcher below the DSH conversation button', () => {

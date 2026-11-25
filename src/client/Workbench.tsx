@@ -1255,7 +1255,7 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   // button and Ctrl+Alt+B must first leave that panel.
   const showConversation=useCallback(()=>{setBrowserId(undefined);setDshTabActive(false);setChatVisible(true)},[])
   const tabListRef=useRef<HTMLDivElement>(null)
-  const workspaceRequests=useRef(new WorkspaceRequestScope());const loadedWorkspaceCwd=useRef<string>();const loadingTabs=useRef(new Map<string, symbol>())
+  const workspaceRequests=useRef(new WorkspaceRequestScope());const loadedWorkspace=useRef<{cwd:string;name:string}>();const loadingTabs=useRef(new Map<string, symbol>())
   const dshDark = useDshDarkTheme()
   const [theme,setTheme]=useState<WorkbenchTheme>(()=>{const saved=localStorage.getItem('dvw:theme');return saved==='dark'||saved==='light'||saved==='white'||saved==='eyecare'?saved:'dsh'})
   const [markdownView,setMarkdownView]=useState<MarkdownDefaultView>(()=>markdownDefaultView())
@@ -1506,9 +1506,12 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     if(line===undefined&&!path.startsWith('diff:')&&/\.html?$/i.test(path)){void openSiteFile(path);return}
     const existing=tabsRef.current.find(tab=>tab.path===path);if(existing)setTabs(rows=>rows.map(tab=>tab.path===path?{...tab,line,endLine,column,highlight,focusOnReveal,preview:line!==undefined?false:tab.preview}:tab));else setTabs(rows=>[...rows,{...unloadedTab(path),line,endLine,column,highlight,focusOnReveal,...(line!==undefined?{preview:false}:{})}]);leaveDshPanel();setActive(path)}
   useEffect(() => {
+    // The pending write still owns the outgoing session/workspace and must run before reset.
+    persistWorkspace.current?.()
     if (sessionId === undefined) return
     // Switching sessions inside one workspace must keep the explorer, tabs and layout as they are.
-    if (loadedWorkspaceCwd.current !== undefined && loadedWorkspaceCwd.current === cwd) return
+    if (loadedWorkspace.current !== undefined && loadedWorkspace.current.cwd === cwd) return
+    loadedWorkspace.current = undefined
     const epoch = workspaceRequests.current.begin()
     const cleared = resetWorkspaceDocuments<Tab>()
     loadingTabs.current.clear(); setWorkspace(undefined); setTabs(cleared.tabs)
@@ -1518,7 +1521,7 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
       try {
           const value = await api<{ cwd: string; name: string }>('workspace', { sessionId }, controller.signal)
           if (!workspaceRequests.current.isCurrent(epoch)) return
-          setWorkspace(value);loadedWorkspaceCwd.current=value.cwd
+          setWorkspace(value);loadedWorkspace.current=value
           let restored: Tab[] = []
           let selected: string | undefined
           try {
@@ -1549,15 +1552,12 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
               focusedRef.current = rebuilt[0]!.id; setFocusedId(rebuilt[0]!.id)
               setLayout(normalizeLayout(savedLayout, rebuilt.map(row => row.id), rebuilt[0]!.id))
               setGroups(rebuilt)
-              // Restored tabs carry no content; without this they stay on 正在加载文件 forever.
-              // A hidden workbench must not touch the disk, so defer until it is visible.
-              if (service.getSnapshot().visible) for (const group of rebuilt) for (const tab of group.tabs) if (!tab.loaded) loadTab(tab.path, group.id)
             } else {
               for (const tab of draftTabs) restored = [...restored.filter(row => row.path !== tab.path), tab]
               setTabs(restored)
               setActive(restored.some(tab => tab.path === selected) ? selected : restored.at(-1)?.path)
-              if (service.getSnapshot().visible) for (const tab of restored) if (!tab.loaded) loadTab(tab.path)
             }
+            // The visible-pane effect loads only each active tab; other restored tabs stay lazy.
           } catch { /* Invalid saved state must not prevent opening the workspace. */ }
           return
       } catch (error) {
@@ -1572,7 +1572,8 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   // keystroke; the pending write is flushed when the page hides or the workbench unmounts.
   const persistWorkspace = useRef<() => void>()
   useEffect(() => {
-    if (!workspace || sessionId === undefined) return
+    // A switch renders once with the old workspace; never persist it under the incoming session.
+    if (!workspace || workspace !== loadedWorkspace.current || sessionId === undefined) return
     const persist = () => {
       persistWorkspace.current = undefined
       try {
@@ -1656,9 +1657,7 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
         }))
         return
       }
-      if (isRemoteFileUri(path)) {
-        setTabsIn(groupId, rows => rows.map(row => row.path === path && row.loaded === false ? { ...row, loadError: String(error) } : row))
-      }
+      setTabsIn(groupId, rows => rows.map(row => row.path === path && row.loaded === false ? { ...row, loadError: String(error) } : row))
       setError(String(error))
     })
       .finally(() => { if (current()) loadingTabs.current.delete(key) })

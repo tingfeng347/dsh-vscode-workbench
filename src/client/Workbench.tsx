@@ -1676,7 +1676,10 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     }))
   }, [])
   useEffect(() => {
-    const changed = (event: Event) => closeChangedDiffTabs((event as CustomEvent<string[] | undefined>).detail)
+    const changed = (event: Event) => {
+      const paths = (event as CustomEvent<string[] | null>).detail
+      closeChangedDiffTabs(paths ?? undefined)
+    }
     window.addEventListener('dvw-files-changed', changed)
     return () => window.removeEventListener('dvw-files-changed', changed)
   }, [closeChangedDiffTabs])

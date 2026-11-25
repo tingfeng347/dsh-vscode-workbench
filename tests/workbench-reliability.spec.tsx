@@ -414,7 +414,10 @@ it('shows a new commit before the commit action finishes', async () => {
   expect(input.value).toBe('')
 })
 
-it('closes a stale Git diff after the file leaves the change list', async () => {
+it.each([
+  ['plain event', () => new Event('dvw-files-changed')],
+  ['custom event without paths', () => new CustomEvent('dvw-files-changed', { detail: undefined })],
+] as const)('closes a stale Git diff after a whole-workspace refresh (%s)', async (_name, changeEvent) => {
   localStorage.setItem('dvw:workbench:snapshot:v1', JSON.stringify({ visible: true, view: 'git' }))
   await setup(false, { paths: [], view: 'git' }, [], [{
     path: 'a.txt', index: '.', worktree: 'M', staged: false, untracked: false,
@@ -440,8 +443,9 @@ it('closes a stale Git diff after the file leaves the change list', async () => 
     return originalFetch(url, options)
   })
 
-  await act(async () => window.dispatchEvent(new Event('dvw-files-changed')))
+  await act(async () => window.dispatchEvent(changeEvent()))
   await vi.waitFor(() => expect(document.querySelector('[data-tab-path="diff:a.txt"]')).toBeNull())
+  expect(document.querySelector('.dvw-overlay')).not.toBeNull()
 })
 
 it('shares the diff layout across new and existing files and restores it after reopening', async () => {

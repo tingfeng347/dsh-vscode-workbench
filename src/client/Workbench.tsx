@@ -19,6 +19,7 @@ import { DshConversationPanel, DshConversationTheme, DshReviewActions } from './
 import { DshMark } from './DshMark.tsx'
 import { DshPanelPage } from './DshPanelPage.tsx'
 import { DshBrowserPage } from './DshBrowserPage.tsx'
+import { useNativeSidebar, type NativeSidebarApi } from './nativeSidebar.ts'
 import { createLeaf, dropPosition, MAX_PANES, paneCount, normalizeLayout, removeGroup, setRatio, splitAt, type PaneNode, type SplitDirection, type SplitPosition } from './panes.ts'
 import { moveTabToGroup, swapActiveTab } from './tabs.ts'
 import { RESTORE_STEP_MS, shouldPauseRestore, splitRestore } from './restore.ts'
@@ -1051,7 +1052,7 @@ function Git(props: { visible: boolean; statusSlot: HTMLElement | null; sessionI
 const ExplorerView = memo(Explorer)
 const GitView = memo(Git)
 
-export function Workbench({ service, browser, sessionId, cwd, navigation, dshPanelId: hostDshPanelId, onOpenDshPanel, onRestoreConversation, onCloseDshPanel, openSettings }: { service: VscodeWorkbench; browser?: NativeBrowser; sessionId?: string; cwd?: string; navigation?: DshNavigation; dshPanelId?: string; onOpenDshPanel?(panelId: string): void; onRestoreConversation?(): void; onCloseDshPanel?(): void; openSettings?(): void }) {
+export function Workbench({ service, browser, rightSidebar, sessionId, cwd, navigation, dshPanelId: hostDshPanelId, onOpenDshPanel, onRestoreConversation, onCloseDshPanel, openSettings }: { rightSidebar?: NativeSidebarApi; service: VscodeWorkbench; browser?: NativeBrowser; sessionId?: string; cwd?: string; navigation?: DshNavigation; dshPanelId?: string; onOpenDshPanel?(panelId: string): void; onRestoreConversation?(): void; onCloseDshPanel?(): void; openSettings?(): void }) {
   const [snapshot, setSnapshot] = useState(() => service.getSnapshot()); const [panels, setPanels] = useState(() => service.getPanels())
   useEffect(() => service.subscribe(() => { setSnapshot(service.getSnapshot()); setPanels(service.getPanels()) }), [service])
   const [workspace,setWorkspace]=useState<{cwd:string;name:string}>()
@@ -1092,6 +1093,8 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
   }
   const [dshTabActive,setDshTabActive]=useState(hostDshPanelId!==undefined); const [dshTabId,setDshTabId]=useState<string|undefined>(hostDshPanelId); const dshPanelId=dshTabId; const [error,setError]=useState<string>(); const [panelHeight,setPanelHeight]=useState(260); const [sideWidth,setSideWidth]=useState(210); const [primarySideVisible,setPrimarySideVisible]=useState(()=>localStorage.getItem('dvw:primary-side-visible')!=='closed');const [statusVisible,setStatusVisible]=useState(()=>localStorage.getItem('dvw:status-bar-visible')!=='closed');const settingsNode=useSyncExternalStore(settingsHost.subscribe,settingsHost.getSnapshot);const settingsOpen=settingsNode!==undefined;const [chatWidth,setChatWidth]=useState(()=>clampChatWidth(Number(localStorage.getItem('dvw:dsh-chat-width'))||DSH_CHAT_DEFAULT_WIDTH));const [chatVisible,setChatVisible]=useState(()=>localStorage.getItem('dvw:dsh-chat-visible')!=='closed');const [outlineVisible,setOutlineVisible]=useState(()=>localStorage.getItem('dvw:outline')!=='closed');const [tsIntellisense,setTsIntellisense]=useState(tsIntellisenseEnabled);const [tsIndex,setTsIndex]=useState<{state:'idle'|'loading'|'ready'|'error';files?:number;truncated?:boolean;error?:string}>({state:'idle'});const [lspServers,setLspServers]=useState<LspServerStatus[]>([]);const [lspBusy,setLspBusy]=useState<string>();const [lspError,setLspError]=useState('');const lspManager=useRef<LspManager>();const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localStorage.getItem('dvw:font-size')));return Number.isFinite(saved)&&saved>=11&&saved<=20?saved:14});const [tabMenu,setTabMenu]=useState<{x:number;y:number;path:string}>()
   const [minimap,setMinimap]=useState(()=>storedValue('dvw:editor-minimap')!=='off')
+  const nativeSidebar=useNativeSidebar(rightSidebar,sessionId,snapshot.visible)
+  const dismissNativeSidebar=nativeSidebar.dismiss
   const [browserSnapshot,setBrowserSnapshot]=useState<BrowserSnapshot>(()=>browser?.getSnapshot()??{available:false,tabs:[]})
   const [browserId,setBrowserId]=useState<string>()
   const browserTabs=browserSnapshot.tabs.filter(tab=>tab.sessionId===sessionId)
@@ -1101,15 +1104,15 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
     const next=new Set(browserTabs.map(tab=>tab.id))
     const added=browserTabs.find(tab=>!previousBrowserIds.current.has(tab.id))
     previousBrowserIds.current=next
-    if(added!==undefined&&snapshot.visible){setBrowserId(added.id);setDshTabActive(false)}
+    if(added!==undefined&&snapshot.visible){dismissNativeSidebar();setBrowserId(added.id);setDshTabActive(false)}
     else if(browserId!==undefined&&!next.has(browserId))setBrowserId(undefined)
-  },[browserSnapshot,sessionId,browserId,snapshot.visible])
+  },[browserSnapshot,sessionId,browserId,snapshot.visible,dismissNativeSidebar])
   const browserRequest=useRef<AbortController>()
   useEffect(()=>()=>browserRequest.current?.abort(),[browser,sessionId,snapshot.visible])
   const browserIdRef=useRef(browserId);browserIdRef.current=browserId
   const newBrowser=async(url?:string)=>{
     if(browser===undefined||sessionId===undefined)return
-    setDshTabActive(false);onRestoreConversation?.()
+    dismissNativeSidebar();setDshTabActive(false);onRestoreConversation?.()
     browserRequest.current?.abort();const request=new AbortController();browserRequest.current=request
     try{setBrowserId(await browser.open(sessionId,request.signal,url,browserIdRef.current))}catch(error){if(!request.signal.aborted)setError(error instanceof Error?error.message:String(error))}
   }
@@ -1190,7 +1193,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
       openBrowserUrl(url)
     }catch(error){setError(error instanceof Error?error.message:String(error))}
   }
-  useEffect(()=>{if(browserId!==undefined&&!dshTabActive)browser?.focus(browserId)},[browser,browserId,dshTabActive])
+  useEffect(()=>{if(snapshot.visible&&browserId!==undefined&&!dshTabActive&&!nativeSidebar.shown)browser?.focus(browserId)},[browser,browserId,dshTabActive,nativeSidebar.shown,snapshot.visible])
   useEffect(()=>{if(!snapshot.visible)return;const open=()=>void newBrowser();window.addEventListener('dvw-browser-new',open);return()=>window.removeEventListener('dvw-browser-new',open)},[browser,sessionId,snapshot.visible])
   useEffect(()=>{
     const open=(event:Event)=>{const url=(event as CustomEvent<string>).detail;if(typeof url==='string'&&url!=='')openBrowserUrl(url)}
@@ -2085,7 +2088,10 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
           {id:'terminal',label:terminalAvailable?(snapshot.bottomPanel==='terminal'?'隐藏终端':'显示终端'):'终端适配器未安装',icon:<Icon name="terminal"/>,active:snapshot.bottomPanel==='terminal',disabled:!terminalAvailable,onActivate:()=>toggleTerminal(service)},
           ...(floating?[]:[{id:'chat',label:showingDshPanel?'返回 DSH 对话 (Ctrl+Alt+B)':chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)',icon:<DshMark size={22}/>,active:chatShown,onActivate:()=>{if(showingDshPanel)showConversation();else setChatVisible(value=>!value)}}]),
         ]}
-        fixed={[{id:'workspaces',label:'打开工作区 / 切换会话',icon:<Icon name="folder-opened"/>,active:false,onActivate:openSwitcher}]}
+        fixed={[
+          {id:'workspaces',label:'打开工作区 / 切换会话',icon:<Icon name="folder-opened"/>,active:false,onActivate:openSwitcher},
+          ...(rightSidebar===undefined?[]:[{id:'native-sidebar',label:'DSH 原生右侧栏',icon:<Icon name={nativeSidebar.shown?'layout-sidebar-right':'layout-sidebar-right-off'}/>,active:nativeSidebar.shown,onActivate:nativeSidebar.toggle}]),
+        ]}
         bottom={[
           {id:'home',label:'返回 DSH',icon:<Icon name="home"/>,active:false,onActivate:()=>service.hide()},
           {id:'settings',label:'打开 DSH 设置',icon:<Icon name="settings"/>,active:settingsOpen,onActivate:()=>openSettings?.()},
@@ -2102,7 +2108,7 @@ export function Workbench({ service, browser, sessionId, cwd, navigation, dshPan
       <button role="menuitem" disabled={savedTabs.length===0} onClick={()=>removeTabs(savedTabs,'关闭已保存标签页')}>关闭已保存<span>Ctrl+K U</span></button>
       <button role="menuitem" onClick={closeAll}>全部关闭<span>Ctrl+K W</span></button>
     </div>}
-    {sessionId!==undefined&&browserTabs.map(tab=><DshBrowserPage key={tab.id} sessionId={sessionId} tabId={tab.id} colorScheme={colorScheme} active={browserId===tab.id&&!dshTabActive&&!switcherOpen&&snapshot.visible}/>)}
+    {sessionId!==undefined&&browserTabs.map(tab=><DshBrowserPage key={tab.id} sessionId={sessionId} tabId={tab.id} colorScheme={colorScheme} active={browserId===tab.id&&!dshTabActive&&!switcherOpen&&!nativeSidebar.shown&&snapshot.visible}/>)}
     {snapshot.bottomPanel&&<section className="dvw-bottom" style={{height:panelHeight}}><div className="dvw-bottom-resizer" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();const startY=event.clientY,startHeight=panelHeight;const move=(e:PointerEvent)=>setPanelHeight(Math.max(120,Math.min(window.innerHeight-160,startHeight+startY-e.clientY)));const up=(e:PointerEvent)=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);if(startHeight+startY-e.clientY<80)service.toggleBottomPanel(snapshot.bottomPanel!)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/><div className="dvw-bottom-head"><button className="dvw-bottom-title">{panels.find(p=>p.id===snapshot.bottomPanel)?.title??snapshot.bottomPanel}</button>{snapshot.bottomPanel==='terminal'&&<button className="dvw-icon" title="新建终端" onClick={()=>window.dispatchEvent(new Event('dvw-terminal-new'))}><Icon name="add"/></button>}<button className="dvw-icon" style={{marginLeft:'auto'}} onClick={()=>service.toggleBottomPanel(snapshot.bottomPanel!)}><Icon name="close"/></button></div><div className="dvw-bottom-body">{Panel&&workspace&&<Panel sessionId={sessionId} cwd={workspace.cwd} visible colorScheme={colorScheme}/>}</div></section>}
     <footer className="dvw-status"><div ref={setGitStatusSlot}/><span>{workspace?.cwd??cwd??''}</span>{activeTab?.external&&<span>磁盘文件已变化</span>}<button className="dvw-icon" style={{color:'inherit',marginLeft:'auto'}} onClick={()=>service.hide()}>返回 DSH</button></footer>
   </div>

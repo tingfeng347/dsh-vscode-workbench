@@ -24,7 +24,7 @@ describe('workbench settings section', () => {
     const workbench = read('src/client/Workbench.tsx')
     expect(workbench).toContain('const chatShown=chatVisible&&!showingDshPanel&&!floating')
     expect(workbench).toContain('const showingDshPanel=dshTabId!==undefined&&dshTabActive')
-    expect(workbench).toContain('active={browserId===tab.id&&!dshTabActive&&!switcherOpen&&snapshot.visible}')
+    expect(workbench).toContain('active={browserId===tab.id&&!dshTabActive&&!switcherOpen&&!nativeSidebar.shown&&snapshot.visible}')
   })
 
   it('offers a code minimap switch backed by a persisted preference', () => {

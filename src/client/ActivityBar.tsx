@@ -7,6 +7,7 @@ export interface ActivityView {
   icon: ReactNode
   active: boolean
   disabled?: boolean
+  expanded?: boolean
   onActivate(): void
 }
 
@@ -189,6 +190,7 @@ export function ActivityBar({ views, fixed, bottom = [], order, hidden, onOrderC
     data-active={view.id === activeId}
     data-dragging={draggingId === view.id || undefined}
     disabled={view.disabled}
+    aria-expanded={view.expanded}
     title={view.label}
     onPointerDown={event => beginDrag(event, view.id)}
     onClick={() => { if (didDrag.current) { didDrag.current = false; return } setLastActivated(view.id); view.onActivate() }}

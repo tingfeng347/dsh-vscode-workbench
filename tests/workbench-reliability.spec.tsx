@@ -66,12 +66,11 @@ let reviewChanges: Array<{
   created: boolean
 }> = []
 const sockets: FakeSocket[] = []
-class FakeSocket {
-  onmessage?: (event: { data: string }) => void
-  onopen?: () => void
-  constructor() { sockets.push(this) }
+class FakeSocket extends EventTarget {
+  static OPEN = 1
+  constructor() { super(); sockets.push(this) }
   close() {}
-  change(paths: string[]) { this.onmessage?.({ data: JSON.stringify({ paths }) }) }
+  change(paths: string[]) { this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ paths }) })) }
 }
 afterEach(async () => {
   await act(async () => { root?.unmount() }); root = undefined
@@ -833,9 +832,52 @@ it('restores unsaved drafts after remounting and detects a changed disk version'
   await act(async () => root!.unmount()); root = undefined
   disk = 'external edit'; revision = 'external'
   await mount(service)
-  await act(async () => sockets.at(-1)!.onopen?.())
+  await act(async () => sockets.at(-1)!.dispatchEvent(new Event('open')))
   expect(state.editor!.value).toBe('recovered draft')
   expect(document.body.textContent).toContain('磁盘文件已变化')
+})
+
+it('keeps the explorer and unsaved document loaded when switching sessions in the same workspace', async () => {
+  const service = await setup(false, undefined, [], [], undefined, [{ path: 'a.txt', name: 'a.txt', kind: 'file' }])
+  await act(async () => state.editor!.onChange('same workspace draft'))
+  vi.mocked(fetch).mockClear()
+  await act(async () => { root!.render(<Workbench service={service} sessionId="other-session" cwd="/tmp/audit"/>) })
+  expect(state.editor?.value).toBe('same workspace draft')
+  expect(document.querySelector('[data-tree-path="a.txt"]')).not.toBeNull()
+  const reloads = vi.mocked(fetch).mock.calls.filter(([url]) => /\/(?:workspace|fs\.read)$/.test(String(url)))
+  expect(reloads).toHaveLength(0)
+})
+
+it('preserves other session drafts across consecutive switches while a workspace is still loading', async () => {
+  const service = await setup()
+  vi.useFakeTimers()
+  const otherDrafts = JSON.stringify([{ path: 'other.txt', content: 'saved', draft: 'other session precious draft', revision: 'r0' }])
+  localStorage.setItem('dvw:drafts:other-session:/tmp/audit', otherDrafts)
+  const originalFetch = fetch
+  vi.stubGlobal('fetch', (url: string, options: RequestInit) => url.endsWith('/workspace')
+    ? new Promise(() => {})
+    : originalFetch(url, options))
+  await act(async () => state.editor!.onChange('outgoing draft'))
+  await act(async () => { root!.render(<Workbench service={service} sessionId="other-session" cwd="/tmp/other"/>) })
+  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/third"/>) })
+  expect(localStorage.getItem('dvw:drafts:other-session:/tmp/audit')).toBe(otherDrafts)
+  expect(localStorage.getItem('dvw:drafts:s:/tmp/audit')).toContain('outgoing draft')
+})
+
+it.each(['s', 'other-session'])('flushes the outgoing draft before a fast workspace switch in %s', async nextSession => {
+  const service = await setup()
+  vi.useFakeTimers()
+  const originalFetch = fetch
+  let currentCwd = '/tmp/other'
+  vi.stubGlobal('fetch', (url: string, options: RequestInit) => url.endsWith('/workspace')
+    ? Promise.resolve(Response.json({ ok: true, value: { cwd: currentCwd, name: 'fixture' } }))
+    : originalFetch(url, options))
+  await act(async () => state.editor!.onChange('unsaved before switching'))
+  await act(async () => { root!.render(<Workbench service={service} sessionId={nextSession} cwd={currentCwd}/>) })
+  expect(localStorage.getItem('dvw:drafts:s:/tmp/audit')).toContain('unsaved before switching')
+  currentCwd = '/tmp/audit'
+  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd={currentCwd}/>) })
+  expect(state.editor?.value).toBe('unsaved before switching')
 })
 
 it('reloads a clean document when its path changes on disk', async () => {
@@ -843,6 +885,36 @@ it('reloads a clean document when its path changes on disk', async () => {
   disk = 'updated by DSH'; revision = 'external'
   await act(async () => sockets.at(-1)!.change(['a.txt']))
   expect(state.editor!.value).toBe('updated by DSH')
+})
+
+it('reloads external changes through the authenticated desktop socket carrier', async () => {
+  const carrier = Object.assign(new EventTarget(), { readyState: 1, send: vi.fn(), close: vi.fn() })
+  const createWebSocket = vi.fn(() => carrier)
+  vi.stubGlobal('__DSH_TRANSPORT__', { streamBaseUrl: 'http://127.0.0.1:4312', createWebSocket })
+  await setup()
+  await act(async () => carrier.dispatchEvent(new Event('open')))
+  expect(carrier.send).toHaveBeenCalledWith(JSON.stringify({ type: 'watch', version: 1, paths: ['', 'a.txt'] }))
+  disk = 'desktop external edit'; revision = 'external'
+  await act(async () => carrier.dispatchEvent(new MessageEvent('message', {
+    data: JSON.stringify({ type: 'files.changed', paths: ['a.txt'] }),
+  })))
+  expect(state.editor!.value).toBe('desktop external edit')
+  expect(createWebSocket).toHaveBeenCalledWith(expect.stringContaining('/dsh-vscode/ws/files?sessionId=s'))
+})
+
+it('shows a retry action after a local read fails and opens the recovered document', async () => {
+  let failed = true
+  await setup(false, undefined, [], [], undefined, [], () => failed
+    ? { code: 'unavailable', message: 'temporary read failure', status: 503 }
+    : undefined)
+  expect(document.querySelector('.dvw-editor-body')?.textContent).toContain('temporary read failure')
+  const retry = [...document.querySelectorAll<HTMLButtonElement>('.dvw-editor-body button')]
+    .find(button => button.textContent === '重试读取文件')
+  expect(retry).toBeDefined()
+  failed = false
+  await act(async () => retry!.click())
+  expect(state.editor?.value).toBe('disk')
+  expect(document.querySelector('.dvw-editor-body')?.textContent).not.toContain('正在加载文件')
 })
 
 it('preserves a dirty draft and only marks external changes for its own path', async () => {
@@ -1018,6 +1090,21 @@ it('loads the active document in every visible pane', async () => {
     },
   })
   expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/fs.read'))).toHaveLength(2)
+  expect(document.body.textContent).not.toContain('正在加载文件')
+})
+
+it.each([
+  { paths: ['a.txt', 'b.txt', 'c.txt'], active: 'a.txt' },
+  { groups: [{ id: 'pane-1', paths: ['a.txt', 'b.txt', 'c.txt'], active: 'a.txt' }] },
+])('keeps inactive restored documents lazy until their tab is selected: %j', async saved => {
+  await setup(false, saved)
+  const reads = () => vi.mocked(fetch).mock.calls
+    .filter(([url]) => String(url).endsWith('/fs.read'))
+    .map(([, options]) => JSON.parse(String(options!.body)).path)
+  expect(reads()).toEqual(['a.txt'])
+  const tab = document.querySelector<HTMLButtonElement>('[data-tab-path="b.txt"]')!
+  await act(async () => tab.click())
+  expect(reads()).toEqual(['a.txt', 'b.txt'])
   expect(document.body.textContent).not.toContain('正在加载文件')
 })
 

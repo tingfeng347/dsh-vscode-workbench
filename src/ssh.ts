@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { isUtf8 } from 'node:buffer'
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
@@ -26,6 +27,7 @@ import { WorkbenchError } from './wire.ts'
 const TEXT_LIMIT = 5 * 1024 * 1024
 const PROCESS_TIMEOUT = 30_000
 const SEARCH_LIMIT = 2_000
+const SEARCH_OUTPUT_LIMIT = 8 * 1024 * 1024
 const SSH_BIN = 'ssh'
 const REMOTE_PREVIEW_LIMIT = 100 * 1024 * 1024
 const GIT_ONLY_SSH_HOSTS = new Set([
@@ -54,6 +56,13 @@ interface ProcessResult {
   stdout: string
   stderr: string
   code: number
+}
+
+interface SshOutputConsumer {
+  reset(): void
+  /** True once enough complete records have been collected and the process can stop. */
+  write(chunk: string): boolean
+  end(): void
 }
 
 const connections = new Map<string, LiveConnection>()
@@ -363,8 +372,10 @@ function runSshOnce(target: Target, script: string, options: {
   signal?: AbortSignal
   timeout?: number
   maxOutput?: number
+  output?: SshOutputConsumer
 } = {}): Promise<ProcessResult> {
   return new Promise((resolve, reject) => {
+    options.output?.reset()
     const child = spawn(SSH_BIN, sshRunArguments(sshArguments(target), script), {
       cwd: homedir(),
       shell: false,
@@ -396,6 +407,19 @@ function runSshOnce(target: Target, script: string, options: {
     child.stdin.on('error', () => undefined)
     child.stdin.end(options.input ?? '')
     child.stdout.setEncoding('utf8').on('data', (chunk: string) => {
+      if (settled) return
+      if (options.output !== undefined) {
+        try {
+          if (options.output.write(chunk)) {
+            child.kill()
+            finish(() => resolve({ stdout: '', stderr, code: 0 }))
+          }
+        } catch (error) {
+          child.kill()
+          finish(() => reject(error))
+        }
+        return
+      }
       stdout += chunk
       if (stdout.length > limit) {
         child.kill()
@@ -404,7 +428,13 @@ function runSshOnce(target: Target, script: string, options: {
     })
     child.stderr.setEncoding('utf8').on('data', (chunk: string) => { stderr += chunk })
     child.on('error', error => finish(() => reject(error)))
-    child.on('close', code => finish(() => resolve({ stdout, stderr, code: code ?? 1 })))
+    child.on('close', code => {
+      if (settled) return
+      try {
+        if (code === 0 || code === 1) options.output?.end()
+        finish(() => resolve({ stdout, stderr, code: code ?? 1 }))
+      } catch (error) { finish(() => reject(error)) }
+    })
   })
 }
 
@@ -418,6 +448,7 @@ async function runSsh(target: Target, script: string, options: {
   timeout?: number
   maxOutput?: number
   retryRead?: boolean
+  output?: SshOutputConsumer
 } = {}): Promise<ProcessResult> {
   options.signal?.throwIfAborted()
   const first = await runSshOnce(target, script, options)
@@ -602,12 +633,14 @@ export async function sshReadDocument(
   const tooLarge = size > TEXT_LIMIT
   const encoded = result.stdout.slice(newline + 1).replace(/\s+/g, '')
   const bytes = tooLarge || encoded === '' ? Buffer.alloc(0) : Buffer.from(encoded, 'base64')
+  const binary = bytes.includes(0)
+  if (!tooLarge && !binary && !isUtf8(bytes)) throw new WorkbenchError('encoding', '文件不是 UTF-8 编码，无法编辑或替换', 409)
   return {
     path: relative,
-    content: tooLarge || bytes.includes(0) ? '' : bytes.toString('utf8'),
+    content: tooLarge || binary ? '' : bytes.toString('utf8'),
     revision: hash,
     size,
-    binary: bytes.includes(0),
+    binary,
     tooLarge,
   }
 }
@@ -736,20 +769,20 @@ export async function sshSaveDocument(
 ): Promise<FileDocument> {
   const connection = connectionFor(sessionId, connectionId)
   const relative = remoteRelativePath(path)
-  const target = shellQuote(remotePathArg(relative))
   const script = [
     'set -eu',
     `cd -- ${shellQuote(connection.root)}`,
     metaCommand(relative),
     `[ "$h" = ${shellQuote(expectedRevision)} ] || { echo "REVISION:$h" >&2; exit 23; }`,
-    'd=$(dirname -- "$p")',
+    'destination=$real',
+    'd=$(dirname -- "$destination")',
     'tmp=$(mktemp "$d/.dsh-vscode.XXXXXX")',
     'trap \'rm -f "$tmp"\' EXIT HUP INT TERM',
     'if base64 --decode </dev/null >/dev/null 2>&1; then base64 --decode > "$tmp"; else base64 -D > "$tmp"; fi',
-    'if m=$(stat -c %a -- "$p" 2>/dev/null); then chmod "$m" "$tmp"; elif m=$(stat -f %Lp "$p" 2>/dev/null); then chmod "$m" "$tmp"; fi',
+    'if m=$(stat -c %a -- "$destination" 2>/dev/null); then chmod "$m" "$tmp"; elif m=$(stat -f %Lp "$destination" 2>/dev/null); then chmod "$m" "$tmp"; fi',
     metaCommand(relative),
-    '[ "$h" = ' + shellQuote(expectedRevision) + ' ] || { echo "REVISION:$h" >&2; exit 23; }',
-    'mv -f -- "$tmp" "$p"',
+    '[ "$real" = "$destination" ] && [ "$h" = ' + shellQuote(expectedRevision) + ' ] || { echo "REVISION:$h" >&2; exit 23; }',
+    'mv -f -- "$tmp" "$destination"',
     'trap - EXIT HUP INT TERM',
   ].join('\n')
   const result = await runSsh(connection.target, script, {
@@ -929,6 +962,7 @@ function searchLineMatches(preview: string, request: SearchRequest): SearchMatch
       if (hit.index >= preview.length) break
     }
     matches.push({ path: '', line: 0, column: hit.index + 1, preview, match: hit[0], lineHash: '' })
+    if (matches.length > SEARCH_LIMIT) break
     if (hit[0] === '') continue
   }
   return matches
@@ -954,7 +988,8 @@ const GREP_FALLBACK_EXCLUDED_DIRS = [
 ]
 
 function grepFallbackCommand(request: SearchRequest): string {
-  const flags = ['-r', '-I', '-n', '-Z']
+  // BSD grep uses -Z for decompression; --null is shared with GNU grep.
+  const flags = ['-r', '-I', '-n', '-H', '--null']
   if (!request.caseSensitive) flags.push('-i')
   if (request.wholeWord) flags.push('-w')
   flags.push(request.regex ? '-E' : '-F')
@@ -963,44 +998,102 @@ function grepFallbackCommand(request: SearchRequest): string {
   for (const glob of splitGlobs(request.exclude)) flags.push('--exclude', glob)
   flags.push('-e', request.query, '.')
   const command = ['grep', ...flags].map(shellQuote).join(' ')
-  return `${command} | head -n ${SEARCH_LIMIT + 1}`
+  return command
 }
 
-/** Parse NUL-delimited `grep -rIln` records used when a remote host has no ripgrep. */
-export function parseGrepSearchOutput(stdout: string, request: SearchRequest): { matches: SearchMatch[]; limited: boolean } {
-  const matches: SearchMatch[] = []
+/** Keep complete search records, rather than buffering an unbounded workspace scan. */
+function searchOutput(request: SearchRequest, format: 'ripgrep' | 'grep') {
+  let matches: SearchMatch[] = []
   let limited = false
-  const records = stdout.split('\0')
-  let path = records.shift()?.replace(/^\.\//, '') ?? ''
-  for (const record of records) {
-    const newline = record.indexOf('\n')
-    const line = newline < 0 ? record : record.slice(0, newline)
-    const nextPath = newline < 0 ? '' : record.slice(newline + 1)
-    const separator = line.indexOf(':')
-    const lineNumber = Number(separator < 0 ? '' : line.slice(0, separator))
-    if (path !== '' && Number.isSafeInteger(lineNumber) && lineNumber > 0) {
-      const preview = line.slice(separator + 1).replace(/\r$/, '')
-      const lineHash = hashSearchLine(preview)
+  let pending = ''
+  let retainedBytes = 0
+  const append = (path: string, line: number, preview: string, hits: Array<{ column: number; match: string }>) => {
+    const lineHash = hashSearchLine(preview)
+    const lineBytes = Buffer.byteLength(path) + Buffer.byteLength(preview)
+    for (const hit of hits) {
+      // Bound the response as well as the record buffer, even for very long matching lines.
+      const bytes = lineBytes + Buffer.byteLength(hit.match)
+      if (matches.length === SEARCH_LIMIT || retainedBytes + bytes > SEARCH_OUTPUT_LIMIT) {
+        limited = true
+        return
+      }
+      retainedBytes += bytes
+      matches.push({ path, line, column: hit.column, preview, match: hit.match, lineHash })
+    }
+  }
+  const record = (text: string) => {
+    if (format === 'grep') {
+      const nul = text.indexOf('\0')
+      if (nul < 0) return
+      const path = text.slice(0, nul).replace(/^\.\//, '')
+      const separator = text.indexOf(':', nul + 1)
+      const line = Number(text.slice(nul + 1, separator))
+      if (path === '' || separator < 0 || !Number.isSafeInteger(line) || line < 1) return
+      const preview = text.slice(separator + 1).replace(/\r$/, '')
       const hits = searchLineMatches(preview, request)
-      for (const hit of hits.length === 0 ? [{ column: 1, match: '' }] : hits) {
-        if (matches.length === SEARCH_LIMIT) {
-          limited = true
-          break
-        }
-        matches.push({
-          path,
-          line: lineNumber,
-          column: hit.column,
-          preview,
-          match: hit.match,
-          lineHash,
-        })
+      append(path, line, preview, hits.length === 0 ? [{ column: 1, match: '' }] : hits)
+      return
+    }
+    if (text === '') return
+    const event = JSON.parse(text) as {
+      type?: string
+      data?: {
+        path?: { text?: string }
+        lines?: { text?: string }
+        line_number?: number
+        submatches?: Array<{ start: number; end: number; match?: { text?: string } }>
       }
     }
-    if (limited) break
-    path = nextPath.replace(/^\.\//, '')
+    if (event.type !== 'match' || event.data?.path?.text === undefined || event.data.lines?.text === undefined) return
+    const preview = event.data.lines.text.replace(/\r?\n$/, '')
+    const bytes = Buffer.from(preview)
+    let byteOffset = 0
+    let column = 1
+    const hits: Array<{ column: number; match: string }> = []
+    for (const hit of event.data.submatches ?? []) {
+      if (hit.start < bytes.length && (bytes[hit.start]! & 0xc0) === 0x80) continue
+      column += bytes.toString('utf8', byteOffset, hit.start).length
+      const match = hit.match?.text ?? ''
+      hits.push({ column, match })
+      if (hits.length > SEARCH_LIMIT) break
+      byteOffset = hit.end
+      column += match.length
+    }
+    append(event.data.path.text.replace(/^\.\//, ''), event.data.line_number ?? 1, preview, hits)
   }
-  return { matches, limited }
+  return {
+    reset() { matches = []; limited = false; pending = ''; retainedBytes = 0 },
+    write(chunk: string) {
+      pending += chunk
+      while (!limited) {
+        // A grep path may itself contain newlines, so find its NUL before the record terminator.
+        const start = format === 'grep' ? pending.indexOf('\0') : 0
+        if (start < 0) break
+        const newline = pending.indexOf('\n', start)
+        if (newline < 0) break
+        record(pending.slice(0, newline))
+        pending = pending.slice(newline + 1)
+      }
+      if (limited) pending = ''
+      if (Buffer.byteLength(pending) > SEARCH_OUTPUT_LIMIT) {
+        throw new WorkbenchError('ssh-output-limit', '远程搜索的单条记录超过 8 MiB', 413)
+      }
+      return limited
+    },
+    end() {
+      if (!limited && pending !== '') record(pending)
+      pending = ''
+    },
+    result() { return { matches, limited } },
+  }
+}
+
+/** Parse NUL-delimited grep records used when a remote host has no ripgrep. */
+export function parseGrepSearchOutput(stdout: string, request: SearchRequest): { matches: SearchMatch[]; limited: boolean } {
+  const output = searchOutput(request, 'grep')
+  output.write(stdout)
+  output.end()
+  return output.result()
 }
 
 export async function sshSearchWorkspace(
@@ -1022,61 +1115,29 @@ export async function sshSearchWorkspace(
   args.push('--glob', '!**/.git', '--glob', '!**/.git/**', '--', request.query, '.')
   const command = ['rg', ...args].map(shellQuote).join(' ')
   const script = [
-    `cd -- ${shellQuote(connection.root)}`,
+    'set -eu',
+    `cd -- ${shellQuote(connection.root)} || exit 20`,
     'command -v rg >/dev/null 2>&1 || { echo "远程主机缺少 ripgrep（rg）" >&2; exit 127; }',
     `exec ${command}`,
   ].join('\n')
-  const result = await runSsh(connection.target, script, { signal, maxOutput: 8 * 1024 * 1024, retryRead: true })
+  const output = searchOutput(request, 'ripgrep')
+  const result = await runSsh(connection.target, script, { signal, output, retryRead: true })
   if (result.code === 127) {
     const grepCommand = grepFallbackCommand(request)
     const fallbackScript = [
-      `cd -- ${shellQuote(connection.root)}`,
+      'set -eu',
+      `cd -- ${shellQuote(connection.root)} || exit 20`,
       'command -v grep >/dev/null 2>&1 || { echo "远程主机缺少 grep" >&2; exit 127; }',
       `exec sh -c ${shellQuote(grepCommand)}`,
     ].join('\n')
-    const fallback = await runSsh(connection.target, fallbackScript, { signal, maxOutput: 8 * 1024 * 1024, retryRead: true })
+    const fallbackOutput = searchOutput(request, 'grep')
+    const fallback = await runSsh(connection.target, fallbackScript, { signal, output: fallbackOutput, retryRead: true })
     if (fallback.code === 127) throw new WorkbenchError('ssh-search-unavailable', '远程主机缺少 ripgrep 和 grep，无法搜索文件', 409)
     if (fallback.code > 1) throw sshFailure(fallback)
-    return parseGrepSearchOutput(fallback.stdout, request)
+    return fallbackOutput.result()
   }
   if (result.code > 1) throw sshFailure(result)
-  const matches: SearchMatch[] = []
-  let limited = false
-  parse: for (const line of result.stdout.split('\n')) {
-    if (line === '') continue
-    const event = JSON.parse(line) as {
-      type?: string
-      data?: {
-        path?: { text?: string }
-        lines?: { text?: string }
-        line_number?: number
-        submatches?: Array<{ start: number; end: number; match?: { text?: string } }>
-      }
-    }
-    if (event.type !== 'match' || event.data?.path?.text === undefined || event.data.lines?.text === undefined) continue
-    const preview = event.data.lines.text.replace(/\r?\n$/, '')
-    const bytes = Buffer.from(preview)
-    const lineHash = hashSearchLine(preview)
-    let byteOffset = 0
-    let column = 1
-    for (const hit of event.data.submatches ?? []) {
-      if (hit.start < bytes.length && (bytes[hit.start]! & 0xc0) === 0x80) continue
-      if (matches.length === SEARCH_LIMIT) { limited = true; break parse }
-      column += bytes.toString('utf8', byteOffset, hit.start).length
-      const match = hit.match?.text ?? ''
-      matches.push({
-        path: event.data.path.text.replace(/^\.\//, ''),
-        line: event.data.line_number ?? 1,
-        column,
-        preview,
-        match,
-        lineHash,
-      })
-      byteOffset = hit.end
-      column += match.length
-    }
-  }
-  return { matches, limited }
+  return output.result()
 }
 
 function validSearchEdit(edit: SearchFileEdits['edits'][number]): boolean {
@@ -1158,7 +1219,7 @@ async function gitOnSsh(connection: LiveConnection, args: string[], signal?: Abo
       '  git diff --cached --quiet -- ":/" ":(top,exclude,literal)$prefix" || { echo "工作区之外还有已暂存的文件，请从仓库根目录提交" >&2; exit 24; }',
       'fi',
     ] : []),
-    `exec git ${args.map(shellQuote).join(' ')}`,
+    `exec git --literal-pathspecs ${args.map(shellQuote).join(' ')}`,
   ].join('\n')
   return runSsh(connection.target, script, { signal, input, retryRead: ['diff', 'show', 'for-each-ref', 'log'].includes(args[0]!), maxOutput: 8 * 1024 * 1024 })
 }

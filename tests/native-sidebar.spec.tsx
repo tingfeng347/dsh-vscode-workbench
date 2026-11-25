@@ -71,3 +71,75 @@ it('presents only the requested session dock and releases it after native collap
     document.body.replaceChildren()
   }
 })
+
+it.each(['removed', 'replaced'] as const)('synchronizes presentation when the host column is %s', async change => {
+  const frame = document.createElement('div')
+  frame.innerHTML = '<div data-rightbar-col><div data-sidebar-right-panel="push" data-sidebar-right-session="s" data-sidebar-right-open="true"></div></div><div id="mount"></div>'
+  document.body.append(frame)
+  const column = frame.firstElementChild!
+  vi.spyOn(column.firstElementChild!, 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect)
+  const sidebar = {
+    mounted: { getSnapshot: () => 's', subscribe: () => () => {} },
+    isExpanded: () => true,
+    toggleExpanded() {},
+  } as unknown as ISidebarRight
+  const root = createRoot(frame.querySelector('#mount')!)
+  function Toggle() {
+    const { shown, toggle } = useNativeSidebar(sidebar, 's', true)
+    return <button aria-expanded={shown} onClick={toggle}/>
+  }
+  try {
+    await act(async () => root.render(<Toggle/>))
+    const button = frame.querySelector('button')!
+    await act(async () => button.click())
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    const replacement = column.cloneNode(true) as HTMLElement
+    replacement.removeAttribute('data-dvw-native-sidebar')
+    vi.spyOn(replacement.firstElementChild!, 'getBoundingClientRect').mockReturnValue({ width: 340 } as DOMRect)
+    await act(async () => { if (change === 'removed') column.remove(); else column.replaceWith(replacement) })
+    expect(column.hasAttribute('data-dvw-native-sidebar')).toBe(false)
+    expect(button.getAttribute('aria-expanded')).toBe(change === 'removed' ? 'false' : 'true')
+    expect(document.body.style.getPropertyValue('--dvw-native-sidebar-width')).toBe(change === 'removed' ? '' : '340px')
+  } finally {
+    await act(async () => root.unmount())
+    frame.remove()
+  }
+})
+
+it('opens the host fullscreen pane when the push track has no room', async () => {
+  document.body.innerHTML = `
+    <div data-rightbar-col>
+      <div data-sidebar-right-panel="push" data-sidebar-right-session="s" style="--dsh-sidebar-right-panel-width: 0px">
+        <button data-sidebar-right-mode="fullscreen"></button>
+      </div>
+    </div><button data-sidebar-right-expand></button><div id="mount"></div>`
+  const panel = document.querySelector<HTMLElement>('[data-sidebar-right-panel]')!
+  const mode = panel.querySelector('button')!
+  const isExpanded = () => panel.hasAttribute('data-sidebar-right-open')
+  mode.onclick = () => { if (isExpanded()) panel.dataset.sidebarRightPanel = 'fullscreen' }
+  document.querySelector<HTMLButtonElement>('[data-sidebar-right-expand]')!.onclick = () => {
+    panel.dataset.sidebarRightOpen = 'true'
+    queueMicrotask(() => { if (panel.dataset.sidebarRightPanel === 'push') panel.removeAttribute('data-sidebar-right-open') })
+  }
+  const sidebar = {
+    mounted: { getSnapshot: () => 's', subscribe: () => () => {} },
+    isExpanded,
+    // The public service flushes synchronously, so the host rejects this push before it returns.
+    toggleExpanded() { panel.removeAttribute('data-sidebar-right-open') },
+  } as unknown as ISidebarRight
+  const root = createRoot(document.querySelector('#mount')!)
+  function Toggle() {
+    const { shown, toggle } = useNativeSidebar(sidebar, 's', true)
+    return <button aria-expanded={shown} onClick={toggle}/>
+  }
+  try {
+    await act(async () => root.render(<Toggle/>))
+    const button = document.querySelector<HTMLButtonElement>('#mount button')!
+    await act(async () => button.click())
+    expect(panel.dataset.sidebarRightPanel).toBe('fullscreen')
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+  } finally {
+    await act(async () => root.unmount())
+    document.body.replaceChildren()
+  }
+})

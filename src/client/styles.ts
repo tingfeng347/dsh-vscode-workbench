@@ -170,6 +170,11 @@ button.dvw-bottom-title{cursor:pointer}.dvw-bottom-title:hover,.dvw-bottom-title
 [data-dvw-conversation-panel] [data-conversation-content] pre{font-size:12px}
 html[data-platform=darwin] [data-dvw-conversation-panel]{top:var(--dvw-titlebar-height)!important}
 body[data-dvw-palette=light] [data-dvw-conversation-panel]{--dsw-alias-bg-base:#f9fafb;--dsw-specific-sidebar-fill:#f9fafb;--dsw-alias-border-l2:#e5e5e5;background:#f9fafb!important}body[data-dvw-palette=dark] [data-dvw-conversation-panel]{--dsw-alias-bg-base:#191a1b;--dsw-specific-sidebar-fill:#191a1b;--dsw-alias-bg-layer-1:#202122;--dsw-alias-bg-layer-2:#252526;--dsw-alias-bg-layer-3:#2a2b2c;--dsw-alias-label-primary:#bfbfbf;--dsw-alias-label-secondary:#8c8c8c;--dsw-alias-label-tertiary:#6e6e6e;--dsw-alias-border-l2:#2a2b2c;--dsw-alias-border-l3:#303132;--dsw-alias-interactive-bg-hover:#ffffff12;--dsw-alias-interactive-bg-active:#ffffff1f}
+/* Keep background native browser tabs mounted without letting a fullscreen dock cover the workbench. */
+[data-rightbar-col]:not([data-dvw-native-sidebar]):has(~ [data-shell-overlay] .dvw-overlay){isolation:isolate}
+[data-rightbar-col][data-dvw-native-sidebar] :is([data-sidebar-right-mode],[data-sidebar-right-toggle]),
+[data-rightbar-col][data-dvw-native-sidebar] ~ [data-side=rightbar]{-webkit-app-region:no-drag}
+[data-rightbar-col][data-dvw-native-sidebar]:has([data-sidebar-right-panel=fullscreen][data-sidebar-right-open=true]) ~ [data-shell-overlay] .dvw-titlebar{-webkit-app-region:no-drag}
 /* Lift the native dock and reserve its full push width in the embedded workbench. */
 [data-rightbar-col][data-dvw-native-sidebar]{z-index:21}
 [data-rightbar-col][data-dvw-native-sidebar] ~ [data-side=rightbar]{z-index:22}
@@ -541,6 +546,11 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-debug{display:flex;flex-direction:column;height:100%;min-height:0;color:var(--dvw-text);font:12px/1.5 var(--dvw-font,system-ui)}
 .dvw-debug-toolbar{display:flex;align-items:center;gap:4px;padding:4px 8px;border-bottom:1px solid var(--dvw-border-soft)}
 .dvw-debug-toolbar .dvw-icon{width:24px;height:22px;font-size:12px}
+.dvw-status{min-width:0;white-space:nowrap;gap:clamp(4px,1%,18px)}
+.dvw-status-git,.dvw-scm-status,.dvw-scm-status .dvw-branch{min-width:0}
+.dvw-status > span,.dvw-status-branch-name{min-width:0;overflow:hidden;text-overflow:ellipsis}
+.dvw-status-path{flex:1 1 auto}
+.dvw-status>button,.dvw-scm-status .dvw-branch:not(:first-child){flex:none}
 .dvw-status-warn{color:#b8860b;cursor:help;margin-left:8px}
 .dvw-status-action{margin-left:8px;height:18px;padding:0 6px;border:1px solid var(--dvw-border-soft);border-radius:3px;background:transparent;color:inherit;font-size:11px;cursor:pointer}
 .dvw-status-action:disabled{opacity:.4;cursor:default}

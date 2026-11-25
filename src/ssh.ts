@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
+import { isUtf8 } from 'node:buffer'
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { readFile } from 'node:fs/promises'
@@ -602,12 +603,14 @@ export async function sshReadDocument(
   const tooLarge = size > TEXT_LIMIT
   const encoded = result.stdout.slice(newline + 1).replace(/\s+/g, '')
   const bytes = tooLarge || encoded === '' ? Buffer.alloc(0) : Buffer.from(encoded, 'base64')
+  const binary = bytes.includes(0)
+  if (!tooLarge && !binary && !isUtf8(bytes)) throw new WorkbenchError('encoding', '文件不是 UTF-8 编码，无法编辑或替换', 409)
   return {
     path: relative,
-    content: tooLarge || bytes.includes(0) ? '' : bytes.toString('utf8'),
+    content: tooLarge || binary ? '' : bytes.toString('utf8'),
     revision: hash,
     size,
-    binary: bytes.includes(0),
+    binary,
     tooLarge,
   }
 }
@@ -736,20 +739,20 @@ export async function sshSaveDocument(
 ): Promise<FileDocument> {
   const connection = connectionFor(sessionId, connectionId)
   const relative = remoteRelativePath(path)
-  const target = shellQuote(remotePathArg(relative))
   const script = [
     'set -eu',
     `cd -- ${shellQuote(connection.root)}`,
     metaCommand(relative),
     `[ "$h" = ${shellQuote(expectedRevision)} ] || { echo "REVISION:$h" >&2; exit 23; }`,
-    'd=$(dirname -- "$p")',
+    'destination=$real',
+    'd=$(dirname -- "$destination")',
     'tmp=$(mktemp "$d/.dsh-vscode.XXXXXX")',
     'trap \'rm -f "$tmp"\' EXIT HUP INT TERM',
     'if base64 --decode </dev/null >/dev/null 2>&1; then base64 --decode > "$tmp"; else base64 -D > "$tmp"; fi',
-    'if m=$(stat -c %a -- "$p" 2>/dev/null); then chmod "$m" "$tmp"; elif m=$(stat -f %Lp "$p" 2>/dev/null); then chmod "$m" "$tmp"; fi',
+    'if m=$(stat -c %a -- "$destination" 2>/dev/null); then chmod "$m" "$tmp"; elif m=$(stat -f %Lp "$destination" 2>/dev/null); then chmod "$m" "$tmp"; fi',
     metaCommand(relative),
-    '[ "$h" = ' + shellQuote(expectedRevision) + ' ] || { echo "REVISION:$h" >&2; exit 23; }',
-    'mv -f -- "$tmp" "$p"',
+    '[ "$real" = "$destination" ] && [ "$h" = ' + shellQuote(expectedRevision) + ' ] || { echo "REVISION:$h" >&2; exit 23; }',
+    'mv -f -- "$tmp" "$destination"',
     'trap - EXIT HUP INT TERM',
   ].join('\n')
   const result = await runSsh(connection.target, script, {
@@ -954,7 +957,8 @@ const GREP_FALLBACK_EXCLUDED_DIRS = [
 ]
 
 function grepFallbackCommand(request: SearchRequest): string {
-  const flags = ['-r', '-I', '-n', '-Z']
+  // BSD grep uses -Z for decompression; --null is shared with GNU grep.
+  const flags = ['-r', '-I', '-n', '-H', '--null']
   if (!request.caseSensitive) flags.push('-i')
   if (request.wholeWord) flags.push('-w')
   flags.push(request.regex ? '-E' : '-F')
@@ -1022,7 +1026,8 @@ export async function sshSearchWorkspace(
   args.push('--glob', '!**/.git', '--glob', '!**/.git/**', '--', request.query, '.')
   const command = ['rg', ...args].map(shellQuote).join(' ')
   const script = [
-    `cd -- ${shellQuote(connection.root)}`,
+    'set -eu',
+    `cd -- ${shellQuote(connection.root)} || exit 20`,
     'command -v rg >/dev/null 2>&1 || { echo "远程主机缺少 ripgrep（rg）" >&2; exit 127; }',
     `exec ${command}`,
   ].join('\n')
@@ -1030,7 +1035,8 @@ export async function sshSearchWorkspace(
   if (result.code === 127) {
     const grepCommand = grepFallbackCommand(request)
     const fallbackScript = [
-      `cd -- ${shellQuote(connection.root)}`,
+      'set -eu',
+      `cd -- ${shellQuote(connection.root)} || exit 20`,
       'command -v grep >/dev/null 2>&1 || { echo "远程主机缺少 grep" >&2; exit 127; }',
       `exec sh -c ${shellQuote(grepCommand)}`,
     ].join('\n')
@@ -1158,7 +1164,7 @@ async function gitOnSsh(connection: LiveConnection, args: string[], signal?: Abo
       '  git diff --cached --quiet -- ":/" ":(top,exclude,literal)$prefix" || { echo "工作区之外还有已暂存的文件，请从仓库根目录提交" >&2; exit 24; }',
       'fi',
     ] : []),
-    `exec git ${args.map(shellQuote).join(' ')}`,
+    `exec git --literal-pathspecs ${args.map(shellQuote).join(' ')}`,
   ].join('\n')
   return runSsh(connection.target, script, { signal, input, retryRead: ['diff', 'show', 'for-each-ref', 'log'].includes(args[0]!), maxOutput: 8 * 1024 * 1024 })
 }

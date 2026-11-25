@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { lstat, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { delimiter, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
-import { connectSsh, disconnectSsh, liveSshConnections, sshCreateEntry, sshDeleteEntry, sshGit, sshListFiles, sshOpenFileDownload, sshReadDocument, sshRenameEntry, sshUploadFile, switchSshWorkspace } from '../src/ssh.ts'
+import { connectSsh, disconnectSsh, liveSshConnections, sshCreateEntry, sshDeleteEntry, sshGit, sshListFiles, sshOpenFileDownload, sshReadDocument, sshRenameEntry, sshReplaceSearchResults, sshSaveDocument, sshSearchWorkspace, sshUploadFile, switchSshWorkspace } from '../src/ssh.ts'
 import * as sshPassword from '../src/ssh-password.ts'
 import { SshChat, type ChatServices } from '../src/ssh-chat.ts'
 import type { Session } from '@deepseek-ai/dsh-session'
@@ -26,8 +26,9 @@ async function localSshFixture() {
   await mkdir(bin)
   await mkdir(workspace)
   // Run the exact remote command OpenSSH would send without a server or credentials.
-  await writeFile(join(bin, 'ssh'), '#!/bin/sh\nfor arg; do command=$arg; done\nexec /bin/sh -c "$command"\n', { mode: 0o700 })
+  await writeFile(join(bin, 'ssh'), '#!/bin/sh\ncd -- "$DVW_TEST_SSH_LOGIN" || exit 1\nfor arg; do command=$arg; done\nexec /bin/sh -c "$command"\n', { mode: 0o700 })
   vi.stubEnv('PATH', bin + delimiter + process.env.PATH)
+  vi.stubEnv('DVW_TEST_SSH_LOGIN', temp)
   return workspace
 }
 
@@ -100,6 +101,33 @@ it.skipIf(process.platform === 'win32')('scopes remote Git status, staging and b
   expect(git('show', '--format=', '--name-only', 'HEAD')).toBe('nested/inside.txt\n')
 })
 
+it.skipIf(process.platform === 'win32')('treats remote Git filenames literally for stage, unstage and discard', async () => {
+  const workspace = await localSshFixture()
+  const git = (...args: string[]) => execFileSync('git', ['-C', workspace, ...args], { encoding: 'utf8' })
+  git('init', '--quiet')
+  git('config', 'user.name', 'Test')
+  git('config', 'user.email', 'test@example.invalid')
+  git('config', 'commit.gpgsign', 'false')
+  for (const name of ['file[1].txt', 'file1.txt']) await writeFile(join(workspace, name), 'before\n')
+  git('add', '.')
+  git('commit', '--quiet', '-m', 'fixture')
+  for (const name of ['file[1].txt', 'file1.txt']) await writeFile(join(workspace, name), 'after\n')
+  const connection = await connectSsh(session, { host: 'dvw-test.invalid', workspace })
+  await sshGit(session, connection.id, 'stage', 'file[1].txt')
+  expect(git('diff', '--cached', '--name-only')).toBe('file[1].txt\n')
+  await sshGit(session, connection.id, 'stage.all')
+  await sshGit(session, connection.id, 'unstage', 'file[1].txt')
+  expect(git('diff', '--cached', '--name-only')).toBe('file1.txt\n')
+  await sshGit(session, connection.id, 'discard', 'file[1].txt')
+  expect(await sshReadDocument(session, connection.id, 'file[1].txt')).toMatchObject({ content: 'before\n' })
+  expect(await sshReadDocument(session, connection.id, 'file1.txt')).toMatchObject({ content: 'after\n' })
+  const subdir = join(workspace, 'sub')
+  await mkdir(subdir)
+  const narrow = await connectSsh(session, { host: 'dvw-test.invalid', workspace: subdir })
+  await expect(sshGit(session, narrow.id, 'stage', ':(top)file[1].txt')).rejects.toThrow()
+  expect(git('diff', '--cached', '--name-only')).toBe('file1.txt\n')
+})
+
 it.skipIf(process.platform === 'win32')('uploads and downloads binary bytes, renames entries, and refuses overwrite and workspace escapes', async () => {
   const workspace = await localSshFixture()
   const connection = await connectSsh(session, { host: 'dvw-test.invalid', workspace })
@@ -117,6 +145,47 @@ it.skipIf(process.platform === 'win32')('uploads and downloads binary bytes, ren
   await expect(sshDeleteEntry(session, connection.id, '')).rejects.toMatchObject({ code: 'root-delete' })
   await sshDeleteEntry(session, connection.id, '资料')
   await expect(sshListFiles(session, connection.id, '')).resolves.toEqual([])
+})
+
+it.skipIf(process.platform === 'win32')('refuses lossy UTF-8 editing and replacement without changing the remote file bytes', async () => {
+  const workspace = await localSshFixture()
+  const original = Buffer.from('666f6f0a636166e90a', 'hex')
+  await writeFile(join(workspace, 'latin1.txt'), original)
+  const connection = await connectSsh(session, { host: 'dvw-test.invalid', workspace })
+  await expect(sshReadDocument(session, connection.id, 'latin1.txt')).rejects.toMatchObject({ code: 'encoding' })
+  const { matches } = await sshSearchWorkspace(session, connection.id, { query: 'foo' })
+  expect(matches).toHaveLength(1)
+  const result = await sshReplaceSearchResults(session, connection.id, [{ path: 'latin1.txt', edits: matches.map(match => ({
+    line: match.line, column: match.column, length: match.match.length, lineHash: match.lineHash, text: 'bar',
+  })) }])
+  expect(result).toEqual({ changed: [], failures: [{ path: 'latin1.txt', message: expect.stringContaining('UTF-8') }] })
+  expect(await readFile(join(workspace, 'latin1.txt'))).toEqual(original)
+  await writeFile(join(workspace, 'valid.txt'), '真正的替代字符 \uFFFD\n')
+  expect(await sshReadDocument(session, connection.id, 'valid.txt')).toMatchObject({ content: '真正的替代字符 \uFFFD\n', binary: false })
+})
+
+it.skipIf(process.platform === 'win32')('saves the canonical remote target while preserving an internal symlink and permissions', async () => {
+  const workspace = await localSshFixture()
+  await writeFile(join(workspace, 'target.txt'), 'before\n', { mode: 0o640 })
+  await symlink('target.txt', join(workspace, 'alias.txt'))
+  const connection = await connectSsh(session, { host: 'dvw-test.invalid', workspace })
+  const document = await sshReadDocument(session, connection.id, 'alias.txt')
+  await expect(sshSaveDocument(session, connection.id, 'alias.txt', 'after\n', document.revision)).resolves.toMatchObject({ content: 'after\n' })
+  expect((await lstat(join(workspace, 'alias.txt'))).isSymbolicLink()).toBe(true)
+  expect(await sshReadDocument(session, connection.id, 'target.txt')).toMatchObject({ content: 'after\n' })
+  expect((await stat(join(workspace, 'target.txt'))).mode & 0o777).toBe(0o640)
+})
+
+it.skipIf(process.platform === 'win32').each(['ripgrep', 'grep'])('refuses a missing remote workspace before %s can search the login directory', async engine => {
+  const workspace = await localSshFixture()
+  await writeFile(join(temp!, 'outside-secret.txt'), 'outside-secret-marker\n')
+  const connection = await connectSsh(session, { host: 'dvw-test.invalid', workspace })
+  if (engine === 'ripgrep') await rm(workspace, { recursive: true })
+  else {
+    vi.stubEnv('DVW_TEST_SSH_WORKSPACE', workspace)
+    await writeFile(join(temp!, 'bin', 'rg'), '#!/bin/sh\nrmdir -- "$DVW_TEST_SSH_WORKSPACE" || exit 2\nexit 127\n', { mode: 0o700 })
+  }
+  await expect(sshSearchWorkspace(session, connection.id, { query: 'outside-secret-marker' })).rejects.toMatchObject({ code: 'ssh-failed' })
 })
 
 it.skipIf(process.platform === 'win32')('routes native DSH file tools and references only to the selected SSH workspace and honors read-only mode', async () => {

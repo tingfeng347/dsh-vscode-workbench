@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process'
 import { lstat, mkdtemp, mkdir, readFile, rm, stat, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
+import { createRequire } from 'node:module'
 import { delimiter, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { connectSsh, disconnectSsh, liveSshConnections, sshCreateEntry, sshDeleteEntry, sshGit, sshListFiles, sshOpenFileDownload, sshReadDocument, sshRenameEntry, sshReplaceSearchResults, sshSaveDocument, sshSearchWorkspace, sshUploadFile, switchSshWorkspace } from '../src/ssh.ts'
@@ -186,6 +187,68 @@ it.skipIf(process.platform === 'win32').each(['ripgrep', 'grep'])('refuses a mis
     await writeFile(join(temp!, 'bin', 'rg'), '#!/bin/sh\nrmdir -- "$DVW_TEST_SSH_WORKSPACE" || exit 2\nexit 127\n', { mode: 0o700 })
   }
   await expect(sshSearchWorkspace(session, connection.id, { query: 'outside-secret-marker' })).rejects.toMatchObject({ code: 'ssh-failed' })
+})
+
+it.skipIf(process.platform === 'win32').each(['ripgrep', 'grep'])('returns limited remote search results before collecting more than 8 MiB of %s output', async engine => {
+  const workspace = await localSshFixture()
+  if (engine === 'ripgrep') {
+    const { rgPath } = createRequire(import.meta.url)('@vscode/ripgrep') as { rgPath: string }
+    await symlink(rgPath, join(temp!, 'bin', 'rg'))
+  } else await writeFile(join(temp!, 'bin', 'rg'), '#!/bin/sh\nexit 127\n', { mode: 0o700 })
+  const content = ('needle ' + 'x'.repeat(693) + '\n').repeat(100)
+  await Promise.all(Array.from({ length: 120 }, (_, index) => writeFile(join(workspace, `${index}.txt`), content)))
+  const connection = await connectSsh(session, { host: 'dvw-test.invalid', workspace })
+  const result = await sshSearchWorkspace(session, connection.id, { query: 'needle' })
+  expect(result.limited).toBe(true)
+  expect(result.matches).toHaveLength(2000)
+  expect(result.matches.every(match => match.column === 1 && match.match === 'needle' && match.preview.length === 700)).toBe(true)
+})
+
+it.skipIf(process.platform === 'win32').each(['ripgrep', 'grep'])('marks %s results limited only after an extra match and preserves UTF-16 columns and newline filenames', async engine => {
+  const workspace = await localSshFixture()
+  if (engine === 'ripgrep') {
+    const { rgPath } = createRequire(import.meta.url)('@vscode/ripgrep') as { rgPath: string }
+    await symlink(rgPath, join(temp!, 'bin', 'rg'))
+  } else await writeFile(join(temp!, 'bin', 'rg'), '#!/bin/sh\nexit 127\n', { mode: 0o700 })
+  const filename = '前\n目录:1.txt'
+  await writeFile(join(workspace, filename), '😀前 needle needle\n'.repeat(1000))
+  const connection = await connectSsh(session, { host: 'dvw-test.invalid', workspace })
+  const result = await sshSearchWorkspace(session, connection.id, { query: 'needle' })
+  expect(result.limited).toBe(false)
+  expect(result.matches).toHaveLength(2000)
+  expect(result.matches[0]).toMatchObject({ path: filename, line: 1, column: 5, match: 'needle' })
+  expect(result.matches[1]).toMatchObject({ path: filename, line: 1, column: 12, match: 'needle' })
+  await writeFile(join(workspace, filename), 'needle\n'.repeat(2001))
+  const extra = await sshSearchWorkspace(session, connection.id, { query: 'needle' })
+  expect(extra.limited).toBe(true)
+  expect(extra.matches).toHaveLength(2000)
+})
+
+it.skipIf(process.platform === 'win32')('resets partial search results on SSH retry and decodes split UTF-8 and a final unterminated record', async () => {
+  const workspace = await localSshFixture()
+  const marker = join(temp!, 'attempt')
+  vi.stubEnv('DVW_TEST_SSH_ATTEMPT', marker)
+  await writeFile(join(temp!, 'bin', 'rg'), `#!/usr/bin/env node
+const fs = require('node:fs')
+const marker = process.env.DVW_TEST_SSH_ATTEMPT
+const first = !fs.existsSync(marker)
+fs.writeFileSync(marker, first ? '1' : '2')
+const event = { type: 'match', data: { path: { text: first ? './stale.txt' : './新\\n目录.txt' }, lines: { text: '😀 needle\\r\\n' }, line_number: 1, submatches: [{ start: 5, end: 11, match: { text: 'needle' } }] } }
+const bytes = Buffer.from(JSON.stringify(event))
+if (first) {
+  fs.writeSync(1, Buffer.concat([bytes, Buffer.from('\\n')]))
+  fs.writeSync(2, 'Connection reset by peer\\n')
+  process.exitCode = 255
+} else {
+  const split = bytes.indexOf(Buffer.from('😀')) + 1
+  fs.writeSync(1, bytes.subarray(0, split))
+  setTimeout(() => fs.writeSync(1, bytes.subarray(split)), 20)
+}
+`, { mode: 0o700 })
+  const connection = await connectSsh(session, { host: 'dvw-test.invalid', workspace })
+  const result = await sshSearchWorkspace(session, connection.id, { query: 'needle' })
+  expect(await readFile(marker, 'utf8')).toBe('2')
+  expect(result).toEqual({ limited: false, matches: [{ path: '新\n目录.txt', line: 1, column: 4, match: 'needle', preview: '😀 needle', lineHash: expect.any(String) }] })
 })
 
 it.skipIf(process.platform === 'win32')('routes native DSH file tools and references only to the selected SSH workspace and honors read-only mode', async () => {

@@ -80,3 +80,47 @@ it('only reports ready once a write can actually be observed', async () => {
   expect(events.some(path => path.startsWith('live/'))).toBe(true)
   await watcher.close()
 }, 30000)
+
+it('arms individual files promptly and observes a write immediately after ready', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dvw-file-armed-'))
+  roots.push(root)
+  mkdirSync(join(root, 'live'))
+  writeFileSync(join(root, 'live', 'a.txt'), 'before')
+  const events: string[] = []
+  const watcher = createWorkspaceWatcher({ workspace: root, ignored: () => false, onChange: path => events.push(path) })
+  try {
+    const start = performance.now()
+    await watcher.apply({ version: 1, paths: ['', 'live/a.txt'] })
+    expect(performance.now() - start).toBeLessThan(1000)
+    writeFileSync(join(root, 'live', 'a.txt'), 'after')
+    await settle(500)
+    expect(events).toContain('live/a.txt')
+    const repeat = performance.now()
+    await watcher.apply({ version: 2, paths: ['', 'live/a.txt'] })
+    expect(performance.now() - repeat).toBeLessThan(1000)
+  } finally { await watcher.close() }
+}, 10000)
+
+it('keeps watching when a file disappears while applying the manifest and is then recreated', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'dvw-file-disappeared-'))
+  roots.push(root)
+  const file = join(root, 'a.txt')
+  writeFileSync(file, 'before')
+  let removed = false
+  const events: string[] = []
+  const watcher = createWorkspaceWatcher({
+    workspace: root,
+    ignored: absolute => {
+      // External deletion between path validation and readiness inspection.
+      if (absolute === file && !removed) { rmSync(file); removed = true }
+      return false
+    },
+    onChange: path => events.push(path),
+  })
+  try {
+    await expect(watcher.apply({ version: 1, paths: ['', 'a.txt'] })).resolves.toMatchObject({ watching: ['', 'a.txt'] })
+    writeFileSync(file, 'recreated')
+    await settle(500)
+    expect(events).toContain('a.txt')
+  } finally { await watcher.close() }
+}, 10000)

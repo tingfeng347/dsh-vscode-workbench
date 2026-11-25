@@ -18,9 +18,7 @@ Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
 let root: Root | undefined
 
-class FakeSocket {
-  onmessage?: (event: { data: string }) => void
-  onopen?: () => void
+class FakeSocket extends EventTarget {
   close() {}
 }
 

@@ -44,7 +44,7 @@ import { TS_INTELLISENSE_KEY, disposeTypeScriptProject, indexTypeScriptProject, 
 import { ADD_TO_DSH_SHORTCUT, dshReferenceInsert, insertIntoDshComposer, isAddToDshShortcut, type DshLineRange, type DshReferenceInsert, type DshReferenceOptions } from './dshComposer.ts'
 import { DocumentPreview, documentPreviewKind, type DocumentPreviewKind } from './documentPreview.tsx'
 import { toggleTerminal } from './shortcuts.ts'
-import { websocketUrl } from './websocket.ts'
+import { openWorkbenchWebSocket } from './websocket.ts'
 import { resetWorkspaceDocuments, WorkspaceRequestScope } from './workspaceState.ts'
 import { WorkbenchSettings } from './SettingsPanel.tsx'
 import { settingsHost } from './settingsHost.ts'
@@ -1698,9 +1698,8 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   useEffect(() => {
     if (!snapshot.visible || sessionId === undefined || workspace === undefined) return
     const query = new URLSearchParams({ sessionId })
-    const url = websocketUrl(`/dsh-vscode/ws/files?${query.toString()}`)
-    if (url === undefined) return
-    const ws = new WebSocket(url)
+    const ws = openWorkbenchWebSocket(`/dsh-vscode/ws/files?${query.toString()}`)
+    if (ws === undefined) return
     let closed = false
     // Everything currently visible: the root, the expanded directories and the open files.
     let watchPaths: string[] = ['']
@@ -1730,7 +1729,7 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
       if (closed) return
       refreshChangedTabs(paths)
     }
-    ws.onopen = () => {
+    ws.addEventListener('open', () => {
       refresh()
       window.addEventListener('dvw-watch-paths', onWatchPaths)
       window.addEventListener('dvw-watch-tabs', onWatchTabs)
@@ -1740,21 +1739,21 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
       // Never reset the expanded set here: the explorer may be unmounted and unable to re-send it.
       firstReadyPending = true
       syncWatch(getWatchExpanded())
-    }
-    ws.onmessage = event => {
+    })
+    ws.addEventListener('message', event => {
       try { const value = JSON.parse(String(event.data)) as { type?: string; paths?: string[]; added?: string[] }; if (value.type === 'files.ready') {
         setWatchSkipped(Array.isArray((value as { skipped?: Array<{ path: string; reason: string }> }).skipped) ? (value as { skipped: Array<{ path: string; reason: string }> }).skipped : [])
         if (!firstReadyPending && Array.isArray(value.added) && value.added.length > 0) refresh(value.added)
         firstReadyPending = false
         return
       } if (Array.isArray(value.paths) && value.paths.every(path => typeof path === 'string')) refresh(value.paths) } catch { /* Ignore invalid notifications. */ }
-    }
+    })
     let retryTimer: ReturnType<typeof setTimeout> | undefined
-    ws.onclose = () => {
+    ws.addEventListener('close', () => {
       if (closed) return
       // A dropped socket silently stops every notification; reconnect and resend the manifest.
       retryTimer = setTimeout(() => setWatchRetry(value => value + 1), nextRetryDelay(watchRetry))
-    }
+    })
     return () => { closed = true; clearTimeout(retryTimer); window.removeEventListener('dvw-watch-paths', onWatchPaths); window.removeEventListener('dvw-watch-tabs', onWatchTabs); ws.close() }
   }, [snapshot.visible, sessionId, workspace, refreshChangedTabs, watchRetry])
   useEffect(() => {

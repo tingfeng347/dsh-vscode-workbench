@@ -66,12 +66,11 @@ let reviewChanges: Array<{
   created: boolean
 }> = []
 const sockets: FakeSocket[] = []
-class FakeSocket {
-  onmessage?: (event: { data: string }) => void
-  onopen?: () => void
-  constructor() { sockets.push(this) }
+class FakeSocket extends EventTarget {
+  static OPEN = 1
+  constructor() { super(); sockets.push(this) }
   close() {}
-  change(paths: string[]) { this.onmessage?.({ data: JSON.stringify({ paths }) }) }
+  change(paths: string[]) { this.dispatchEvent(new MessageEvent('message', { data: JSON.stringify({ paths }) })) }
 }
 afterEach(async () => {
   await act(async () => { root?.unmount() }); root = undefined
@@ -833,7 +832,7 @@ it('restores unsaved drafts after remounting and detects a changed disk version'
   await act(async () => root!.unmount()); root = undefined
   disk = 'external edit'; revision = 'external'
   await mount(service)
-  await act(async () => sockets.at(-1)!.onopen?.())
+  await act(async () => sockets.at(-1)!.dispatchEvent(new Event('open')))
   expect(state.editor!.value).toBe('recovered draft')
   expect(document.body.textContent).toContain('磁盘文件已变化')
 })
@@ -886,6 +885,21 @@ it('reloads a clean document when its path changes on disk', async () => {
   disk = 'updated by DSH'; revision = 'external'
   await act(async () => sockets.at(-1)!.change(['a.txt']))
   expect(state.editor!.value).toBe('updated by DSH')
+})
+
+it('reloads external changes through the authenticated desktop socket carrier', async () => {
+  const carrier = Object.assign(new EventTarget(), { readyState: 1, send: vi.fn(), close: vi.fn() })
+  const createWebSocket = vi.fn(() => carrier)
+  vi.stubGlobal('__DSH_TRANSPORT__', { streamBaseUrl: 'http://127.0.0.1:4312', createWebSocket })
+  await setup()
+  await act(async () => carrier.dispatchEvent(new Event('open')))
+  expect(carrier.send).toHaveBeenCalledWith(JSON.stringify({ type: 'watch', version: 1, paths: ['', 'a.txt'] }))
+  disk = 'desktop external edit'; revision = 'external'
+  await act(async () => carrier.dispatchEvent(new MessageEvent('message', {
+    data: JSON.stringify({ type: 'files.changed', paths: ['a.txt'] }),
+  })))
+  expect(state.editor!.value).toBe('desktop external edit')
+  expect(createWebSocket).toHaveBeenCalledWith(expect.stringContaining('/dsh-vscode/ws/files?sessionId=s'))
 })
 
 it('shows a retry action after a local read fails and opens the recovered document', async () => {

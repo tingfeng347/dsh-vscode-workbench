@@ -105,7 +105,7 @@ dsh plugin --profile web add dsh-vscode-workbench
 | `Ctrl+Alt+B` | 显示或隐藏 DSH 对话栏 |
 | `` Ctrl+` `` | 显示或隐藏终端 |
 | `` Ctrl+Shift+` `` | 新建终端 |
-| `Ctrl+T` / `⌘T` | 新建内置浏览器标签 |
+| `Ctrl+T` / `⌘T` | 打开官方浏览器 |
 | `Ctrl/⌘+Alt+K` | 将当前文件或选中的代码添加到 DSH 对话（编辑器内） |
 | `Alt/Option+\` | 手动触发 AI 代码补全（启用后） |
 | `Tab` / `Esc` | 接受或隐藏 AI 行内建议 |

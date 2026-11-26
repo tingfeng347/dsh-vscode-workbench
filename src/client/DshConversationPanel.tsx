@@ -5,6 +5,7 @@ import type { WorkbenchColorScheme } from './service.ts'
 
 export const CONVERSATION_OPEN_ICON = 'dsh-vscode-workbench.open-conversation'
 export const CONVERSATION_CLOSE_ICON = 'dsh-vscode-workbench.close-conversation'
+export const NATIVE_SIDEBAR_OPEN_ICON = 'dsh-vscode-workbench.open-native-sidebar'
 
 /** Window with an inward arrow, sized by the official context menu's icon cell. */
 export function DshConversationOpenIcon() {
@@ -16,6 +17,13 @@ export function DshConversationOpenIcon() {
 export function DshConversationCloseIcon() {
   return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" aria-hidden="true">
     <path d="m4 4 8 8M12 4l-8 8"/>
+  </svg>
+}
+
+export function DshNativeSidebarOpenIcon() {
+  return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="2" y="2.5" width="12" height="11" rx="1.2"/>
+    <path d="M9.5 2.5v11M5 6l2 2-2 2"/>
   </svg>
 }
 
@@ -43,6 +51,7 @@ export function DshConversationMenu(props: {
   onOpen(): void
   onReturn(): void
   onClose(): void
+  onOpenSidebar?(): void
 }) {
   const current = useRef(props)
   current.current = props
@@ -77,6 +86,16 @@ export function DshConversationMenu(props: {
             if (latest.sessionId === target.sessionId) latest.onClose()
           },
         },
+        ...(state.onOpenSidebar === undefined ? [] : [{
+          id: 'open-native-sidebar',
+          label: '打开侧边栏',
+          icon: { key: NATIVE_SIDEBAR_OPEN_ICON },
+          separatorBefore: false,
+          run: () => {
+            const latest = current.current
+            if (latest.sessionId === target.sessionId) latest.onOpenSidebar?.()
+          },
+        }]),
       ]
     },
   }), [props.menus])

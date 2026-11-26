@@ -105,7 +105,7 @@ Installing from the DSH Plugins page or a marketplace enables the plugin automat
 | `Ctrl+Alt+B` | Toggle the DSH conversation panel |
 | `` Ctrl+` `` | Show or hide the terminal |
 | `` Ctrl+Shift+` `` | Create a terminal |
-| `Ctrl+T` / `⌘T` | Open a built-in browser tab |
+| `Ctrl+T` / `⌘T` | Open the official browser |
 | `Ctrl/Cmd+Alt+K` | Add the current file or selected code to DSH chat from the editor |
 | `Alt/Option+\` | Trigger AI code completion when enabled |
 | `Tab` / `Esc` | Accept or dismiss an AI inline suggestion |

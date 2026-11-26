@@ -129,7 +129,7 @@ describe('workbench dark theme', () => {
   it('offers VS Code tab close actions from the context menu', () => {
     const workbench = read('src/client/Workbench.tsx')
     const styles = read('src/client/styles.ts')
-    expect(workbench).toContain('onContextMenu={event=>{event.preventDefault();setBrowserId(undefined);setDshTabActive(false);setActive(tab.path);setTabMenu(')
+    expect(workbench).toContain('onContextMenu={event=>{event.preventDefault();setDshTabActive(false);setActive(tab.path);setTabMenu(')
     expect(workbench).toContain('dvw-tab-menu')
     expect(workbench).toContain('关闭其他')
     expect(workbench).toContain('关闭右侧标签页')
@@ -148,7 +148,7 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('border-left:1px solid var(--dvw-border);border-top:1px solid var(--dvw-border);border-right:1px solid var(--dvw-border);border-bottom:1px solid var(--dvw-border);border-radius:8px;margin-left:3px;overflow:hidden}')
     expect(styles).not.toContain('.dvw-overlay[data-dvw-bottom-panel] .dvw-main')
     expect(styles).toContain('.dvw-tabs[data-empty]{display:none}')
-    expect(read('src/client/Workbench.tsx')).toContain('data-empty={(tabs.length===0&&conversation===undefined&&dshPanelId===undefined&&browserTabs.length===0)||undefined}')
+    expect(read('src/client/Workbench.tsx')).toContain('data-empty={(tabs.length===0&&conversation===undefined&&dshPanelId===undefined)||undefined}')
     expect(read('src/client/Workbench.tsx')).toContain('data-dvw-bottom-panel={snapshot.bottomPanel||undefined}')
     expect(styles).toContain('.dvw-bottom{grid-column:3;grid-row:2;height:260px;min-height:120px;border-top:1px solid var(--dvw-border);border-left:1px solid var(--dvw-border);border-right:1px solid var(--dvw-border);border-bottom:1px solid var(--dvw-border);border-radius:8px;margin-top:4px;margin-left:3px')
     expect(styles).toContain('.dvw-tabs{height:35px;background:linear-gradient(to top,var(--dvw-border) 0 1px,var(--dvw-base) 1px 100%)')

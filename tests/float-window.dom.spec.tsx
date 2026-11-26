@@ -47,7 +47,8 @@ async function mount(dshPanelId?: string, onOpenDshPanel?: (id: string) => void,
             { provider: 'deepseek-official', model: 'deepseek-v4-pro', id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', providerName: 'DeepSeek' },
           ], unavailable: [], defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' } }
         : method === 'git.status' ? {repository:'/tmp/audit', branch:'main', ahead:0, behind:0, changes:[]}
-        : method === 'fs.list' ? [{ name: 'sidebar-reference.txt', path: 'sidebar-reference.txt', kind: 'file' }]
+        : method === 'fs.list' ? [{ name: 'sidebar-reference.txt', path: 'sidebar-reference.txt', kind: 'file' }, { name: 'index.html', path: 'index.html', kind: 'file' }]
+        : method === 'preview.site' ? { url: 'http://127.0.0.1:8123/index.html' }
         : method === 'fs.read' ? { path: 'sidebar-reference.txt', content: 'hello', revision: 'r1', size: 5, binary: false, tooLarge: false }
         : ['search', 'lsp.status', 'terminal.list'].includes(method ?? '') ? [] : {}
     return { ok: true, json: async () => ({ ok: true, value }) }
@@ -294,7 +295,7 @@ it('falls back to filling the DSH window when the host rejects fullscreen', asyn
   expect(document.querySelectorAll('.dvw-float-handle')).toHaveLength(0)
 })
 
-it('fits the conversation and restores an existing browser after opening the native sidebar', async () => {
+it('fits the conversation beside the official dock while keeping file tabs active', async () => {
   vi.stubGlobal('innerWidth', 1000)
   const column = document.createElement('div')
   column.setAttribute('data-rightbar-col', '')
@@ -311,17 +312,13 @@ it('fits the conversation and restores an existing browser after opening the nat
       else panel.setAttribute('data-sidebar-right-open', 'true')
     }),
   } as unknown as Parameters<typeof Workbench>[0]['rightSidebar']
-  const focus = vi.fn()
-  const browser = {
-    getSnapshot: () => ({ available: true, tabs: [{ id: 'existing', sessionId: 's', title: 'Existing browser' }] }),
-    subscribe: () => () => {},
-    focus,
-  } as unknown as Parameters<typeof Workbench>[0]['browser']
-  await mount(undefined, undefined, { rightSidebar, browser })
+  await mount(undefined, undefined, { rightSidebar })
 
   const overlay = document.querySelector<HTMLElement>('.dvw-overlay')!
   const sidebarToggle = document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!
-  const browserTab = document.querySelector<HTMLButtonElement>('[data-dvw-browser-tab="existing"]')!
+  await act(async () => document.querySelector<HTMLElement>('[data-tree-path="sidebar-reference.txt"]')!.click())
+  const fileTab = document.querySelector<HTMLButtonElement>('[data-tab-path="sidebar-reference.txt"]')!
+  expect(document.querySelector('[data-dvw-browser-tab]')).toBeNull()
   await act(async () => sidebarToggle.click())
   expect(sidebarToggle.getAttribute('aria-expanded')).toBe('true')
   expect(document.body.style.getPropertyValue('--dvw-native-sidebar-width')).toBe('300px')
@@ -329,10 +326,9 @@ it('fits the conversation and restores an existing browser after opening the nat
   expect(overlay.style.getPropertyValue('--dvw-chat-width')).toBe('440px')
   expect(overlay.style.getPropertyValue('--dvw-side-width')).toBe('65px')
 
-  await act(async () => browserTab.click())
+  await act(async () => sidebarToggle.click())
   expect(sidebarToggle.getAttribute('aria-expanded')).toBe('false')
-  expect(focus).toHaveBeenCalledWith('existing')
-  expect(browserTab.dataset.active).toBe('true')
+  expect(fileTab.dataset.active).toBe('true')
   expect(document.body.style.getPropertyValue('--dvw-native-sidebar-width')).toBe('')
 
   await act(async () => sidebarToggle.click())
@@ -469,25 +465,6 @@ it('reveals the conversation when adding a file from a cramped workspace', async
   expect(conversation.querySelector('textarea')?.value).toContain('draft')
 })
 
-it('never focuses an older browser tab while changing to another session', async () => {
-  const focus = vi.fn()
-  const previous = { id: 'old', sessionId: 's', title: 'Old browser' }
-  const browser = {
-    getSnapshot: () => ({ available: true, tabs: [previous] }),
-    subscribe: () => () => {},
-    focus,
-  } as unknown as Parameters<typeof Workbench>[0]['browser']
-  const service = await mount(undefined, undefined, { rightSidebar: mockNativeDock('push'), browser })
-  await act(async () => document.querySelector<HTMLButtonElement>('[data-dvw-browser-tab="old"]')!.click())
-  expect(focus).toHaveBeenCalledWith('old')
-  const toggle = document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!
-  await act(async () => toggle.click())
-  focus.mockClear()
-  await act(async () => root!.render(<Workbench service={service} browser={browser} sessionId="other" cwd="/tmp/audit"/>))
-  expect(focus).not.toHaveBeenCalled()
-  expect(document.querySelector('[data-dvw-browser-tab="old"]')).toBeNull()
-})
-
 it('reports the fitted separator range without saving the temporary left-pane width', async () => {
   vi.stubGlobal('innerWidth', 1042)
   await mount(undefined, undefined, { rightSidebar: mockNativeDock('push', 299.4) })
@@ -505,4 +482,98 @@ it('reports the fitted separator range without saving the temporary left-pane wi
   await act(async () => toggle.click())
   expect(separator.getAttribute('aria-valuenow')).toBe('210')
   expect(separator.getAttribute('aria-valuemin')).toBe('210')
+})
+
+
+it('opens the Workbench browser shortcut and explicit links in the official dock', async () => {
+  const open = vi.fn(async () => undefined)
+  const browser = { open } as unknown as Parameters<typeof Workbench>[0]['browser']
+  await mount(undefined, undefined, { rightSidebar: mockNativeDock('push'), browser })
+  await act(async () => document.querySelector<HTMLElement>('[data-tree-path="sidebar-reference.txt"]')!.click())
+  const file = document.querySelector<HTMLButtonElement>('[data-tab-path="sidebar-reference.txt"]')!
+  const toggle = document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!
+  await act(async () => window.dispatchEvent(new Event('dvw-browser-new')))
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  expect(open).toHaveBeenLastCalledWith('s', expect.any(AbortSignal), undefined)
+  expect(file.dataset.active).toBe('true')
+  expect(document.querySelector('[data-dvw-browser-tab]')).toBeNull()
+  await act(async () => window.dispatchEvent(new CustomEvent('dvw-open-external-url', { detail: 'https://example.com/docs' })))
+  expect(open).toHaveBeenLastCalledWith('s', expect.any(AbortSignal), 'https://example.com/docs')
+  expect(toggle.getAttribute('aria-expanded')).toBe('true')
+  expect(file.dataset.active).toBe('true')
+  expect(document.querySelector('[data-browser-active]')).toBeNull()
+})
+
+
+it('keeps HTML previews in the official dock and preserves the current file', async () => {
+  const open = vi.fn(async () => undefined)
+  const browser = { open } as unknown as Parameters<typeof Workbench>[0]['browser']
+  await mount(undefined, undefined, { rightSidebar: mockNativeDock('push'), browser })
+  await act(async () => document.querySelector<HTMLElement>('[data-tree-path="sidebar-reference.txt"]')!.click())
+  await act(async () => document.querySelector<HTMLElement>('[data-tree-path="index.html"]')!.click())
+  expect(open).toHaveBeenLastCalledWith('s', expect.any(AbortSignal), 'http://127.0.0.1:8123/index.html')
+  expect(document.querySelector('[data-act-id="native-sidebar"]')?.getAttribute('aria-expanded')).toBe('true')
+  expect(document.querySelector('[data-tab-path="sidebar-reference.txt"]')?.getAttribute('data-active')).toBe('true')
+  expect(document.querySelector('[data-tab-path="index.html"]')).toBeNull()
+  expect(document.querySelector('[data-dvw-browser-tab], [data-dvw-browser-page], [data-browser-active]')).toBeNull()
+})
+
+it('honors the system default for explicit links without opening the official dock', async () => {
+  localStorage.setItem('dvw:default-browser', 'system')
+  const open = vi.fn(async () => undefined)
+  const external = vi.fn()
+  vi.stubGlobal('open', external)
+  const browser = { open } as unknown as Parameters<typeof Workbench>[0]['browser']
+  await mount(undefined, undefined, { rightSidebar: mockNativeDock('push'), browser })
+  await act(async () => window.dispatchEvent(new CustomEvent('dvw-open-external-url', { detail: 'https://example.com/docs' })))
+  expect(external).toHaveBeenCalledWith('https://example.com/docs', '_blank', 'noopener,noreferrer')
+  expect(open).not.toHaveBeenCalled()
+  expect(document.querySelector('[data-act-id="native-sidebar"]')?.getAttribute('aria-expanded')).toBe('false')
+})
+
+it('opens the official sidebar from the conversation menu and keeps it open on repeat', async () => {
+  let menu: Parameters<DshConversationMenus['register']>[0] | undefined
+  await mount(undefined, undefined, {
+    rightSidebar: mockNativeDock('push'),
+    conversationMenus: { register: value => { menu = value; return () => {} } },
+  })
+  const action = menu!.resolve({ sessionId: 's' }).find(item => item.id === 'open-native-sidebar')!
+  expect(action).toBeDefined()
+  await act(async () => action.run())
+  expect(document.querySelector('[data-act-id="native-sidebar"]')?.getAttribute('aria-expanded')).toBe('true')
+  await act(async () => menu!.resolve({ sessionId: 's' }).find(item => item.id === 'open-native-sidebar')!.run())
+  expect(document.querySelector('[data-act-id="native-sidebar"]')?.getAttribute('aria-expanded')).toBe('true')
+  expect(menu!.resolve({ sessionId: 'other' })).toEqual([])
+})
+
+it('cancels a pending official browser open when the selected Session changes', async () => {
+  let complete!: () => void
+  const open = vi.fn(() => new Promise<void>(resolve => { complete = resolve }))
+  const browser = { open } as unknown as Parameters<typeof Workbench>[0]['browser']
+  const rightSidebar = mockNativeDock('push')
+  const service = await mount(undefined, undefined, { rightSidebar, browser })
+  await act(async () => window.dispatchEvent(new Event('dvw-browser-new')))
+  const signal = (open.mock.calls[0] as unknown as [string, AbortSignal])[1]
+  await act(async () => root!.render(<Workbench service={service} browser={browser} rightSidebar={rightSidebar} sessionId="other" cwd="/tmp/audit"/>))
+  expect(signal.aborted).toBe(true)
+  await act(async () => complete())
+  expect(document.querySelector('[data-act-id="native-sidebar"]')?.getAttribute('aria-expanded')).toBe('false')
+  expect(document.querySelector('[data-dvw-browser-tab], [data-dvw-browser-page]')).toBeNull()
+})
+
+it('does not open an HTML preview whose Session changed while its address was loading', async () => {
+  const open = vi.fn(async () => undefined)
+  const browser = { open } as unknown as Parameters<typeof Workbench>[0]['browser']
+  const rightSidebar = mockNativeDock('push')
+  const service = await mount(undefined, undefined, { rightSidebar, browser })
+  const previousFetch = fetch
+  let complete!: () => void
+  vi.stubGlobal('fetch', vi.fn((input: RequestInfo | URL, init?: RequestInit) => String(input).endsWith('/preview.site')
+    ? new Promise<Response>(resolve => { complete = () => resolve({ ok: true, json: async () => ({ ok: true, value: { url: 'http://127.0.0.1:8123/index.html' } }) } as Response) })
+    : previousFetch(input, init)))
+  await act(async () => document.querySelector<HTMLElement>('[data-tree-path="index.html"]')!.click())
+  await act(async () => root!.render(<Workbench service={service} browser={browser} rightSidebar={rightSidebar} sessionId="other" cwd="/tmp/audit"/>))
+  await act(async () => complete())
+  expect(open).not.toHaveBeenCalled()
+  expect(document.querySelector('[data-act-id="native-sidebar"]')?.getAttribute('aria-expanded')).toBe('false')
 })

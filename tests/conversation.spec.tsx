@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
-import { CONVERSATION_CLOSE_ICON, CONVERSATION_OPEN_ICON, DshConversationCloseIcon, DshConversationMenu, DshConversationOpenIcon, DshConversationPanel, DshReviewActions, findDshConversationRoot, type DshConversationMenus } from '../src/client/DshConversationPanel.tsx'
+import { CONVERSATION_CLOSE_ICON, CONVERSATION_OPEN_ICON, DshConversationCloseIcon, DshConversationMenu, DshConversationOpenIcon, DshNativeSidebarOpenIcon, DshConversationPanel, DshReviewActions, findDshConversationRoot, type DshConversationMenus } from '../src/client/DshConversationPanel.tsx'
 import { SshChatTarget } from '../src/client/SshChatTarget.tsx'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -42,7 +42,7 @@ it('keeps native menu registration stable and ignores actions from a previous se
   expect(dispose).toHaveBeenCalledTimes(1)
 })
 
-it.each([DshConversationOpenIcon, DshConversationCloseIcon])('renders the conversation menu icon as a compact current-color glyph: %s', async Icon => {
+it.each([DshConversationOpenIcon, DshConversationCloseIcon, DshNativeSidebarOpenIcon])('renders the conversation menu icon as a compact current-color glyph: %s', async Icon => {
   const node = document.createElement('div')
   document.body.append(node)
   const root = createRoot(node)
@@ -50,6 +50,27 @@ it.each([DshConversationOpenIcon, DshConversationCloseIcon])('renders the conver
     await act(async () => root.render(<Icon/>))
     expect(node.querySelector('svg')?.getAttribute('viewBox')).toBe('0 0 16 16')
     expect(node.querySelector('svg')?.getAttribute('stroke')).toBe('currentColor')
+  } finally { await act(async () => root.unmount()) }
+})
+
+it('offers an icon-labelled native sidebar opener scoped to the current session', async () => {
+  const node = document.createElement('div')
+  document.body.append(node)
+  const root = createRoot(node)
+  let contribution: Parameters<DshConversationMenus['register']>[0] | undefined
+  const menus = { register: (value: NonNullable<typeof contribution>) => { contribution = value; return () => {} } }
+  const openSidebar = vi.fn()
+  const noop = () => {}
+  try {
+    await act(async () => root.render(<DshConversationMenu menus={menus} sessionId="a" editor={false} onOpen={noop} onReturn={noop} onClose={noop} onOpenSidebar={openSidebar}/>))
+    const action = contribution!.resolve({ sessionId: 'a' }).find(item => item.id === 'open-native-sidebar')
+    expect(action).toMatchObject({ label: '打开侧边栏', icon: { key: 'dsh-vscode-workbench.open-native-sidebar' } })
+    action!.run()
+    expect(openSidebar).toHaveBeenCalledTimes(1)
+    await act(async () => root.render(<DshConversationMenu menus={menus} sessionId="b" editor onOpen={noop} onReturn={noop} onClose={noop} onOpenSidebar={openSidebar}/>))
+    action!.run()
+    expect(openSidebar).toHaveBeenCalledTimes(1)
+    expect(contribution!.resolve({ sessionId: 'b' }).some(item => item.id === 'open-native-sidebar')).toBe(true)
   } finally { await act(async () => root.unmount()) }
 })
 

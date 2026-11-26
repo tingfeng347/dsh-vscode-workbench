@@ -210,6 +210,44 @@ function layoutPane(pane: Element) {
   vi.spyOn(pane, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 600, 400))
 }
 
+it('opens the workspace switcher from an empty editor instead of a browser', async () => {
+  await setup(false, { paths: [] })
+  const actions = document.querySelector('.dvw-start-tools')!
+  const buttons = [...actions.querySelectorAll<HTMLButtonElement>('button')]
+  expect(buttons.map(button => button.textContent)).toEqual(['新建终端', '打开工作区'])
+  await act(async () => buttons.find(button => button.textContent === '打开工作区')!.click())
+  expect(document.querySelector('[role="dialog"][aria-label="打开工作区"]')).not.toBeNull()
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+  expect(document.querySelector('[role="dialog"][aria-label="打开工作区"]')).toBeNull()
+})
+
+it('closes only the selected empty editor group and preserves conversation and file drafts', async () => {
+  residentConversation()
+  await setup(false, {
+    groups: [{ id: 'pane-1', paths: ['a.txt'], active: 'a.txt' }, { id: 'pane-2', paths: [] }, { id: 'pane-3', paths: [] }],
+    focused: 'pane-1',
+    layout: {
+      kind: 'split', id: 's1', direction: 'row', ratio: 0.5, first: { kind: 'leaf', group: 'pane-1' },
+      second: { kind: 'split', id: 's2', direction: 'column', ratio: 0.5, first: { kind: 'leaf', group: 'pane-2' }, second: { kind: 'leaf', group: 'pane-3' } },
+    },
+  })
+  await act(async () => state.editor!.onChange('unsaved file draft'))
+  await openConversation()
+  const closeEmpty = (id: string) => document.querySelector<HTMLButtonElement>(`.dvw-pane[data-group="${id}"] button[title="关闭当前空白编辑组"]`)!
+  await act(async () => closeEmpty('pane-2').click())
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(2)
+  expect(document.querySelector('.dvw-pane[data-group="pane-2"]')).toBeNull()
+  expect(document.querySelector('.dvw-pane[data-focused]')?.getAttribute('data-group')).toBe('pane-1')
+  expect(document.querySelector('[data-dvw-conversation-tab]')).not.toBeNull()
+  await act(async () => closeEmpty('pane-3').click())
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(1)
+  expect(document.querySelector('[data-tab-path="a.txt"]')).not.toBeNull()
+  expect(document.querySelector('[data-dvw-conversation-tab]')).not.toBeNull()
+  expect(document.querySelectorAll('.dvw-split')).toHaveLength(0)
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-tab-path="a.txt"]')!.click())
+  expect(state.editor!.value).toBe('unsaved file draft')
+})
+
 it('opens the official conversation from its More menu and returns it without dragging or losing drafts', async () => {
   const surface = residentConversation()
   const composer = surface.querySelector('textarea')!

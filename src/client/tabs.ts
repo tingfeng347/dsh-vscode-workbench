@@ -17,7 +17,8 @@ export function moveTabToGroup<T extends { path: string }>(groups: readonly TabG
     if (group.id !== from && group.id !== to) return group
     if (from === to) return { ...group, tabs: placed, active: path }
     if (group.id === from) return { ...group, tabs: rest, active: group.active === path ? rest.at(-1)?.path : group.active }
-    return { ...group, tabs: [...group.tabs, tab], active: path }
+    const at = Math.max(0, Math.min(index ?? group.tabs.length, group.tabs.length))
+    return { ...group, tabs: [...group.tabs.slice(0, at), tab, ...group.tabs.slice(at)], active: path }
   })
 }
 

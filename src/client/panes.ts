@@ -2,6 +2,12 @@
 
 export type SplitDirection = 'row' | 'column'
 export type SplitPosition = 'first' | 'second'
+export interface PaneDropPosition {
+  direction: SplitDirection
+  position: SplitPosition
+  /** Corners split the selected horizontal half again, above or below. */
+  vertical?: SplitPosition
+}
 
 export interface PaneLeaf { kind: 'leaf'; group: string }
 export interface PaneSplit {
@@ -47,6 +53,15 @@ export function splitAt(node: PaneNode, group: string, direction: SplitDirection
   return second === node.second ? node : { ...node, second }
 }
 
+export function dropPaneCount(drop: PaneDropPosition): number { return drop.vertical === undefined ? 1 : 2 }
+
+/** Keep the existing group in the opposite half; the unused quarter is an empty editor group. */
+export function splitForDrop(node: PaneNode, group: string, drop: PaneDropPosition, added: string, empty: string): PaneNode {
+  const tree = splitAt(node, group, drop.direction, added, drop.position, `split-${added}`)
+  if (tree === node || drop.vertical === undefined) return tree
+  return splitAt(tree, added, 'column', empty, drop.vertical === 'first' ? 'second' : 'first', `split-${empty}`)
+}
+
 /** Drop a group's leaf and collapse the split that held it, so the survivor takes the space. */
 export function removeGroup(node: PaneNode, group: string): PaneNode | undefined {
   if (node.kind === 'leaf') return node.group === group ? undefined : node
@@ -66,10 +81,13 @@ export function setRatio(node: PaneNode, id: string, ratio: number): PaneNode {
 }
 
 /** The edge whose drop zone the pointer is in, or undefined when it means "open here". */
-export function dropPosition(rect: { width: number; height: number }, x: number, y: number, edge = 0.25): { direction: SplitDirection; position: SplitPosition } | undefined {
+export function dropPosition(rect: { width: number; height: number }, x: number, y: number, edge = 0.25): PaneDropPosition | undefined {
   if (rect.width <= 0 || rect.height <= 0) return undefined
   const left = x / rect.width
   const top = y / rect.height
+  if ((left <= edge || left >= 1 - edge) && (top <= edge || top >= 1 - edge)) {
+    return { direction: 'row', position: left <= edge ? 'first' : 'second', vertical: top <= edge ? 'first' : 'second' }
+  }
   const candidates = [
     { distance: left, value: { direction: 'row' as const, position: 'first' as const } },
     { distance: 1 - left, value: { direction: 'row' as const, position: 'second' as const } },
@@ -78,6 +96,14 @@ export function dropPosition(rect: { width: number; height: number }, x: number,
   ]
   candidates.sort((a, b) => a.distance - b.distance)
   return candidates[0]!.distance <= edge ? candidates[0]!.value : undefined
+}
+
+/** Find the pane rectangle under the pointer without relying on event targets. */
+export function paneAtPoint<T extends Element>(panes: readonly T[], x: number, y: number): T | undefined {
+  return panes.find(pane => {
+    const rect = pane.getBoundingClientRect()
+    return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom
+  })
 }
 
 /** Keep a persisted tree usable: drop leaves whose group is gone and re-anchor a missing first group. */

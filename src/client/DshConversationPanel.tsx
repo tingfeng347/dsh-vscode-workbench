@@ -3,6 +3,78 @@ import { createPortal } from 'react-dom'
 import { placeDshSurface, watchDshPlacement } from './dshPlacement.ts'
 import type { WorkbenchColorScheme } from './service.ts'
 
+export const CONVERSATION_OPEN_ICON = 'dsh-vscode-workbench.open-conversation'
+
+/** Window with an inward arrow, sized by the official context menu's icon cell. */
+export function DshConversationOpenIcon() {
+  return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d="M6 2.5h7.5v11H6M6 5.5h7.5M2 8h7M6.5 5.5 9 8l-2.5 2.5"/>
+  </svg>
+}
+
+/** Narrow contract for DSH's optional native Session Header More menu service. */
+export interface DshConversationMenus {
+  register(contribution: {
+    id: string
+    target: 'sessionHeader'
+    order: number
+    resolve(target: { readonly sessionId: string }): readonly {
+      id: string
+      label: string
+      icon?: { key: string }
+      separatorBefore: boolean
+      run(): void
+    }[]
+  }): () => void
+}
+
+/** Add placement actions to the official More menu, without adding conversation UI. */
+export function DshConversationMenu(props: {
+  menus?: DshConversationMenus
+  sessionId: string
+  editor: boolean
+  onOpen(): void
+  onReturn(): void
+  onClose(): void
+}) {
+  const current = useRef(props)
+  current.current = props
+  useLayoutEffect(() => props.menus?.register({
+    id: 'dsh-vscode-workbench-conversation',
+    target: 'sessionHeader',
+    order: 60,
+    resolve: target => {
+      const state = current.current
+      if (target.sessionId !== state.sessionId) return []
+      const editor = state.editor
+      return [
+        {
+          id: editor ? 'return-to-sidebar' : 'open-in-editor',
+          label: editor ? '移回侧栏' : '在编辑区打开对话',
+          ...(editor ? {} : { icon: { key: CONVERSATION_OPEN_ICON } }),
+          separatorBefore: true,
+          run: () => {
+            const latest = current.current
+            if (latest.sessionId !== target.sessionId) return
+            if (editor) latest.onReturn()
+            else latest.onOpen()
+          },
+        },
+        {
+          id: 'close-conversation-bar',
+          label: '关闭对话栏',
+          separatorBefore: false,
+          run: () => {
+            const latest = current.current
+            if (latest.sessionId === target.sessionId) latest.onClose()
+          },
+        },
+      ]
+    },
+  }), [props.menus])
+  return null
+}
+
 /** Locate the resident DSH conversation without depending on generated CSS module names. */
 export function findDshConversationRoot(documentRoot: Document = document): HTMLElement | null {
   const roots = new Set<HTMLElement>()
@@ -28,12 +100,13 @@ export function findDshConversationRoot(documentRoot: Document = document): HTML
   return visible ?? fallback ?? first ?? null
 }
 
-/** Keep the official conversation mounted while presenting it in the workbench's right column. */
-export function DshConversationPanel({ visible, width, statusHeight, floating = false, onRootChange }: {
+/** Keep the official conversation mounted while presenting it in a workbench slot. */
+export function DshConversationPanel({ visible, width, statusHeight, floating = false, editor = false, onRootChange }: {
   visible: boolean
   width: number
   statusHeight: number
   floating?: boolean
+  editor?: boolean
   onRootChange?(root: HTMLElement | null): void
 }) {
   useLayoutEffect(() => {
@@ -47,14 +120,14 @@ export function DshConversationPanel({ visible, width, statusHeight, floating = 
       attached?.style.removeProperty('--dvw-status-height')
     }
     const stop = watchDshPlacement(
-      () => floating ? document.querySelector('.dvw-chat-body') : null,
+      () => editor ? document.querySelector('[data-dvw-conversation-editor]') : floating ? document.querySelector('.dvw-chat-body') : null,
       rect => {
         const next = findDshConversationRoot()
         if (next !== attached) {
           release()
           attached = next
-          placement = attached !== null && floating ? placeDshSurface(attached, true) : undefined
-          attached?.setAttribute('data-dvw-conversation-panel', '')
+          placement = attached !== null && (floating || editor) ? placeDshSurface(attached, floating) : undefined
+          attached?.setAttribute('data-dvw-conversation-panel', editor ? 'editor' : '')
           attached?.style.setProperty('--dvw-chat-width', `${width}px`)
           attached?.style.setProperty('--dvw-status-height', `${statusHeight}px`)
           onRootChange?.(next)
@@ -69,7 +142,7 @@ export function DshConversationPanel({ visible, width, statusHeight, floating = 
       document.body.removeAttribute('data-dvw-conversation-active')
       onRootChange?.(null)
     }
-  }, [visible, width, statusHeight, floating, onRootChange])
+  }, [visible, width, statusHeight, floating, editor, onRootChange])
   return null
 }
 

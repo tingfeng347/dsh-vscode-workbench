@@ -8,6 +8,7 @@ import { settingsHost } from '../src/client/settingsHost.ts'
 import { WorkbenchController } from '../src/client/service.ts'
 import { disposeTypeScriptProject } from '../src/client/typescriptProject.ts'
 import type { FileEntry, GitChange } from '../src/types.ts'
+import type { DshConversationMenus } from '../src/client/DshConversationPanel.tsx'
 
 type EditorProps = Parameters<typeof MonacoEditor>[0]
 type DiffProps = Parameters<typeof MonacoDiffEditor>[0]
@@ -49,9 +50,13 @@ vi.mock('../src/client/MonacoEditor.tsx', () => ({
   isMacPlatform: () => false,
   loadMonaco: () => Promise.resolve(state.monaco),
 }))
-vi.mock('../src/client/DshConversationPanel.tsx', () => ({ DshConversationPanel: () => null, DshConversationTheme: () => null, DshReviewActions: () => null }))
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 let root: Root | undefined
+let conversationMenu: Parameters<DshConversationMenus['register']>[0] | undefined
+const conversationMenus: DshConversationMenus = { register: value => { conversationMenu = value; return () => { conversationMenu = undefined } } }
+async function openConversation() {
+  await act(async () => conversationMenu!.resolve({ sessionId: 's' })[0]!.run())
+}
 let disk = 'disk'
 let revision = 'r1'
 let completeSave: (() => void) | undefined
@@ -84,7 +89,7 @@ afterEach(async () => {
 async function mount(service = new WorkbenchController(), visible = true, dshPanelId?: string, handlers: { open?(panelId: string): void; restore?(): void } = {}) {
   if (visible) service.show()
   const node = document.createElement('div'); document.body.append(node); root = createRoot(node)
-  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" dshPanelId={dshPanelId} onOpenDshPanel={handlers.open} onRestoreConversation={handlers.restore}/>) })
+  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" conversationMenus={conversationMenus} dshPanelId={dshPanelId} onOpenDshPanel={handlers.open} onRestoreConversation={handlers.restore}/>) })
   return service
 }
 type FakeModelCatalog = {
@@ -166,6 +171,412 @@ it('preserves an unsaved draft when returning to DSH and reopening', async () =>
   await act(async () => service.hide())
   await act(async () => service.show())
   expect(state.editor!.value).toBe('unsaved draft')
+})
+
+function residentConversation() {
+  const surface = document.createElement('section')
+  surface.dataset.phase = 'active'
+  surface.innerHTML = '<header>Greeting</header><div data-conversation-scroll>Existing reply</div><textarea>message draft</textarea>'
+  document.body.prepend(surface)
+  return surface
+}
+
+function dragData() {
+  const values = new Map<string, string>()
+  return {
+    effectAllowed: 'none', dropEffect: 'none',
+    get types() { return [...values.keys()] },
+    setData(type: string, value: string) { values.set(type, value) },
+    getData(type: string) { return values.get(type) ?? '' },
+  }
+}
+
+async function dragTo(source: Element, target: Element, x = 300, y = 200, shared?: ReturnType<typeof dragData>) {
+  const dataTransfer = dragData()
+  const send = async (element: Element, type: string) => {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y })
+    Object.defineProperty(event, 'dataTransfer', { value: shared ?? dataTransfer })
+    await act(async () => { element.dispatchEvent(event) })
+    return event
+  }
+  await send(source, 'dragstart')
+  const over = await send(target, 'dragover')
+  const drop = await send(target, 'drop')
+  await send(source, 'dragend')
+  return { over, drop }
+}
+
+function layoutPane(pane: Element) {
+  vi.spyOn(pane, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 600, 400))
+}
+
+it('opens the official conversation from its More menu and returns it without dragging or losing drafts', async () => {
+  const surface = residentConversation()
+  const composer = surface.querySelector('textarea')!
+  const parent = surface.parentElement
+  const original = surface.innerHTML
+  const service = await setup()
+  const sidebarMarkup = surface.innerHTML
+  await act(async () => state.editor!.onChange('unsaved file'))
+  type Contribution = {
+    target: 'sessionHeader'
+    resolve(target: { sessionId: string }): readonly { label: string; run?(): void }[]
+  }
+  let contribution: Contribution | undefined
+  const unregister = vi.fn()
+  const menus = { register: vi.fn((value: Contribution) => { contribution = value; return unregister }) }
+  await act(async () => root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" conversationMenus={menus}/>))
+  expect(contribution?.target).toBe('sessionHeader')
+  expect(contribution!.resolve({ sessionId: 'other' })).toEqual([])
+  const action = contribution!.resolve({ sessionId: 's' })[0]!
+  expect(action.label).toBe('在编辑区打开对话')
+  await act(async () => action.run!())
+  expect(document.querySelectorAll('[data-dvw-conversation-tab]')).toHaveLength(1)
+  expect(surface.dataset.dvwConversationPanel).toBe('editor')
+  expect(surface.parentElement).toBe(parent)
+  expect(surface.querySelector('textarea')).toBe(composer)
+  expect(surface.innerHTML).toBe(original)
+  expect(composer.value).toBe('message draft')
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-tab-path="a.txt"]')!.click())
+  expect(state.editor!.value).toBe('unsaved file')
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-dvw-conversation-tab]')!.click())
+  const back = contribution!.resolve({ sessionId: 's' })[0]!
+  expect(back.label).toBe('移回侧栏')
+  await act(async () => back.run!())
+  expect(document.querySelector('[data-dvw-conversation-tab]')).toBeNull()
+  expect(document.querySelector('.dvw-chat')).not.toBeNull()
+  expect(surface.innerHTML).toBe(sidebarMarkup)
+  expect(composer.value).toBe('message draft')
+  expect(menus.register).toHaveBeenCalledTimes(1)
+  await act(async () => service.hide())
+  expect(unregister).toHaveBeenCalledTimes(1)
+  expect(surface.innerHTML).toBe(original)
+})
+
+it('docks through the menu and leaves the official title row non-draggable', async () => {
+  const surface = residentConversation()
+  const composer = surface.querySelector('textarea')!
+  const parent = surface.parentElement
+  await setup()
+  await act(async () => state.editor!.onChange('unsaved file'))
+  const pane = document.querySelector('.dvw-pane')!
+  layoutPane(pane)
+  expect(surface.querySelector('header')!.hasAttribute('draggable')).toBe(false)
+  expect(document.querySelector('[data-dvw-conversation-grip]')).toBeNull()
+  await openConversation()
+  expect(surface.querySelector('.dvw-conversation-dock-host')).toBeNull()
+  expect(document.querySelector('.dvw-conversation-editor-toolbar')).toBeNull()
+  const tab = document.querySelector<HTMLButtonElement>('[data-dvw-conversation-tab]')!
+  expect(tab.dataset.active).toBe('true')
+  expect(document.querySelector('.dvw-chat')).toBeNull()
+  expect(surface.dataset.dvwConversationPanel).toBe('editor')
+  expect(surface.parentElement).toBe(parent)
+  expect(surface.querySelector('textarea')).toBe(composer)
+  expect(composer.value).toBe('message draft')
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-tab-path="a.txt"]')!.click())
+  expect(tab.dataset.active).toBe('false')
+  expect(surface.hasAttribute('data-dvw-conversation-panel')).toBe(false)
+  expect(state.editor!.value).toBe('unsaved file')
+  await act(async () => tab.click())
+  expect(surface.dataset.dvwConversationPanel).toBe('editor')
+  await act(async () => tab.querySelector<HTMLElement>('.dvw-tab-close')!.click())
+  expect(document.querySelector('[data-dvw-conversation-tab]')).toBeNull()
+  expect(document.querySelector('.dvw-chat')).toBeNull()
+  expect(surface.hasAttribute('data-dvw-conversation-panel')).toBe(false)
+  expect(composer.value).toBe('message draft')
+})
+
+it('accepts a conversation drag into the middle and reorders it on the tab strip without splitting', async () => {
+  residentConversation()
+  await setup()
+  const pane = document.querySelector('.dvw-pane')!
+  layoutPane(pane)
+  await openConversation()
+  const { over, drop } = await dragTo(document.querySelector('[data-dvw-conversation-tab]')!, pane)
+  expect(over.defaultPrevented).toBe(true)
+  expect(drop.defaultPrevented).toBe(true)
+  expect(document.querySelectorAll('[data-dvw-conversation-tab]')).toHaveLength(1)
+  const file = document.querySelector<HTMLElement>('[data-tab-path]')!
+  vi.spyOn(file, 'getBoundingClientRect').mockReturnValue(new DOMRect(100, 0, 100, 35))
+  await dragTo(document.querySelector('[data-dvw-conversation-tab]')!, pane.querySelector('.dvw-tabs')!, 200, 5)
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(1)
+  expect(pane.querySelector('.dvw-tab-list')!.lastElementChild).toBe(document.querySelector('[data-dvw-conversation-tab]'))
+  expect(document.body.hasAttribute('data-dvw-editor-dragging')).toBe(false)
+})
+
+it('splits a conversation from the editor edge and collapses its empty group when closed', async () => {
+  const surface = residentConversation()
+  await setup()
+  const pane = document.querySelector('.dvw-pane')!
+  layoutPane(pane)
+  await openConversation()
+  await dragTo(document.querySelector('[data-dvw-conversation-tab]')!, pane, 595, 200)
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(2)
+  const conversationPane = document.querySelector('[data-dvw-conversation-tab]')!.closest('.dvw-pane')!
+  expect(conversationPane).not.toBe(pane)
+  expect(pane.querySelector('[data-tab-path="a.txt"]')).not.toBeNull()
+  expect(surface.dataset.dvwConversationPanel).toBe('editor')
+  await act(async () => conversationPane.querySelector<HTMLElement>('.dvw-tab-close')!.click())
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(1)
+  expect(document.querySelector('[data-tab-path="a.txt"]')).not.toBeNull()
+  expect(document.querySelector('.dvw-chat')).toBeNull()
+})
+
+it('closes the editor conversation tab without reopening the sidebar conversation', async () => {
+  residentConversation()
+  await setup()
+  await openConversation()
+  const tab = document.querySelector<HTMLButtonElement>('[data-dvw-conversation-tab]')!
+  await act(async () => conversationMenu!.resolve({ sessionId: 's' })[1]!.run())
+  expect(document.querySelector('[data-dvw-conversation-tab]')).toBeNull()
+  expect(document.querySelector('.dvw-chat')).toBeNull()
+  expect(document.querySelector('[data-dvw-conversation-panel]')).toBeNull()
+  await act(async () => conversationMenu!.resolve({ sessionId: 's' })[0]!.run())
+  await act(async () => document.querySelector<HTMLElement>('[data-dvw-conversation-tab] .dvw-tab-close')!.click())
+  expect(document.querySelector('[data-dvw-conversation-tab]')).toBeNull()
+  expect(document.querySelector('.dvw-chat')).toBeNull()
+  await openConversation()
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-dvw-conversation-tab]')!.dispatchEvent(new MouseEvent('auxclick', { bubbles: true, cancelable: true, button: 1 })))
+  expect(document.querySelector('[data-dvw-conversation-tab]')).toBeNull()
+  expect(document.querySelector('.dvw-chat')).toBeNull()
+  await act(async () => conversationMenu!.resolve({ sessionId: 's' })[0]!.run())
+  expect(document.querySelector('[data-dvw-conversation-tab]')).not.toBeNull()
+})
+
+it('keeps files and their editor group when the conversation tab closes', async () => {
+  residentConversation()
+  await setup()
+  await openConversation()
+  await act(async () => document.querySelector<HTMLElement>('[data-dvw-conversation-tab] .dvw-tab-close')!.click())
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(1)
+  expect(document.querySelector('[data-tab-path="a.txt"]')).not.toBeNull()
+  expect(document.querySelector('[data-dvw-conversation-tab]')).toBeNull()
+  expect(document.querySelector('.dvw-chat')).toBeNull()
+})
+
+it('keeps quarter and bottom-half hit testing when the official layer stops drag events', async () => {
+  residentConversation()
+  await setup()
+  await openConversation()
+  const pane = document.querySelector('.dvw-pane')!
+  layoutPane(pane)
+  const dataTransfer = dragData()
+  const send = async (target: Element, type: string, x: number, y: number) => {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: x, clientY: y })
+    Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
+    await act(async () => { target.dispatchEvent(event) })
+    return event
+  }
+  const tab = document.querySelector('[data-dvw-conversation-tab]')!
+  await send(tab, 'dragstart', 300, 20)
+  const blocker = document.createElement('div')
+  blocker.id = 'official-overlay'
+  blocker.style.cssText = 'position:fixed;inset:0;z-index:1000'
+  blocker.addEventListener('dragover', event => { event.stopImmediatePropagation(); event.preventDefault() }, true)
+  blocker.addEventListener('drop', event => { event.stopImmediatePropagation(); event.preventDefault() }, true)
+  document.body.append(blocker)
+  // React sees the synthetic capture through the overlay's coordinates even though its target is
+  // outside the pane. The bottom half must preview before release.
+  const bottom = await send(blocker, 'dragover', 300, 390)
+  expect(bottom.defaultPrevented).toBe(true)
+  await act(async () => {})
+  expect(document.querySelector('.dvw-pane-drop')?.getAttribute('data-direction')).toBe('column')
+  expect(document.querySelector('.dvw-pane-drop')?.getAttribute('data-position')).toBe('second')
+  const dropped = await send(blocker, 'drop', 300, 390)
+  expect(dropped.defaultPrevented).toBe(true)
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(2)
+  const conversationPane = document.querySelector('[data-dvw-conversation-tab]')!.closest('.dvw-pane')!
+  expect(conversationPane.closest('.dvw-split')?.getAttribute('data-direction')).toBe('column')
+  expect(conversationPane.parentElement).toBe(conversationPane.closest('.dvw-split')?.lastElementChild)
+  blocker.remove()
+})
+
+it.each([
+  { x: 300, direction: 'column', position: 'second', vertical: null, panes: 2 },
+  { x: 20, direction: 'row', position: 'first', vertical: 'second', panes: 3 },
+  { x: 580, direction: 'row', position: 'second', vertical: 'second', panes: 3 },
+])('previews and drops into the lower file region when the host claims native drag events: $x', async ({ x, direction, position, vertical, panes }) => {
+  const hostCapture = (event: Event) => {
+    if ((event as MouseEvent).clientY < 200) return
+    event.preventDefault()
+    // The host can stop propagation before React's root capture listener runs.
+    event.stopPropagation()
+  }
+  document.addEventListener('dragover', hostCapture, true)
+  document.addEventListener('drop', hostCapture, true)
+  try {
+    await setup()
+    const pane = document.querySelector('.dvw-pane')!
+    layoutPane(pane)
+    const dataTransfer = dragData()
+    const tab = pane.querySelector('[data-tab-path]')!
+    const body = pane.querySelector('.dvw-editor-body')!
+    const send = async (target: Element, type: string, y: number, clientX = x) => {
+      const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX, clientY: y })
+      Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
+      await act(async () => { target.dispatchEvent(event) })
+    }
+    await send(tab, 'dragstart', 20)
+    await send(body, 'dragover', 40, 300)
+    expect(document.querySelector('.dvw-pane-drop')?.getAttribute('data-position')).toBe('first')
+    await send(body, 'dragover', 380)
+    const preview = document.querySelector('.dvw-pane-drop')
+    expect(preview?.getAttribute('data-direction')).toBe(direction)
+    expect(preview?.getAttribute('data-position')).toBe(position)
+    expect(preview?.getAttribute('data-vertical')).toBe(vertical)
+    await send(body, 'drop', 380)
+    expect(document.querySelectorAll('.dvw-pane')).toHaveLength(panes)
+    expect(document.querySelector('.dvw-pane-drop')).toBeNull()
+    await send(tab, 'dragend', 380)
+  } finally {
+    document.removeEventListener('dragover', hostCapture, true)
+    document.removeEventListener('drop', hostCapture, true)
+  }
+})
+
+it('keeps a conversation group when its last file closes or moves away', async () => {
+  residentConversation()
+  await setup(false, {
+    groups: [{ id: 'pane-1', paths: ['a.txt'], active: 'a.txt' }, { id: 'pane-2', paths: ['b.txt'], active: 'b.txt' }],
+    focused: 'pane-1',
+    layout: { kind: 'split', id: 's1', direction: 'row', ratio: 0.5, first: { kind: 'leaf', group: 'pane-1' }, second: { kind: 'leaf', group: 'pane-2' } },
+  })
+  await openConversation()
+  const first = document.querySelector('.dvw-pane[data-group="pane-1"]')!
+  const second = document.querySelector('.dvw-pane[data-group="pane-2"]')!
+  vi.spyOn(first, 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 300, 400))
+  vi.spyOn(second, 'getBoundingClientRect').mockReturnValue(new DOMRect(300, 0, 300, 400))
+  // Moving a file out of a conversation group must retain the conversation's leaf.
+  await dragTo(first.querySelector('[data-tab-path="a.txt"]')!, second.querySelector('.dvw-tabs')!, 450, 10)
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(2)
+  expect(first.querySelector('[data-dvw-conversation-tab]')).not.toBeNull()
+  expect(first.querySelector('[data-tab-path]')).toBeNull()
+  // Move it back and close it while it is active.
+  await dragTo(second.querySelector('[data-tab-path="a.txt"]')!, first.querySelector('.dvw-tabs')!, 150, 10)
+  await act(async () => first.querySelector<HTMLElement>('[data-tab-path="a.txt"] .dvw-tab-close')!.click())
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(2)
+  expect(first.querySelector<HTMLElement>('[data-dvw-conversation-tab]')!.dataset.active).toBe('true')
+  expect(first.querySelector('.dvw-tabs')!.hasAttribute('data-empty')).toBe(false)
+})
+
+it('moves the one conversation tab between groups and clears it on a session change', async () => {
+  residentConversation()
+  const service = await setup()
+  const pane = document.querySelector('.dvw-pane')!
+  layoutPane(pane)
+  await openConversation()
+  await dragTo(document.querySelector('[data-dvw-conversation-tab]')!, pane, 595, 200)
+  const target = document.querySelector('.dvw-pane[data-group="pane-1"]')!
+  layoutPane(target)
+  await dragTo(document.querySelector('[data-dvw-conversation-tab]')!, target, 300, 200)
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(1)
+  expect(document.querySelectorAll('[data-dvw-conversation-tab]')).toHaveLength(1)
+  await act(async () => root!.render(<Workbench service={service} sessionId="other" cwd="/tmp/audit"/>))
+  expect(document.querySelector('[data-dvw-conversation-tab]')).toBeNull()
+  expect(document.querySelector('.dvw-chat')).not.toBeNull()
+})
+
+it.each(['关闭已保存', '全部关闭'])('keeps the conversation reachable after the file menu action %s', async action => {
+  residentConversation()
+  await setup()
+  await openConversation()
+  const file = document.querySelector<HTMLButtonElement>('[data-tab-path="a.txt"]')!
+  await act(async () => {
+    file.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }))
+  })
+  const button = [...document.querySelectorAll<HTMLButtonElement>('.dvw-tab-menu button')].find(button => button.textContent?.startsWith(action))!
+  await act(async () => button.click())
+  expect(document.querySelector('[data-tab-path]')).toBeNull()
+  if (action === '全部关闭') {
+    expect(document.querySelector('[data-dvw-conversation-tab]')).toBeNull()
+    expect(document.querySelector('.dvw-chat')).not.toBeNull()
+  } else {
+    expect(document.querySelector<HTMLElement>('[data-dvw-conversation-tab]')?.dataset.active).toBe('true')
+    expect(document.querySelector('[data-dvw-conversation-panel=editor]')).not.toBeNull()
+  }
+})
+
+it('clears the editor drop preview and restores conversation hit testing after a cancelled drag', async () => {
+  residentConversation()
+  await setup()
+  const pane = document.querySelector('.dvw-pane')!
+  layoutPane(pane)
+  await openConversation()
+  const dataTransfer = dragData()
+  const send = (target: Element, type: string) => {
+    const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: 595, clientY: 200 })
+    Object.defineProperty(event, 'dataTransfer', { value: dataTransfer })
+    target.dispatchEvent(event)
+  }
+  await act(async () => send(document.querySelector('[data-dvw-conversation-tab]')!, 'dragstart'))
+  await act(async () => send(pane, 'dragover'))
+  expect(document.body.hasAttribute('data-dvw-editor-dragging')).toBe(true)
+  expect(document.querySelector('.dvw-pane-drop')).not.toBeNull()
+  await act(async () => window.dispatchEvent(new Event('dragend')))
+  expect(document.body.hasAttribute('data-dvw-editor-dragging')).toBe(false)
+  expect(document.querySelector('.dvw-pane-drop')).toBeNull()
+  expect(document.querySelector('[data-dvw-conversation-tab]')).not.toBeNull()
+})
+
+it.each([
+  [10, 60, 'first', 'first'], [590, 60, 'second', 'first'],
+  [10, 390, 'first', 'second'], [590, 390, 'second', 'second'],
+] as const)('drops conversation and file tabs into the quarter at %s/%s', async (x, y, horizontal, vertical) => {
+  const surface = residentConversation()
+  await setup()
+  await openConversation()
+  const original = document.querySelector('.dvw-pane')!
+  layoutPane(original)
+  await dragTo(document.querySelector('[data-dvw-conversation-tab]')!, original, x, y)
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(3)
+  const conversationPane = document.querySelector('[data-dvw-conversation-tab]')!.closest('.dvw-pane')!
+  const column = conversationPane.closest('.dvw-split')!
+  expect(column.getAttribute('data-direction')).toBe('column')
+  const half = column.closest('.dvw-slot')!
+  expect(half.parentElement?.getAttribute('data-direction')).toBe('row')
+  expect((horizontal === 'first' ? half.parentElement?.firstElementChild : half.parentElement?.lastElementChild)).toBe(half)
+  expect((vertical === 'first' ? column.firstElementChild : column.lastElementChild)).toBe(conversationPane.parentElement)
+  expect(surface.querySelector('textarea')!.value).toBe('message draft')
+  // The unused quarter is a usable target, rather than a duplicate file or conversation.
+  const empty = [...document.querySelectorAll('.dvw-pane')].find(pane => pane.getAttribute('data-group') !== 'pane-1' && pane !== conversationPane)!
+  const emptyId = empty.getAttribute('data-group')
+  layoutPane(empty)
+  await dragTo(document.querySelector('[data-tab-path="a.txt"]')!, empty, 300, 200)
+  expect(document.querySelector(`.dvw-pane[data-group="${emptyId}"] [data-tab-path="a.txt"]`)).not.toBeNull()
+  expect(document.querySelectorAll('[data-dvw-conversation-tab]')).toHaveLength(1)
+})
+
+it.each(['tab', 'tree'] as const)('supports a quarter split for a file dragged from the %s', async source => {
+  await setup(false, { paths: ['a.txt'], active: 'a.txt' }, [], [], defaultModelCatalog, [{ name: 'b.txt', path: 'b.txt', kind: 'file' }])
+  await act(async () => state.editor!.onChange('unsaved quarter draft'))
+  const pane = document.querySelector('.dvw-pane')!
+  layoutPane(pane)
+  const drag = source === 'tab' ? document.querySelector('[data-tab-path="a.txt"]')! : document.querySelector('[data-tree-path="b.txt"]')!
+  await dragTo(drag, pane, 590, 390)
+  if (source === 'tree') await act(async () => { await new Promise(resolve => requestAnimationFrame(resolve)) })
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(3)
+  const path = source === 'tab' ? 'a.txt' : 'b.txt'
+  const target = document.querySelector(`[data-tab-path="${path}"]`)!.closest('.dvw-pane')!
+  expect(target.closest('.dvw-split')?.getAttribute('data-direction')).toBe('column')
+  expect(target.parentElement).toBe(target.closest('.dvw-split')?.lastElementChild)
+  if (source === 'tab') expect(state.editor!.value).toBe('unsaved quarter draft')
+})
+
+it('refuses a quarter that would exceed the six-pane cap while retaining center drops', async () => {
+  await setup(false, { paths: ['a.txt', 'b.txt'], active: 'a.txt' })
+  const pane = document.querySelector('.dvw-pane')!
+  layoutPane(pane)
+  await dragTo(document.querySelector('[data-tab-path="a.txt"]')!, pane, 590, 390)
+  const target = document.querySelector('[data-tab-path="a.txt"]')!.closest('.dvw-pane')!
+  layoutPane(target)
+  await dragTo(document.querySelector('[data-tab-path="a.txt"]')!, target, 590, 390)
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(5)
+  const latest = document.querySelector('[data-tab-path="a.txt"]')!.closest('.dvw-pane')!
+  layoutPane(latest)
+  await dragTo(document.querySelector('[data-tab-path="a.txt"]')!, latest, 590, 390)
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(5)
+  await dragTo(document.querySelector('[data-tab-path="b.txt"]')!, latest, 300, 200)
+  expect(document.querySelectorAll('.dvw-pane').length).toBeLessThanOrEqual(5)
 })
 
 it('opens a DSH generated-file link at its requested line in the workbench editor', async () => {

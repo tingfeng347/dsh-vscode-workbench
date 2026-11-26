@@ -7,7 +7,7 @@ import { terminalIssue, type TerminalWorkspaceController } from './terminal.ts'
 
 // VS Code Light+ ANSI palette: the default xterm colors (e.g. yellow #e5e510) vanish on a light background.
 const LIGHT_ANSI = { black: '#000000', red: '#cd3131', green: '#107c10', yellow: '#949800', blue: '#0451a5', magenta: '#bc05bc', cyan: '#0598bc', white: '#555555', brightBlack: '#666666', brightRed: '#cd3131', brightGreen: '#14ce14', brightYellow: '#b5ba00', brightBlue: '#0451a5', brightMagenta: '#bc05bc', brightCyan: '#0598bc', brightWhite: '#a5a5a5' }
-function terminalTheme(colorScheme: 'dark' | 'light' | 'white' | 'eyecare') {
+function terminalTheme(colorScheme: BottomPanelProps['colorScheme']) {
   return colorScheme === 'dark'
     ? { background: '#191a1b', foreground: '#bfbfbf', cursor: '#bfbfbf', selectionBackground: '#264f78', selectionForeground: '#ffffff' }
     : { background: '#ffffff', foreground: '#1d2025', cursor: '#4b515b', selectionBackground: '#add6ff', selectionForeground: '#1d2025', ...LIGHT_ANSI }

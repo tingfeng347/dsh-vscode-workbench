@@ -1,7 +1,9 @@
 import type { ComponentType } from 'react'
 
 export type WorkbenchView = 'explorer' | 'search' | 'git' | 'ssh'
-export interface BottomPanelProps { sessionId: string; cwd: string; visible: boolean; colorScheme: 'dark' | 'light' | 'white' | 'eyecare' }
+export type WorkbenchColorScheme = 'dark' | 'light' | 'eyecare'
+export type WorkbenchTheme = WorkbenchColorScheme | 'dsh'
+export interface BottomPanelProps { sessionId: string; cwd: string; visible: boolean; colorScheme: WorkbenchColorScheme }
 export interface BottomPanelContribution { id: string; title: string; component: ComponentType<BottomPanelProps> }
 export interface WorkbenchCommand { id: string; run(): void }
 export interface WorkbenchSnapshot { visible: boolean; view: WorkbenchView; bottomPanel?: string }

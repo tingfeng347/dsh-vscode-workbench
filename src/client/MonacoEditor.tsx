@@ -1,4 +1,5 @@
 import type { languages } from 'monaco-editor'
+import type { WorkbenchColorScheme } from './service.ts'
 import { editorLanguageForPath } from './lspLanguage.ts'
 import { colorInlineGitDiff, connectGitSplit, type GitDiffLineRange } from './GitSplitDiff.ts'
 import type { GitDiff } from '../types.ts'
@@ -159,7 +160,7 @@ const EYE_COLORS = {
   'scrollbarSlider.activeBackground': '#5c4a2a66',
 }
 
-export type MonacoColorScheme = 'dark' | 'light' | 'white' | 'eyecare'
+export type MonacoColorScheme = WorkbenchColorScheme
 
 export function monacoThemeFor(theme: MonacoColorScheme): string {
   return theme === 'dark' ? DARK_THEME : theme === 'eyecare' ? EYE_THEME : 'vs'

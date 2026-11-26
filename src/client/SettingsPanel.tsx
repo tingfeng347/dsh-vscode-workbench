@@ -3,11 +3,11 @@ import { useEffect, useId, useRef, useState } from 'react'
 import type { CSSProperties } from 'react'
 import type { LspRuntimeStatus, LspServerStatus } from './lsp.ts'
 import type { ReviewMode } from './aiReview.ts'
+import type { WorkbenchTheme } from './service.ts'
 import { settingsHost } from './settingsHost.ts'
 import type { CommitModelCatalog, CommitModelOption, CommitModelSelection } from '../commit-message.ts'
 import type { InlineCompletionMode } from '../inline-completion.ts'
 
-type WorkbenchTheme = 'dsh' | 'dark' | 'light' | 'white' | 'eyecare'
 type MarkdownView = 'preview' | 'source'
 type DefaultBrowser = 'builtin' | 'system'
 type OpenMode = 'current' | 'floating'
@@ -78,7 +78,7 @@ export interface WorkbenchSettingsProps {
 const LSP_STATUS_TEXT: Record<LspRuntimeStatus['state'] | 'idle', string> = {
   idle: '已安装，打开对应文件时自动启动', starting: '语言服务启动中', ready: '语言服务运行中', reconnecting: '语言服务正在重连', failed: '语言服务启动失败',
 }
-const THEMES = [['dsh', '跟随 DSH'], ['dark', '深色'], ['light', '浅色'], ['white', '纯白'], ['eyecare', '护眼']] as const
+const THEMES = [['dsh', '跟随 DSH'], ['dark', '深色'], ['light', '浅色'], ['eyecare', '护眼']] as const
 const MARKDOWN_VIEWS = [['preview', '预览'], ['source', '源码']] as const
 const REVIEW_MODES = [['all', '审阅全部改动'], ['latest', '审阅最新改动'], ['none', '无需审阅']] as const
 const DEFAULT_BROWSERS = [['builtin', '内置浏览器'], ['system', '系统浏览器']] as const

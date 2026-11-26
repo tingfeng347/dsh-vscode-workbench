@@ -25,6 +25,11 @@ it('reorders inside one group at the requested index', () => {
   expect(next[0]!.active).toBe('z')
 })
 
+it('honors the tab-strip insertion position when moving across groups', () => {
+  const next = moveTabToGroup(groups(['a', ['x']], ['b', ['y', 'z']]), 'a', 'x', 'b', 1)!
+  expect(next[1]!.tabs.map(row => row.path)).toEqual(['y', 'x', 'z'])
+})
+
 it('refuses to open a second tab over the same file', () => {
   expect(moveTabToGroup(groups(['a', ['x'], 'x'], ['b', ['x'], 'x']), 'a', 'x', 'b')).toBeUndefined()
 })

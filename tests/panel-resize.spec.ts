@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
-import { DSH_CHAT_DEFAULT_WIDTH, DSH_CHAT_MAX_WIDTH, DSH_CHAT_MIN_WIDTH, clampChatWidth, resizedPanelWidth } from '../src/client/Workbench.tsx'
+import { DSH_CHAT_DEFAULT_WIDTH, DSH_CHAT_MIN_WIDTH, clampChatWidth, resizedPanelWidth } from '../src/client/Workbench.tsx'
 
 describe('resizedPanelWidth', () => {
   it('grows the source control panel when its right edge moves right', () => {
@@ -21,7 +21,7 @@ describe('resizedPanelWidth', () => {
     expect(DSH_CHAT_DEFAULT_WIDTH).toBe(DSH_CHAT_MIN_WIDTH)
     expect(clampChatWidth(400)).toBe(DSH_CHAT_MIN_WIDTH)
     expect(clampChatWidth(510.6)).toBe(511)
-    expect(clampChatWidth(900)).toBe(DSH_CHAT_MAX_WIDTH)
+    expect(clampChatWidth(1900)).toBe(1900)
     expect(clampChatWidth(Number.NaN)).toBe(DSH_CHAT_DEFAULT_WIDTH)
   })
 
@@ -36,13 +36,13 @@ describe('resizedPanelWidth', () => {
     expect(resizer).toMatch(/if \(hideBelow !== undefined && nextSize < hideBelow\) \{\s+onHide\?\.\(\)\s+return/)
     expect(workbench).toContain('hideBelow={200} onHide={()=>setChatVisible(false)}')
     expect(workbench).toContain('hideBelow={Math.min(105,Math.floor(nativeLayout.sideWidth))} onHide={()=>setPrimarySideVisible(false)}')
-    expect(workbench).toContain('min={DSH_CHAT_MIN_WIDTH} max={chatWidthLimit} defaultSize={DSH_CHAT_DEFAULT_WIDTH}')
+    expect(workbench).toContain('min={Math.min(DSH_CHAT_MIN_WIDTH,chatWidthLimit)} max={chatWidthLimit} defaultSize={DSH_CHAT_DEFAULT_WIDTH}')
     expect(styles).toContain('.dvw-chat-resizer{position:fixed;top:var(--dvw-titlebar-height);right:calc(var(--dvw-chat-width) - 5px);z-index:22}')
-    expect(styles).toContain('--dvw-chat-effective:max(440px,min(var(--dvw-chat-width),calc(100vw - 254px)))')
-    expect(styles).toContain('grid-template-columns:44px min(210px,var(--dvw-side-width),max(0px,calc(100vw - 164px - var(--dvw-chat-effective)))) minmax(0,1fr) var(--dvw-chat-effective)')
-    expect(styles).toContain('.dvw-overlay[data-dvw-chat=true] .dvw-status{padding-right:calc(var(--dvw-chat-effective) + 6px)}')
-    expect(styles).toContain('.dvw-chat-resizer{right:calc(var(--dvw-chat-effective) - 5px)}')
-    expect(styles).toContain('[data-dvw-conversation-panel]{width:calc(max(440px,min(var(--dvw-chat-width),calc(100vw - 254px))) - 6px)!important}')
+    expect(styles).toContain('.dvw-overlay[data-dvw-editor-empty=true]>.dvw-main{display:none}')
+    expect(styles).not.toContain('--dvw-chat-effective')
+    expect(styles).not.toContain('--dvw-float-chat-width')
+    expect(styles).toContain('.dvw-overlay[data-dvw-chat=true] .dvw-status{grid-column:1/-1}')
+    expect(styles).toContain('.dvw-overlay[data-dvw-status=true]:not([data-dvw-float=true]) .dvw-chat-resizer{bottom:30px}')
     expect(styles).toContain('[data-dvw-conversation-panel]{position:fixed!important;top:calc(var(--dvw-titlebar-height) + 6px)!important;right:3px!important;bottom:var(--dvw-status-height,30px)!important;left:auto!important;width:calc(var(--dvw-chat-width) - 6px)!important;')
     expect(styles).not.toContain('min(400px,var(--dvw-chat-width))')
     expect(styles).toContain('html[data-platform=darwin] .dvw-titlebar{')

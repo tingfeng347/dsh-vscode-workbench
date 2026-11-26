@@ -1,6 +1,5 @@
 // @vitest-environment jsdom
-import { Context } from '@deepseek-ai/cordis'
-import type { SessionId } from '@deepseek-ai/dsh-session/types'
+import type { Context } from '@deepseek-ai/cordis'
 import { afterEach, expect, it, vi } from 'vitest'
 import { NativeBrowser } from '../src/client/browser.ts'
 
@@ -14,57 +13,44 @@ function setup() {
   const seat = document.createElement('div'); seat.setAttribute('data-sidebar-right-session', 's'); document.body.append(seat)
   const mounted = source<string | undefined>('s')
   const rows: Array<{ id: string; sessionId: string; kind: string; title: string; contentId: string }> = []
-  const openTabs = source<Array<{ sessionId: string; tabId: string; kind: string; contentId: string }>>([])
   let expanded = false
-  let lastId = -1
-  const publish = () => openTabs.set(rows.map(row => ({ ...row, tabId: row.id })))
   const sidebar = {
-    openTabs, mounted,
-    tabsIn: (id: string) => rows.filter(row => row.sessionId === id),
-    openTabIn: vi.fn((sessionId: string, kind: string, options?: { replaceTab?: string }) => {
-      if (options?.replaceTab !== undefined) {
-        const index = rows.findIndex(row => row.id === options.replaceTab)
-        if (index >= 0) rows.splice(index, 1)
-      }
-      rows.push({ id: `tab-${++lastId}`, sessionId, kind, title: '浏览器', contentId: `content-${lastId}` }); publish()
+    mounted,
+    openTabIn: vi.fn((sessionId: string, kind: string, _options?: { revealIfOpened?: boolean; params?: { url?: string } }) => {
+      rows.push({ id: `tab-${rows.length}`, sessionId, kind, title: '浏览器', contentId: `content-${rows.length}` })
+      expanded = true
     }),
-    closeIn: vi.fn((sessionId: string, id: string) => { const i = rows.findIndex(row => row.id === id && row.sessionId === sessionId); rows.splice(i, 1); publish() }),
-    close: vi.fn((id: string) => { const i = rows.findIndex(row => row.id === id); rows.splice(i, 1); publish() }),
-    focus: vi.fn(), isExpanded: () => expanded, toggleExpanded: () => { expanded = !expanded },
+    isExpanded: () => expanded,
   }
-  const browser = new NativeBrowser({ sidebarRight: sidebar, sidebarRightTabs: { get: () => ({}), subscribe: () => () => {} } } as unknown as Context)
+  const registration = { get: () => ({}) as object | undefined }
+  const browser = new NativeBrowser({ sidebarRight: sidebar, sidebarRightTabs: registration } as unknown as Context)
   cleanup.push(() => browser.dispose())
-  return { browser, sidebar, mounted, rows, publish }
+  return { browser, sidebar, mounted, rows, registration }
 }
-it('opens independent official browser pages and scopes closure to their Session', async () => {
+it('opens independent official pages without changing an Agent browser', async () => {
   const h = setup()
-  const first = await h.browser.open('s'); const second = await h.browser.open('s')
-  expect(first).not.toBe(second)
-  h.rows.push({ id: 'agent', sessionId: 's', kind: 'ego-browser', title: 'Agent 浏览器', contentId: 'agent' }); h.publish()
-  expect(h.browser.getSnapshot().tabs.map(tab => tab.id)).toEqual([first, second])
-  h.browser.focus(first)
+  h.rows.push({ id: 'agent', sessionId: 's', kind: 'ego-browser', title: 'Agent 浏览器', contentId: 'agent' })
+  await h.browser.open('s'); await h.browser.open('s')
+  expect(h.rows.map(row => row.kind)).toEqual(['ego-browser', 'browser', 'browser'])
+  expect(h.rows[0]).toEqual({ id: 'agent', sessionId: 's', kind: 'ego-browser', title: 'Agent 浏览器', contentId: 'agent' })
   expect(h.sidebar.isExpanded()).toBe(true)
-  h.browser.close('s', first)
-  expect(h.sidebar.closeIn).toHaveBeenCalledWith('s' as SessionId, first)
-  expect(h.rows.some(row => row.id === 'agent')).toBe(true)
 })
 it('waits for the selected Session to mount after leaving a global panel', async () => {
   const h = setup(); h.mounted.set(undefined)
   const opening = h.browser.open('s')
   expect(h.sidebar.openTabIn).not.toHaveBeenCalled()
   h.mounted.set('s')
-  await expect(opening).resolves.toBe('tab-0')
+  await expect(opening).resolves.toBeUndefined()
+  expect(h.rows).toHaveLength(1)
 })
-
-it('opens the official page at an address and reuses that tab for the next address', async () => {
+it('passes explicit addresses to the official browser without replacing existing pages', async () => {
   const h = setup()
-  const first = await h.browser.open('s', undefined, 'https://example.com/')
-  expect(h.sidebar.openTabIn.mock.calls[0]?.[2]).toMatchObject({ params: { url: 'https://example.com/' } })
-  expect(h.sidebar.openTabIn.mock.calls[0]?.[2]).not.toHaveProperty('replaceTab')
-  const second = await h.browser.open('s', undefined, 'https://example.org/docs', first)
-  expect(second).not.toBe(first)
-  expect(h.sidebar.openTabIn.mock.calls[1]?.[2]).toMatchObject({ params: { url: 'https://example.org/docs' }, replaceTab: first })
-  expect(h.rows.filter(row => row.kind === 'browser').map(row => row.id)).toEqual([second])
+  await h.browser.open('s')
+  await h.browser.open('s', undefined, 'https://example.com/')
+  await h.browser.open('s', undefined, 'https://example.org/docs')
+  expect(h.sidebar.openTabIn.mock.calls[1]?.[2]).toEqual({ revealIfOpened: false, params: { url: 'https://example.com/' } })
+  expect(h.sidebar.openTabIn.mock.calls[2]?.[2]).toEqual({ revealIfOpened: false, params: { url: 'https://example.org/docs' } })
+  expect(h.rows).toHaveLength(3)
 })
 it('cancels pending opens when switching workspaces instead of opening a stale page later', async () => {
   const h = setup(); h.mounted.set(undefined)
@@ -75,29 +61,31 @@ it('cancels pending opens when switching workspaces instead of opening a stale p
   h.mounted.set('s')
   expect(h.sidebar.openTabIn).not.toHaveBeenCalled()
 })
-
 it('waits for the native sidebar seat after mounted changes before React commits', async () => {
   const h = setup(); document.body.replaceChildren()
   const opening = h.browser.open('s')
   expect(h.sidebar.openTabIn).not.toHaveBeenCalled()
   const seat = document.createElement('div'); seat.setAttribute('data-sidebar-right-session', 's'); document.body.append(seat)
-  await expect(opening).resolves.toBe('tab-0')
+  await expect(opening).resolves.toBeUndefined()
+  expect(h.rows).toHaveLength(1)
 })
-
-it('falls back to the on-screen close when a Session store was never adopted', async () => {
-  const h = setup(); const id = await h.browser.open('s')
-  // A released adoption makes closeIn a documented no-op, and the tab would otherwise stay clickable forever.
-  h.sidebar.closeIn.mockImplementation(() => {})
-  h.browser.close('s', id)
-  expect(h.sidebar.close).toHaveBeenCalledWith(id)
-  expect(h.rows.some(row => row.id === id)).toBe(false)
+it('cancels a ready but not yet continued open if another Session replaces it', async () => {
+  const h = setup(); h.mounted.set(undefined)
+  const opening = h.browser.open('s')
+  h.mounted.set('s'); h.mounted.set('other')
+  await expect(opening).rejects.toThrow('工作区已切换')
+  expect(h.sidebar.openTabIn).not.toHaveBeenCalled()
 })
-
-it('never closes a same-named tab of a different Session', async () => {
-  const h = setup(); const id = await h.browser.open('s')
-  h.rows.push({ id: 'other', sessionId: 'x', kind: 'browser', title: '浏览器', contentId: 'other' }); h.publish()
-  h.mounted.set('x')
-  h.sidebar.closeIn.mockImplementation(() => {})
-  h.browser.close('s', id)
-  expect(h.sidebar.close).not.toHaveBeenCalled()
+it('cancels pending opens when its plugin is disposed', async () => {
+  const h = setup(); h.mounted.set(undefined)
+  const opening = h.browser.open('s')
+  h.browser.dispose()
+  await expect(opening).rejects.toBeDefined()
+  h.mounted.set('s')
+  expect(h.sidebar.openTabIn).not.toHaveBeenCalled()
+})
+it('reports an unavailable official browser instead of creating another browser', async () => {
+  const h = setup(); h.registration.get = () => undefined
+  await expect(h.browser.open('s')).rejects.toThrow('官方浏览器尚未启用')
+  expect(h.sidebar.openTabIn).not.toHaveBeenCalled()
 })

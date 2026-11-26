@@ -9,7 +9,7 @@ import type { CancellationToken, languages, Uri } from 'monaco-editor'
 import type { FileDocument, FileEntry, GitBranch, GitChange, GitCommit, GitCommitFile, GitDiff, GitStatus } from '../types.ts'
 import { ApiError, api, readApiResponse } from './api.ts'
 import { AiReviewController, latestReviewFollowChange, locateReviewChange, type AiReviewSnapshot, type ReviewChange, type ReviewMode } from './aiReview.ts'
-import type { VscodeWorkbench, WorkbenchView } from './service.ts'
+import type { VscodeWorkbench, WorkbenchColorScheme, WorkbenchTheme, WorkbenchView } from './service.ts'
 import { Icon } from './Icon.tsx'
 import { SearchView } from './SearchView.tsx'
 import { PanelResizer, resizedPanelWidth } from './PanelResizer.tsx'
@@ -22,18 +22,18 @@ import { branchErrorMessage, gitActionErrorNotice, noStagedCommitNotice, type Gi
 import { MarkdownPreview, markdownHeadings } from './MarkdownPreview.tsx'
 import type { MarkdownHeading } from './MarkdownPreview.tsx'
 import { MonacoDiffEditor, MonacoEditor, type GitDiffStyle, isMacPlatform, loadMonaco, preloadMonaco, retainEditorModels } from './MonacoEditor.tsx'
-import { DshConversationPanel, DshConversationTheme, DshReviewActions } from './DshConversationPanel.tsx'
+import { DshConversationMenu, DshConversationPanel, DshConversationTheme, DshReviewActions, type DshConversationMenus } from './DshConversationPanel.tsx'
 import { DshMark } from './DshMark.tsx'
 import { DshPanelPage } from './DshPanelPage.tsx'
-import { DshBrowserPage } from './DshBrowserPage.tsx'
 import { fitNativeSidebarLayout, useNativeSidebar } from './nativeSidebar.ts'
 import type { ISidebarRight } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
-import { createLeaf, dropPosition, MAX_PANES, paneCount, normalizeLayout, removeGroup, setRatio, splitAt, type PaneNode, type SplitDirection, type SplitPosition } from './panes.ts'
+import { createLeaf, dropPosition, dropPaneCount, MAX_PANES, paneAtPoint, paneCount, normalizeLayout, removeGroup, setRatio, splitForDrop, type PaneDropPosition, type PaneNode, type SplitDirection } from './panes.ts'
+import { PaneDropPreview } from './PaneDropPreview.tsx'
 import { moveTabToGroup, swapActiveTab } from './tabs.ts'
 import { RESTORE_STEP_MS, shouldPauseRestore, splitRestore } from './restore.ts'
 import { getWatchExpanded, mergeWatchPaths, nextRetryDelay, setWatchExpanded } from './watch-paths.ts'
 import { debugController } from './debug.ts'
-import type { NativeBrowser, BrowserSnapshot } from './browser.ts'
+import type { NativeBrowser } from './browser.ts'
 import { dshPanelLabel } from './dshPanels.ts'
 import { ActivityBar, normalizeActivityLayout, normalizeActivityOrder, type ActivityView } from './ActivityBar.tsx'
 import { WorkspaceSwitcher } from './WorkspaceSwitcher.tsx'
@@ -59,7 +59,6 @@ import { outermostTreeEntries, remapTreeSelectionPaths, selectAllTreePaths, sele
 interface Tab extends FileDocument { referenceUri?: string; instance?: symbol; dirty: boolean; draft: string; loaded?: boolean; loadError?: string; line?: number; endLine?: number; column?: number; highlight?: string; focusOnReveal?: boolean; external?: boolean; preview?: boolean; title?: string; diff?: GitDiff; diffSourcePath?:string; imageUrl?:string; documentPreview?:DocumentPreviewKind; documentUrl?:string }
 type GitDiffMode = 'inline' | 'split'
 const GIT_DIFF_MODE_KEY = 'dvw:git-diff-mode'
-type WorkbenchTheme = 'dsh' | 'dark' | 'light' | 'white' | 'eyecare'
 export type MarkdownDefaultView = 'preview' | 'source'
 export const MARKDOWN_DEFAULT_VIEW_KEY = 'dvw:markdown-default-view'
 export type DefaultBrowser = 'builtin' | 'system'
@@ -92,7 +91,6 @@ interface CreatingEntry { kind: 'file' | 'directory'; directory: string; value: 
 
 
 export const DSH_CHAT_MIN_WIDTH = 440
-export const DSH_CHAT_MAX_WIDTH = 720
 export const DSH_CHAT_DEFAULT_WIDTH = 440
 
 const FLOAT_HANDLES: readonly FloatGesture[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
@@ -150,10 +148,10 @@ function persistFloatMax(max: boolean): void {
   try { localStorage.setItem(FLOAT_MAX_KEY, max ? '1' : '0') } catch { /* Browser privacy settings may deny storage. */ }
 }
 
-/** Keep persisted or dragged widths inside the range the DSH composer can lay out cleanly. */
+/** Preserve the preferred width; the current window supplies the effective maximum. */
 export function clampChatWidth(width: number): number {
   if (!Number.isFinite(width)) return DSH_CHAT_DEFAULT_WIDTH
-  return Math.max(DSH_CHAT_MIN_WIDTH, Math.min(DSH_CHAT_MAX_WIDTH, Math.round(width)))
+  return Math.max(DSH_CHAT_MIN_WIDTH, Math.round(width))
 }
 
 export { resizedPanelWidth } from './PanelResizer.tsx'
@@ -305,6 +303,19 @@ const DRAG_EXPAND_DELAY = 500
 // Only one Explorer drag can be active; dragover cannot read dataTransfer payloads, so keep the entry here.
 let draggedEntry: FileEntry | undefined
 const TAB_DRAG_TYPE = 'application/x-dvw-tab'
+const CONVERSATION_DRAG_TYPE = 'application/x-dvw-conversation'
+function startConversationDrag(event: DragEvent | globalThis.DragEvent) {
+  if (event.target instanceof Element && event.target.closest('.dvw-tab-close')) {
+    event.preventDefault()
+    return
+  }
+  if (event.dataTransfer === null) return
+  event.dataTransfer.effectAllowed = 'move'
+  event.dataTransfer.setData(CONVERSATION_DRAG_TYPE, 'conversation')
+  document.body.setAttribute('data-dvw-editor-dragging', '')
+}
+function endConversationDrag() { document.body.removeAttribute('data-dvw-editor-dragging') }
+function isConversationDrag(event: DragEvent) { return event.dataTransfer.types.includes(CONVERSATION_DRAG_TYPE) }
 /** An already-open tab being dragged, with the group it currently lives in. */
 let draggedTab: { group: string; path: string } | undefined
 function startTabDrag(event: DragEvent, group: string, tab: Tab) {
@@ -1048,7 +1059,7 @@ function Git(props: { visible: boolean; statusSlot: HTMLElement | null; sessionI
 const ExplorerView = memo(Explorer)
 const GitView = memo(Git)
 
-export function Workbench({ service, browser, rightSidebar, sessionId, cwd, navigation, dshPanelId: hostDshPanelId, onOpenDshPanel, onRestoreConversation, onCloseDshPanel, openSettings }: { service: VscodeWorkbench; browser?: NativeBrowser; rightSidebar?: ISidebarRight; sessionId?: string; cwd?: string; navigation?: DshNavigation; dshPanelId?: string; onOpenDshPanel?(panelId: string): void; onRestoreConversation?(): void; onCloseDshPanel?(): void; openSettings?(): void }) {
+export function Workbench({ service, browser, rightSidebar, conversationMenus, sessionId, cwd, navigation, dshPanelId: hostDshPanelId, onOpenDshPanel, onRestoreConversation, onCloseDshPanel, openSettings }: { service: VscodeWorkbench; browser?: NativeBrowser; rightSidebar?: ISidebarRight; conversationMenus?: DshConversationMenus; sessionId?: string; cwd?: string; navigation?: DshNavigation; dshPanelId?: string; onOpenDshPanel?(panelId: string): void; onRestoreConversation?(): void; onCloseDshPanel?(): void; openSettings?(): void }) {
   const [snapshot, setSnapshot] = useState(() => service.getSnapshot()); const [panels, setPanels] = useState(() => service.getPanels())
   // Paths the host declined to watch; shown so a missing notification is never a mystery.
   const [watchSkipped, setWatchSkipped] = useState<Array<{ path: string; reason: string }>>([])
@@ -1057,32 +1068,76 @@ export function Workbench({ service, browser, rightSidebar, sessionId, cwd, navi
   useEffect(() => service.subscribe(() => { setSnapshot(service.getSnapshot()); setPanels(service.getPanels()) }), [service])
   const [workspace,setWorkspace]=useState<{cwd:string;name:string}>()
   const [groups,setGroups]=useState<EditorGroup[]>(()=>[{id:'pane-1',tabs:[]}])
+  const [conversationTab, setConversationTab] = useState<{ sessionId: string; group: string; index: number; active: boolean }>()
+  const dockedConversation = conversationTab?.sessionId === sessionId && groups.some(group => group.id === conversationTab?.group)
+    ? conversationTab : undefined
   const [focusedId,setFocusedId]=useState('pane-1')
   const [layout,setLayout]=useState<PaneNode>(()=>createLeaf('pane-1'))
   // Reads and writes of the focused group go through this ref, so a handler that focuses a pane
   // and then mutates tabs in the same tick still targets the pane it just focused.
   const focusedRef=useRef('pane-1')
   const focusedGroup=groups.find(group=>group.id===focusedId)??groups[0]!
-  const tabs=focusedGroup.tabs; const active=focusedGroup.active
+  const tabs=focusedGroup.tabs
+  const active=dockedConversation?.active && dockedConversation.group === focusedId ? undefined : focusedGroup.active
   const debugState = useSyncExternalStore(debugController.subscribe, debugController.getSnapshot)
   // F5 must work even when the debug panel is closed, so the session is registered here.
   const debugWorkspace = workspace?.cwd ?? cwd
   useEffect(() => { if (sessionId !== undefined) debugController.setSession(sessionId, debugWorkspace) }, [sessionId,debugWorkspace])
   const setTabsIn=useCallback((id:string,update:Tab[]|((rows:Tab[])=>Tab[]))=>setGroups(current=>current.map(group=>group.id===id?{...group,tabs:typeof update==='function'?update(group.tabs):update}:group)),[])
-  const setActiveIn=useCallback((id:string,value:string|undefined)=>setGroups(current=>current.map(group=>group.id===id?{...group,active:value}:group)),[])
+  const deactivateConversationIn = useCallback((group: string) => {
+    setConversationTab(current => current?.group === group && current.active ? { ...current, active: false } : current)
+  }, [])
+  const setActiveIn=useCallback((id:string,value:string|undefined)=>{
+    setGroups(current=>current.map(group=>group.id===id?{...group,active:value}:group))
+    if (value !== undefined) deactivateConversationIn(id)
+  },[deactivateConversationIn])
   const setTabs=useCallback((update:Tab[]|((rows:Tab[])=>Tab[]))=>setTabsIn(focusedRef.current,update),[setTabsIn])
   const setActive=useCallback((value?:string)=>setActiveIn(focusedRef.current,value),[setActiveIn])
   const focusGroup=useCallback((id:string)=>{if(focusedRef.current!==id){focusedRef.current=id;setFocusedId(id)}},[])
-  const [paneDrop,setPaneDrop]=useState<{group:string;direction:SplitDirection;position:SplitPosition}|undefined>()
+  const [paneDrop,setPaneDrop]=useState<(PaneDropPosition & {group:string})|undefined>()
   const [tabDrop,setTabDrop]=useState<{group:string;index:number}|undefined>()
+  // Latest drag handlers for the document capture listener; hook count stays stable
+  // even when the component later returns early for settings or a missing session.
+  const dragCaptureRef = useRef({ over: (_: DragEvent) => {}, drop: (_: DragEvent) => {} })
   // A cancelled drag (Esc) or a drop outside the panes never reaches the drop handler, and a
   // highlight left behind would then describe a position that is no longer true.
   useEffect(() => {
-    const clear = () => { setPaneDrop(undefined); setTabDrop(undefined) }
+    const start = (event: globalThis.DragEvent) => {
+      if ([CONVERSATION_DRAG_TYPE, TAB_DRAG_TYPE, ENTRY_DRAG_TYPE].some(type => event.dataTransfer?.types.includes(type))) document.body.setAttribute('data-dvw-editor-dragging', '')
+    }
+    const clear = () => {
+      document.body.removeAttribute('data-dvw-editor-dragging')
+      setPaneDrop(undefined); setTabDrop(undefined)
+    }
+    window.addEventListener('dragstart', start)
     window.addEventListener('dragend', clear)
-    window.addEventListener('drop', clear)
-    return () => { window.removeEventListener('dragend', clear); window.removeEventListener('drop', clear) }
+    window.addEventListener('drop', clear, true)
+    return () => {
+      window.removeEventListener('dragstart', start)
+      window.removeEventListener('dragend', clear); window.removeEventListener('drop', clear, true)
+      document.body.removeAttribute('data-dvw-editor-dragging')
+    }
   }, []);
+  useEffect(() => {
+    const insidePane = (event: globalThis.DragEvent) => paneAtPoint(
+      Array.from(overlayRef.current?.querySelectorAll<HTMLElement>('.dvw-pane') ?? []),
+      event.clientX, event.clientY,
+    ) !== undefined
+    const over = (event: globalThis.DragEvent) => {
+      if (!insidePane(event)) return
+      dragCaptureRef.current.over(event as unknown as DragEvent)
+    }
+    const drop = (event: globalThis.DragEvent) => {
+      if (!insidePane(event)) return
+      dragCaptureRef.current.drop(event as unknown as DragEvent)
+    }
+    document.addEventListener('dragover', over, true)
+    document.addEventListener('drop', drop, true)
+    return () => {
+      document.removeEventListener('dragover', over, true)
+      document.removeEventListener('drop', drop, true)
+    }
+  }, [])
   const [gitDiffStyle, setGitDiffStyle] = useState<GitDiffStyle>(() => localStorage.getItem('dvw:git-diff-style') === 'classic' ? 'classic' : 'ribbon')
   const [preferredDiffMode, setPreferredDiffMode] = useState<GitDiffMode | undefined>(() => {
     const saved = storedValue(GIT_DIFF_MODE_KEY)
@@ -1115,28 +1170,21 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   const [minimap,setMinimap]=useState(()=>storedValue('dvw:editor-minimap')!=='off')
   const nativeSidebar=useNativeSidebar(rightSidebar,sessionId,snapshot.visible)
   const dismissNativeSidebar=nativeSidebar.dismiss
-  const [browserSnapshot,setBrowserSnapshot]=useState<BrowserSnapshot>(()=>browser?.getSnapshot()??{available:false,tabs:[]})
-  const [browserId,setBrowserId]=useState<string>()
-  const browserTabs=browserSnapshot.tabs.filter(tab=>tab.sessionId===sessionId)
-  const previousBrowserTabs=useRef({sessionId,ids:new Set(browserTabs.map(tab=>tab.id))})
-  const activeBrowserId=previousBrowserTabs.current.sessionId===sessionId&&browserTabs.some(tab=>tab.id===browserId)?browserId:undefined
-  useEffect(()=>{if(browser===undefined)return;setBrowserSnapshot(browser.getSnapshot());return browser.subscribe(()=>setBrowserSnapshot(browser.getSnapshot()))},[browser])
-  useEffect(()=>{
-    const next=new Set(browserTabs.map(tab=>tab.id))
-    const previous=previousBrowserTabs.current
-    const added=previous.sessionId===sessionId?browserTabs.find(tab=>!previous.ids.has(tab.id)):undefined
-    previousBrowserTabs.current={sessionId,ids:next}
-    if(added!==undefined&&snapshot.visible){dismissNativeSidebar();setBrowserId(added.id);setDshTabActive(false)}
-    else if(browserId!==undefined&&(previous.sessionId!==sessionId||!next.has(browserId)))setBrowserId(undefined)
-  },[browserSnapshot,sessionId,browserId,snapshot.visible,dismissNativeSidebar])
   const browserRequest=useRef<AbortController>()
-  useEffect(()=>()=>browserRequest.current?.abort(),[browser,sessionId,snapshot.visible])
-  const browserIdRef=useRef(browserId);browserIdRef.current=browserId
+  const browserScope=useRef<AbortController>()
+  const nativeSidebarRef=useRef(nativeSidebar);nativeSidebarRef.current=nativeSidebar
+  useEffect(()=>{
+    const scope=new AbortController();browserScope.current=scope
+    return()=>{scope.abort();browserRequest.current?.abort()}
+  },[browser,sessionId,snapshot.visible])
   const newBrowser=async(url?:string)=>{
     if(browser===undefined||sessionId===undefined)return
-    dismissNativeSidebar();setDshTabActive(false);onRestoreConversation?.()
+    onRestoreConversation?.()
     browserRequest.current?.abort();const request=new AbortController();browserRequest.current=request
-    try{setBrowserId(await browser.open(sessionId,request.signal,url,browserIdRef.current))}catch(error){if(!request.signal.aborted)setError(error instanceof Error?error.message:String(error))}
+    try{
+      await browser.open(sessionId,request.signal,url)
+      if(!request.signal.aborted&&!nativeSidebarRef.current.shown)nativeSidebarRef.current.toggle()
+    }catch(error){if(!request.signal.aborted)setError(error instanceof Error?error.message:String(error))}
   }
   const [defaultBrowser,setDefaultBrowser]=useState<DefaultBrowser>(()=>localStorage.getItem(DEFAULT_BROWSER_KEY)==='system'?'system':'builtin')
   useEffect(()=>localStorage.setItem(DEFAULT_BROWSER_KEY,defaultBrowser),[defaultBrowser])
@@ -1147,12 +1195,23 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   const [floatFullscreen,setFloatFullscreen]=useState(false)
   const ownsFullscreen=useRef(false)
   const [viewport,setViewport]=useState(viewportSize)
-  const nativeLayout=fitNativeSidebarLayout(viewport.width,floating?0:nativeSidebar.width,sideWidth,chatWidth,DSH_CHAT_MIN_WIDTH,chatVisible&&!dshTabActive)
-  const chatSuppressedBySidebar=nativeSidebar.shown&&(nativeSidebar.fullscreen||floating||!nativeLayout.chatFits)
-  const sideWidthLimit=Math.min(640,nativeLayout.sideLimit)
-  const chatWidthLimit=Math.min(DSH_CHAT_MAX_WIDTH,nativeLayout.chatLimit)
   const [floatRect,setFloatRect]=useState<FloatRect>(()=>readFloatRect(storedValue(FLOAT_RECT_KEY),viewportSize(),dshTitlebarHeight()))
   const [floatMax,setFloatMax]=useState(()=>readFloatMax(storedValue(FLOAT_MAX_KEY)))
+  const editorHasContent=groups.some(group=>group.tabs.length>0)||dockedConversation!==undefined||dshPanelId!==undefined||snapshot.bottomPanel!==undefined
+  const nativeLayout=fitNativeSidebarLayout({
+    viewportWidth:floating&&!floatMax&&!floatFullscreen?floatRect.width-2:viewport.width,
+    dockWidth:floating?0:nativeSidebar.width,sideWidth,chatWidth,minChatWidth:DSH_CHAT_MIN_WIDTH,
+    chatVisible:chatVisible&&!dshTabActive&&dockedConversation===undefined,
+    sideVisible:primarySideVisible,editorVisible:editorHasContent,
+  })
+  const chatSuppressedBySidebar=nativeSidebar.shown&&(nativeSidebar.fullscreen||floating||!nativeLayout.chatFits)
+  const sideWidthLimit=Math.min(640,nativeLayout.sideLimit)
+  const chatWidthLimit=nativeLayout.chatLimit
+  const resizeSide = (width: number) => {
+    if (sideWidthLimit < 210) return
+    setSideWidth(width === sideWidthLimit ? Math.max(sideWidth, width) : width)
+  }
+  const resizeChat = (width: number) => setChatWidth(width === chatWidthLimit ? Math.max(chatWidth, width) : width)
   useEffect(()=>{
     const sync=()=>{
       const active=ownsFullscreen.current&&document.fullscreenElement===document.body
@@ -1222,19 +1281,19 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   }
   const openSiteFile=async(path:string)=>{
     if(sessionId===undefined)return
+    const signal=browserScope.current?.signal
     try{
-      const {url}=await api<{url:string}>('preview.site',{sessionId,path})
+      const {url}=await api<{url:string}>('preview.site',{sessionId,path},signal)
+      if(signal?.aborted)return
       openBrowserUrl(url)
-    }catch(error){setError(error instanceof Error?error.message:String(error))}
+    }catch(error){if(!signal?.aborted)setError(error instanceof Error?error.message:String(error))}
   }
-  useEffect(()=>{if(snapshot.visible&&activeBrowserId!==undefined&&!dshTabActive&&!nativeSidebar.shown&&(!rightSidebar||nativeSidebar.ready))browser?.focus(activeBrowserId)},[browser,activeBrowserId,dshTabActive,nativeSidebar.shown,nativeSidebar.ready,rightSidebar,snapshot.visible])
   useEffect(()=>{if(!snapshot.visible)return;const open=()=>void newBrowser();window.addEventListener('dvw-browser-new',open);return()=>window.removeEventListener('dvw-browser-new',open)},[browser,sessionId,snapshot.visible])
   useEffect(()=>{
     const open=(event:Event)=>{const url=(event as CustomEvent<string>).detail;if(typeof url==='string'&&url!=='')openBrowserUrl(url)}
     window.addEventListener('dvw-open-external-url',open)
     return ()=>window.removeEventListener('dvw-open-external-url',open)
   },[defaultBrowser,browser,sessionId])
-  useEffect(()=>{if(hostDshPanelId!==undefined)setBrowserId(undefined)},[hostDshPanelId])
   const groupsRef=useRef(groups);groupsRef.current=groups
   const hasUnsavedSearchFile = useCallback((path: string) => groupsRef.current.some(group => group.tabs.some(tab => tab.path === path && tab.dirty)), [])
   const [searchFocus, setSearchFocus] = useState<{ replace: boolean }>()
@@ -1258,16 +1317,30 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   const hostDshPanelIdRef=useRef(hostDshPanelId);hostDshPanelIdRef.current=hostDshPanelId
   const openDshPanelRef=useRef(onOpenDshPanel);openDshPanelRef.current=onOpenDshPanel
   const restoreConversationRef=useRef(onRestoreConversation);restoreConversationRef.current=onRestoreConversation
-  const leaveDshPanel=useCallback(()=>{setBrowserId(undefined);const wasActive=dshTabActiveRef.current;setDshTabActive(false);if(wasActive)restoreConversationRef.current?.()},[])
-  const openDshTab=useCallback(()=>{setBrowserId(undefined);const id=dshTabIdRef.current;if(id===undefined)return;setDshTabActive(true);if(hostDshPanelIdRef.current!==id)openDshPanelRef.current?.(id)},[])
+  const leaveDshPanel=useCallback(()=>{const wasActive=dshTabActiveRef.current;setDshTabActive(false);if(wasActive)restoreConversationRef.current?.()},[])
+  const openDshTab=useCallback(()=>{const id=dshTabIdRef.current;if(id===undefined)return;setDshTabActive(true);if(hostDshPanelIdRef.current!==id)openDshPanelRef.current?.(id)},[])
   // Bring the official conversation back without requiring another tab: while a
   // DSH panel is pinned, the chat column is intentionally hidden, so the whale
   // button and Ctrl+Alt+B must first leave that panel.
-  const showConversation=useCallback(()=>{if(chatSuppressedBySidebar)dismissNativeSidebar();setBrowserId(undefined);setDshTabActive(false);setChatVisible(true)},[chatSuppressedBySidebar,dismissNativeSidebar])
+  const conversationTabGroup = dockedConversation?.group
+  const showConversation=useCallback(()=>{
+    if(chatSuppressedBySidebar)dismissNativeSidebar()
+    setDshTabActive(false)
+    setChatVisible(true)
+    if (conversationTabGroup !== undefined) {
+      focusGroup(conversationTabGroup)
+      setConversationTab(tab => tab && { ...tab, active: true })
+    }
+  },[chatSuppressedBySidebar,conversationTabGroup,dismissNativeSidebar,focusGroup])
+  useEffect(() => { setConversationTab(undefined) }, [sessionId, cwd])
   const tabListRef=useRef<HTMLDivElement>(null)
   const workspaceRequests=useRef(new WorkspaceRequestScope());const loadedWorkspace=useRef<{cwd:string;name:string}>();const loadingTabs=useRef(new Map<string, symbol>())
   const dshDark = useDshDarkTheme()
-  const [theme,setTheme]=useState<WorkbenchTheme>(()=>{const saved=localStorage.getItem('dvw:theme');return saved==='dark'||saved==='light'||saved==='white'||saved==='eyecare'?saved:'dsh'})
+  const [theme, setTheme] = useState<WorkbenchTheme>(() => {
+    const saved = storedValue('dvw:theme')
+    if (saved === 'white') return 'light'
+    return saved === 'dark' || saved === 'light' || saved === 'eyecare' ? saved : 'dsh'
+  })
   const [markdownView,setMarkdownView]=useState<MarkdownDefaultView>(()=>markdownDefaultView())
   const [reviewMode,setReviewMode]=useState<ReviewMode>(()=>{
     const saved=storedValue('dvw:ai-review-mode')
@@ -1374,7 +1447,7 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     setCommitModelConfigured(false)
     setCommitModel(availableDefault)
   },[commitModel,commitModelConfigured,commitModels])
-  const colorScheme: 'dark' | 'light' | 'white' | 'eyecare' = theme === 'dsh' ? dshDark ? 'dark' : 'light' : theme
+  const colorScheme: WorkbenchColorScheme = theme === 'dsh' ? dshDark ? 'dark' : 'light' : theme
   const commitPreferences=useMemo<CommitMessagePreferences>(()=>({detail:commitDetail,language:commitLanguage}),[commitDetail,commitLanguage])
   useEffect(()=>localStorage.setItem('dvw:theme',theme),[theme])
   useEffect(()=>localStorage.setItem(MARKDOWN_DEFAULT_VIEW_KEY,markdownView),[markdownView])
@@ -1436,7 +1509,7 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     document.body.setAttribute('data-dvw-workbench-active', '')
     return () => document.body.removeAttribute('data-dvw-workbench-active')
   }, [snapshot.visible, openMode])
-  useEffect(()=>{if(!snapshot.visible)return;const onKey=(event:KeyboardEvent)=>{if(event.isComposing||!event.ctrlKey||!event.altKey||event.shiftKey||event.code!=='KeyB')return;event.preventDefault();if(dshTabActiveRef.current&&dshTabIdRef.current!==undefined){showConversation();return}if(chatSuppressedBySidebar){showConversation();return}setChatVisible(value=>!value)};window.addEventListener('keydown',onKey,true);return()=>window.removeEventListener('keydown',onKey,true)},[snapshot.visible,showConversation,chatSuppressedBySidebar])
+  useEffect(()=>{if(!snapshot.visible)return;const onKey=(event:KeyboardEvent)=>{if(event.isComposing||!event.ctrlKey||!event.altKey||event.shiftKey||event.code!=='KeyB')return;event.preventDefault();if(dshTabActiveRef.current&&dshTabIdRef.current!==undefined){showConversation();return}if(chatSuppressedBySidebar||conversationTabGroup!==undefined){showConversation();return}setChatVisible(value=>!value)};window.addEventListener('keydown',onKey,true);return()=>window.removeEventListener('keydown',onKey,true)},[snapshot.visible,showConversation,chatSuppressedBySidebar,conversationTabGroup])
   useEffect(()=>{
     if(!floating||!snapshot.visible)return
     const onKey=(event:KeyboardEvent)=>{
@@ -2075,9 +2148,9 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     } catch (error) { if (workspaceRequests.current.isCurrent(epoch)) setError(String(error)) }
     finally { savingTabs.current.delete(tab.path) }
   }
-  const close=(tab:Tab)=>{if(tab.dirty&&!confirm(`${tab.path} 有未保存更改，确定关闭？`))return;loadingTabs.current.delete(tabLoadKey(focusedRef.current,tab.path));setTabs(rows=>rows.filter(row=>row.path!==tab.path));if(active===tab.path)setActive(tabs.filter(row=>row.path!==tab.path).at(-1)?.path)}
-  const closeAll=()=>{const dirty=tabs.filter(tab=>tab.dirty);if(dirty.length>0&&!confirm(`有 ${dirty.length} 个文件包含未保存更改，确定全部关闭？`))return;loadingTabs.current.clear();setTabs([]);setActive(undefined);setError(undefined);setTabMenu(undefined)}
-  const removeTabs=(targets:Tab[],verb:string)=>{if(targets.length===0)return;const dirty=targets.filter(tab=>tab.dirty).length;if(dirty>0&&!confirm(`有 ${dirty} 个文件包含未保存更改，确定${verb}？`))return;const paths=new Set(targets.map(tab=>tab.path));for(const path of paths)loadingTabs.current.delete(tabLoadKey(focusedRef.current,path));const remaining=tabsRef.current.filter(tab=>!paths.has(tab.path));setTabs(remaining);if(active!==undefined&&paths.has(active))setActive(remaining.at(-1)?.path);setTabMenu(undefined)}
+  const close=(tab:Tab)=>closeInGroup(focusedRef.current,tab)
+  const closeAll=()=>{const dirty=tabs.filter(tab=>tab.dirty);if(dirty.length>0&&!confirm(`有 ${dirty.length} 个文件包含未保存更改，确定全部关闭？`))return;loadingTabs.current.clear();setTabs([]);setActive(undefined);if(dockedConversation?.group===focusedRef.current)returnConversation();setError(undefined);setTabMenu(undefined)}
+  const removeTabs=(targets:Tab[],verb:string)=>{if(targets.length===0)return;const dirty=targets.filter(tab=>tab.dirty).length;if(dirty>0&&!confirm(`有 ${dirty} 个文件包含未保存更改，确定${verb}？`))return;const paths=new Set(targets.map(tab=>tab.path));for(const path of paths)loadingTabs.current.delete(tabLoadKey(focusedRef.current,path));const remaining=tabsRef.current.filter(tab=>!paths.has(tab.path));setTabs(remaining);if(active!==undefined&&paths.has(active))setActive(remaining.at(-1)?.path);if(remaining.length===0&&dockedConversation?.group===focusedRef.current)setConversationTab(current=>current&&{...current,active:true});setTabMenu(undefined)}
   const activeTab=tabs.find(tab=>tab.path===active)
   const debugPath = activeTab?.loaded && !isRemoteFileUri(activeTab.path) && !activeTab.binary && !activeTab.tooLarge && !activeTab.path.startsWith('diff:') &&
     activeTab.referenceUri === undefined && !activeTab.documentPreview && !activeTab.imageUrl ? activeTab.path : undefined
@@ -2260,9 +2333,66 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   const showingDshPanel=dshTabId!==undefined&&dshTabActive
   const closeDshPanel=()=>{setDshTabActive(false);setDshTabId(undefined);onCloseDshPanel?.()}
   const openFromView=openPath
-  const chatShown=chatVisible&&!showingDshPanel&&!chatSuppressedBySidebar
+  const chatShown=chatVisible&&!showingDshPanel&&!chatSuppressedBySidebar&&dockedConversation===undefined
+  const conversationEditorShown=dockedConversation?.active===true&&(!showingDshPanel||dockedConversation.group!==focusedId)
+  const conversationShown=chatShown||conversationEditorShown
+  // Only change presentation: the user's split tree returns when the native dock closes.
+  const conversationOnlyBesideSidebar=nativeSidebar.shown&&dockedConversation!==undefined&&groups.every(group=>group.tabs.length===0)&&dshPanelId===undefined&&snapshot.bottomPanel===undefined
+  const displayedLayout=conversationOnlyBesideSidebar?createLeaf(dockedConversation.group):layout
   const floatSurfacePaused=floating&&(settingsOpen||switcherOpen)
+  const detachConversation = (showSidebar: boolean) => {
+    const group = groups.find(group => group.id === dockedConversation?.group)
+    if (group !== undefined && group.tabs.length === 0 && groups.length > 1) {
+      const remaining = groups.filter(row => row.id !== group.id)
+      setGroups(remaining)
+      setLayout(current => removeGroup(current, group.id) ?? createLeaf(remaining[0]!.id))
+      if (focusedRef.current === group.id) focusGroup(remaining[0]!.id)
+    }
+    setConversationTab(undefined)
+    setChatVisible(showSidebar)
+    leaveDshPanel()
+    if (showSidebar && chatSuppressedBySidebar) dismissNativeSidebar()
+  }
+  const returnConversation = () => detachConversation(true)
+  const closeConversationBar = () => detachConversation(false)
+  const closeEmptyGroup = (groupId: string) => {
+    const index = groups.findIndex(group => group.id === groupId)
+    if (index < 0 || groups.length === 1 || groups[index]!.tabs.length > 0 || dockedConversation?.group === groupId) return
+    const remaining = groups.filter(group => group.id !== groupId)
+    setGroups(remaining)
+    setLayout(current => removeGroup(current, groupId) ?? createLeaf(remaining[0]!.id))
+    if (focusedRef.current === groupId) focusGroup(remaining[Math.max(0, index - 1)]!.id)
+  }
+  const dockConversation = (groupId: string, index?: number, split?: PaneDropPosition) => {
+    if (split !== undefined && paneCount(layout) + dropPaneCount(split) > MAX_PANES) return
+    const source = groups.find(group => group.id === dockedConversation?.group)
+    // A lone conversation already fills this group; splitting it away would only make an empty pane.
+    if (split !== undefined && split.vertical === undefined && source?.id === groupId && source.tabs.length === 0) return
+    const target = split === undefined ? groupId : `pane-${crypto.randomUUID()}`
+    const empty = `${target}-empty`
+    const collapse = source !== undefined && source.id !== target && source.id !== groupId && source.tabs.length === 0
+    let next = split === undefined ? groups : [...groups, { id: target, tabs: [] }, ...(split.vertical === undefined ? [] : [{ id: empty, tabs: [] }])]
+    if (collapse) next = next.filter(group => group.id !== source.id)
+    setGroups(next)
+    setLayout(current => {
+      const tree = split === undefined ? current : splitForDrop(current, groupId, split, target, empty)
+      return collapse ? removeGroup(tree, source.id) ?? createLeaf(target) : tree
+    })
+    setConversationTab({ sessionId, group: target, index: split === undefined ? index ?? groups.find(group => group.id === target)!.tabs.length : 0, active: true })
+    setChatVisible(true)
+    leaveDshPanel()
+    if (chatSuppressedBySidebar) dismissNativeSidebar()
+    focusGroup(target)
+  }
   const renderPaneChrome = (group: EditorGroup, tabs: Tab[], active: string | undefined, activeTab: Tab | undefined, focused: boolean, paneMarkdown: boolean, paneDiffMarkdown: boolean, markdownPreview: boolean) => {
+    const conversation = dockedConversation?.group === group.id ? dockedConversation : undefined
+    const conversationIndex = conversation === undefined ? -1 : Math.min(conversation.index, tabs.length)
+    const conversationButton = conversation === undefined ? null : <button key="conversation" type="button" className="dvw-tab" data-dvw-conversation-tab="" data-active={conversation.active&&(!focused||(!dshTabActive))}
+      draggable onDragStart={startConversationDrag} onDragEnd={endConversationDrag} title="DSH 对话（拖动可移动标签或分屏）"
+      onClick={()=>{focusGroup(group.id);leaveDshPanel();setConversationTab(current=>current&&{...current,active:true})}}
+      onAuxClick={event=>{if(event.button===1){event.preventDefault();closeConversationBar()}}} onMouseDown={event=>{if(event.button===1)event.preventDefault()}}>
+      <DshMark/><span className="dvw-tab-name">DSH 对话</span><span className="dvw-tab-close" title="关闭对话栏" onClick={event=>{event.stopPropagation();closeConversationBar()}}><Icon name="close"/></span>
+    </button>
     const setActive = (value?: string) => { focusGroup(group.id); setActiveIn(group.id, value) }
     const setTabs = (update: Tab[] | ((rows: Tab[]) => Tab[])) => setTabsIn(group.id, update)
     const close = (tab: Tab) => closeInGroup(group.id, tab)
@@ -2283,29 +2413,31 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     const inlineReviewChanges=activeReviewChanges.filter(change=>!change.created||activeReviewChanges.length===1)
     const rejectReview=(ids:string[])=>{if(activeTab!==undefined)void rejectReviewIn(group.id,activeTab,ids)}
     const selectHeading = (index: number) => { if (activeTab === undefined) return; setTabs(rows => rows.map(tab => tab.path === activeTab.path ? { ...tab, preview: true } : tab)); window.setTimeout(() => window.dispatchEvent(new CustomEvent('dvw-markdown-heading', { detail: index })), 50) }
-    return <><div className="dvw-tabs" data-empty={(tabs.length===0&&dshPanelId===undefined&&browserTabs.length===0)||undefined}><div className="dvw-tab-list" ref={focused?tabListRef:undefined}>{focused&&browserTabs.map(tab=><button className="dvw-tab" key={tab.id} data-dvw-browser-tab={tab.id} data-active={browserId===tab.id&&!dshTabActive} title={tab.title} onClick={()=>{dismissNativeSidebar();leaveDshPanel();setBrowserId(tab.id)}}><Icon name="globe"/><span className="dvw-tab-name">{tab.title}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();browser?.close(tab.sessionId,tab.id)}}><Icon name="close"/></span></button>)}{focused&&dshPanelId!==undefined&&<button className="dvw-tab" data-active={dshTabActive} data-dvw-dsh-tab="" title={`${dshPanelLabel(dshPanelId)}（DSH 官方页面）`} onClick={()=>setDshTabActive(true)}><span className="dvw-dsh-tab-mark"/><span className="dvw-tab-name">{dshPanelLabel(dshPanelId)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();closeDshPanel()}}><Icon name="close"/></span></button>}{tabs.map(tab=>{const count=reviewEnabled?(reviewByPath.get(tab.path)?.length??0):0;const conflict=reviewEnabled&&(reviewByPath.get(tab.path)??[]).some(change=>reviewSnapshot.conflicts[change.id]!==undefined);return <button className="dvw-tab" data-active={tab.path===active&&!dshTabActive&&browserId===undefined} data-review-conflict={conflict||undefined} key={tab.path} data-tab-path={tab.path} draggable onDragStart={event=>startTabDrag(event,group.id,tab)} onDragEnd={endTabDrag} title={conflict?`${tab.diffSourcePath??tab.path} · AI 改动与当前文件状态冲突`:tab.diffSourcePath??tab.path} onClick={()=>{setBrowserId(undefined);setDshTabActive(false);setActive(tab.path)}} onAuxClick={event=>{if(event.button===1){event.preventDefault();close(tab)}}} onMouseDown={event=>{if(event.button===1)event.preventDefault()}} onContextMenu={event=>{event.preventDefault();setBrowserId(undefined);setDshTabActive(false);setActive(tab.path);setTabMenu({x:event.clientX,y:event.clientY,path:tab.path})}}><FileIcon name={tabLabel(tab)} className="dvw-tab-icon"/><span className="dvw-tab-name">{tab.dirty?'● ':''}{tabLabel(tab)}</span>{count>0&&<span className="dvw-tab-review" data-conflict={conflict||undefined} title={`${count} 处 AI 改动待审阅`}>{count}</span>}<span className="dvw-tab-close" onClick={event=>{event.stopPropagation();close(tab)}}><Icon name="close"/></span></button>})}</div></div><div className="dvw-editor" data-dvw-focused-editor={focused||undefined} data-review={hasActiveReview||undefined} data-outline={markdownPreview&&outlineVisible&&headings.length>0} data-browser-active={focused&&browserId!==undefined||undefined} onKeyDownCapture={event=>{if(!hasActiveReview||activeTab===undefined||!(event.target instanceof Element)||event.target.closest('.monaco-editor')===null)return;const command=event.ctrlKey||event.metaKey;if(command&&!event.altKey&&!event.shiftKey&&event.key==='Enter'){event.preventDefault();event.stopPropagation();keepReview(activeReviewChanges.map(change=>change.id));return}if(command&&!event.altKey&&!event.shiftKey&&event.key==='Backspace'){event.preventDefault();event.stopPropagation();rejectReview(activeReviewChanges.map(change=>change.id));return}const singleModifier=navigator.userAgent.includes('Mac')?event.ctrlKey&&!event.metaKey&&!event.altKey:event.altKey&&!command;if(singleModifier&&!event.shiftKey&&(event.code==='KeyY'||event.code==='KeyN')){const change=inlineReviewChanges.find(item=>item.id===reviewActiveId)??inlineReviewChanges[0];if(change===undefined)return;event.preventDefault();event.stopPropagation();if(event.code==='KeyY')keepReview([change.id]);else rejectReview([change.id])}}}>{error&&<div className="dvw-error"><button className="dvw-icon" onClick={()=>setError(undefined)}><Icon name="close"/></button>{error}</div>}{markdownPreview&&outlineVisible&&headings.length>0&&<MarkdownOutline headings={headings} onClose={()=>setOutlineVisible(false)} onHeading={selectHeading}/>} {markdown&&activeTab&&<div className="dvw-editor-toolbar"><button className="dvw-icon dvw-outline-toggle" data-active={outlineVisible} title={outlineVisible?'关闭 Markdown 大纲':'显示 Markdown 大纲'} onClick={()=>setOutlineVisible(value=>!value)}><Icon name="list-tree"/></button><button className="dvw-mode-button" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="code"/> 源码</button><button className="dvw-mode-button" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{activeTab?.diff&&!showTextDiff&&<div className="dvw-editor-toolbar dvw-diff-toolbar">{diffControls}</div>}<div className="dvw-editor-body" data-toolbar={markdown||activeTab?.diff!==undefined} style={{top:(markdown&&!activeTab?.preview?35:0)+(activeTab?.diff&&!showTextDiff?35:0)}}>{activeTab===undefined?<div className="dvw-empty"><div><strong>DSH Workbench</strong><br/>从资源管理器或搜索结果打开文件<div className="dvw-start-tools"><button onClick={()=>{if(snapshot.bottomPanel!=='terminal')service.toggleBottomPanel('terminal');queueMicrotask(()=>service.runCommand('terminal.new'))}} disabled={!terminalAvailable}><Icon name="terminal"/>新建终端</button>{browser!==undefined&&<button onClick={()=>void newBrowser()} disabled={!browserSnapshot.available}><Icon name="globe"/>浏览器</button>}</div></div></div>:activeTab.diff?diffMarkdown&&activeTab.preview?<MarkdownPreview source={activeTab.diff.modified} sessionId={sessionId} path={activeTab.diffSourcePath??''}/>:<MonacoDiffEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} original={activeTab.diff.original} modified={activeTab.diff.modified} mode={diffMode} style={gitDiffStyle} viewControls={diffControls} versions={diffVersions} sourcePath={activeTab.diffSourcePath} blame={activeTab.diff.blame} blameSessionId={gitLineBlame?sessionId:undefined} reviewActions={gitReviewPath===undefined?undefined:{onAsk:range=>askFileToDsh(gitReviewPath,range)}} theme={colorScheme} fontSize={fontSize}/>:activeTab.imageUrl?<div className="dvw-image-preview" key={activeTab.path}><img src={activeTab.imageUrl} alt={activeTab.diffSourcePath??activeTab.path}/><span>{activeTab.diffSourcePath??activeTab.path}</span></div>:activeTab.documentPreview&&activeTab.documentUrl?<DocumentPreview key={activeTab.path} kind={activeTab.documentPreview} src={activeTab.documentUrl} path={activeTab.path}/>:markdown&&activeTab.preview?<MarkdownPreview source={activeTab.draft} sessionId={sessionId} path={activeTab.path}/>:activeTab.binary||activeTab.tooLarge?<div className="dvw-message">{activeTab.binary?'二进制文件无法在文本编辑器或差异视图中打开':`文件超过 5 MiB：${activeTab.path}`}{activeTab.binary&&activeTab.diffSourcePath!==undefined&&!activeTab.path.startsWith('diff:commit:')&&<button onClick={()=>void openPath(activeTab.diffSourcePath!)}>打开文件</button>}</div>:activeTab.loaded===false?<div className="dvw-message">{activeTab.loadError===undefined?'正在加载文件…':<>{activeTab.loadError} <button type="button" onClick={()=>{setTabsIn(group.id,rows=>rows.map(row=>row.path===activeTab.path?{...row,loadError:undefined}:row));loadTab(activeTab.path,group.id)}}>重试读取文件</button></>}</div>:<MonacoEditor uri={activeTab.referenceUri??editorModelUri(workspace?.cwd??'',activeTab.path)} readOnly={activeTab.referenceUri!==undefined} aiCompletion={focused&&!showingDshPanel&&!switcherOpen&&browserId===undefined&&!isRemoteFileUri(activeTab.path)?inlineCompletion:undefined} onCompletionError={setError} breakpoints={(debugState.breakpoints[activeTab.path]??[]).map(row=>row.line)} pausedLine={debugState.frames.find(frame=>{if(frame.path===undefined)return false;const norm=(v:string)=>v.replace(/\\/g,'/');return norm(frame.path).endsWith(norm(activeTab.path))})?.line} onToggleBreakpoint={line=>{if(sessionId!==undefined&&activeTab.referenceUri===undefined&&!isRemoteFileUri(activeTab.path))debugController.toggleBreakpoint(sessionId,activeTab.path,line)}} onAddToDsh={activeTab.referenceUri===undefined?selection=>addReferenceToDsh(activeTab.path,{selection}):undefined} value={activeTab.draft} theme={colorScheme} fontSize={fontSize} minimap={minimap} line={activeTab.line} endLine={activeTab.endLine} column={activeTab.column} highlight={activeTab.highlight} focusOnReveal={activeTab.focusOnReveal} blame={gitLineBlame&&sessionId&&activeTab.referenceUri===undefined&&!isRemoteFileUri(activeTab.path)?{sessionId,path:activeTab.path,revision:activeTab.revision,dirty:activeTab.dirty}:undefined} review={reviewEnabled&&inlineReviewChanges.length>0?{changes:inlineReviewChanges.map(change=>({...change,...(reviewSnapshot.conflicts[change.id]===undefined?{}:{conflict:reviewSnapshot.conflicts[change.id]})})),activeId:reviewActiveId,busy:reviewSnapshot.busy||reviewSnapshot.working,rejectDisabled:reviewSnapshot.busy||reviewSnapshot.working||activeTab.dirty,onFocus:setReviewActiveId,onKeep:changeId=>keepReview([changeId]),onReject:changeId=>rejectReview([changeId]),onAsk:change=>askFileToDsh(activeTab.path,locateReviewChange(activeTab.draft,change))}:undefined} onChange={draft=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,draft,dirty:draft!==tab.content}:tab))} onSave={()=>void save(activeTab)}/>}</div></div></>
+    return <><div className="dvw-tabs" data-empty={(tabs.length===0&&conversation===undefined&&dshPanelId===undefined)||undefined}><div className="dvw-tab-list" ref={focused?tabListRef:undefined}>{focused&&dshPanelId!==undefined&&<button className="dvw-tab" data-active={dshTabActive} data-dvw-dsh-tab="" title={`${dshPanelLabel(dshPanelId)}（DSH 官方页面）`} onClick={()=>setDshTabActive(true)}><span className="dvw-dsh-tab-mark"/><span className="dvw-tab-name">{dshPanelLabel(dshPanelId)}</span><span className="dvw-tab-close" onClick={event=>{event.stopPropagation();closeDshPanel()}}><Icon name="close"/></span></button>}{tabs.flatMap((tab,index)=>{const count=reviewEnabled?(reviewByPath.get(tab.path)?.length??0):0;const conflict=reviewEnabled&&(reviewByPath.get(tab.path)??[]).some(change=>reviewSnapshot.conflicts[change.id]!==undefined);return [index===conversationIndex?conversationButton:null,<button className="dvw-tab" data-active={tab.path===active&&!dshTabActive} data-review-conflict={conflict||undefined} key={tab.path} data-tab-path={tab.path} draggable onDragStart={event=>startTabDrag(event,group.id,tab)} onDragEnd={endTabDrag} title={conflict?`${tab.diffSourcePath??tab.path} · AI 改动与当前文件状态冲突`:tab.diffSourcePath??tab.path} onClick={()=>{setDshTabActive(false);setActive(tab.path)}} onAuxClick={event=>{if(event.button===1){event.preventDefault();close(tab)}}} onMouseDown={event=>{if(event.button===1)event.preventDefault()}} onContextMenu={event=>{event.preventDefault();setDshTabActive(false);setActive(tab.path);setTabMenu({x:event.clientX,y:event.clientY,path:tab.path})}}><FileIcon name={tabLabel(tab)} className="dvw-tab-icon"/><span className="dvw-tab-name">{tab.dirty?'● ':''}{tabLabel(tab)}</span>{count>0&&<span className="dvw-tab-review" data-conflict={conflict||undefined} title={`${count} 处 AI 改动待审阅`}>{count}</span>}<span className="dvw-tab-close" onClick={event=>{event.stopPropagation();close(tab)}}><Icon name="close"/></span></button>]})}{conversationIndex===tabs.length&&conversationButton}</div></div><div className="dvw-editor" data-dvw-focused-editor={focused||undefined} data-review={hasActiveReview||undefined} data-outline={markdownPreview&&outlineVisible&&headings.length>0} onKeyDownCapture={event=>{if(!hasActiveReview||activeTab===undefined||!(event.target instanceof Element)||event.target.closest('.monaco-editor')===null)return;const command=event.ctrlKey||event.metaKey;if(command&&!event.altKey&&!event.shiftKey&&event.key==='Enter'){event.preventDefault();event.stopPropagation();keepReview(activeReviewChanges.map(change=>change.id));return}if(command&&!event.altKey&&!event.shiftKey&&event.key==='Backspace'){event.preventDefault();event.stopPropagation();rejectReview(activeReviewChanges.map(change=>change.id));return}const singleModifier=navigator.userAgent.includes('Mac')?event.ctrlKey&&!event.metaKey&&!event.altKey:event.altKey&&!command;if(singleModifier&&!event.shiftKey&&(event.code==='KeyY'||event.code==='KeyN')){const change=inlineReviewChanges.find(item=>item.id===reviewActiveId)??inlineReviewChanges[0];if(change===undefined)return;event.preventDefault();event.stopPropagation();if(event.code==='KeyY')keepReview([change.id]);else rejectReview([change.id])}}}>{error&&<div className="dvw-error"><button className="dvw-icon" onClick={()=>setError(undefined)}><Icon name="close"/></button>{error}</div>}{markdownPreview&&outlineVisible&&headings.length>0&&<MarkdownOutline headings={headings} onClose={()=>setOutlineVisible(false)} onHeading={selectHeading}/>} {markdown&&activeTab&&<div className="dvw-editor-toolbar"><button className="dvw-icon dvw-outline-toggle" data-active={outlineVisible} title={outlineVisible?'关闭 Markdown 大纲':'显示 Markdown 大纲'} onClick={()=>setOutlineVisible(value=>!value)}><Icon name="list-tree"/></button><button className="dvw-mode-button" data-active={!activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:false}:tab))}><Icon name="code"/> 源码</button><button className="dvw-mode-button" data-active={activeTab.preview} onClick={()=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,preview:true}:tab))}><Icon name="preview"/> 预览</button></div>}{activeTab?.diff&&!showTextDiff&&<div className="dvw-editor-toolbar dvw-diff-toolbar">{diffControls}</div>}<div className="dvw-editor-body" data-toolbar={markdown||activeTab?.diff!==undefined} style={{top:(markdown&&!activeTab?.preview?35:0)+(activeTab?.diff&&!showTextDiff?35:0)}}>{conversation?.active?<div data-dvw-conversation-editor=""/>:activeTab===undefined?<div className="dvw-empty"><div><strong>DSH Workbench</strong><br/>从资源管理器或搜索结果打开文件<div className="dvw-start-tools"><button onClick={()=>{if(snapshot.bottomPanel!=='terminal')service.toggleBottomPanel('terminal');queueMicrotask(()=>service.runCommand('terminal.new'))}} disabled={!terminalAvailable}><Icon name="terminal"/>新建终端</button><button onClick={openSwitcher}><Icon name="folder-opened"/>打开工作区</button>{groups.length>1&&group.tabs.length===0&&conversation===undefined&&<button title="关闭当前空白编辑组" onClick={()=>closeEmptyGroup(group.id)}><Icon name="close"/>关闭</button>}</div></div></div>:activeTab.diff?diffMarkdown&&activeTab.preview?<MarkdownPreview source={activeTab.diff.modified} sessionId={sessionId} path={activeTab.diffSourcePath??''}/>:<MonacoDiffEditor uri={`${workspace?.cwd??''}/${activeTab.path}`} original={activeTab.diff.original} modified={activeTab.diff.modified} mode={diffMode} style={gitDiffStyle} viewControls={diffControls} versions={diffVersions} sourcePath={activeTab.diffSourcePath} blame={activeTab.diff.blame} blameSessionId={gitLineBlame?sessionId:undefined} reviewActions={gitReviewPath===undefined?undefined:{onAsk:range=>askFileToDsh(gitReviewPath,range)}} theme={colorScheme} fontSize={fontSize}/>:activeTab.imageUrl?<div className="dvw-image-preview" key={activeTab.path}><img src={activeTab.imageUrl} alt={activeTab.diffSourcePath??activeTab.path}/><span>{activeTab.diffSourcePath??activeTab.path}</span></div>:activeTab.documentPreview&&activeTab.documentUrl?<DocumentPreview key={activeTab.path} kind={activeTab.documentPreview} src={activeTab.documentUrl} path={activeTab.path}/>:markdown&&activeTab.preview?<MarkdownPreview source={activeTab.draft} sessionId={sessionId} path={activeTab.path}/>:activeTab.binary||activeTab.tooLarge?<div className="dvw-message">{activeTab.binary?'二进制文件无法在文本编辑器或差异视图中打开':`文件超过 5 MiB：${activeTab.path}`}{activeTab.binary&&activeTab.diffSourcePath!==undefined&&!activeTab.path.startsWith('diff:commit:')&&<button onClick={()=>void openPath(activeTab.diffSourcePath!)}>打开文件</button>}</div>:activeTab.loaded===false?<div className="dvw-message">{activeTab.loadError===undefined?'正在加载文件…':<>{activeTab.loadError} <button type="button" onClick={()=>{setTabsIn(group.id,rows=>rows.map(row=>row.path===activeTab.path?{...row,loadError:undefined}:row));loadTab(activeTab.path,group.id)}}>重试读取文件</button></>}</div>:<MonacoEditor uri={activeTab.referenceUri??editorModelUri(workspace?.cwd??'',activeTab.path)} readOnly={activeTab.referenceUri!==undefined} aiCompletion={focused&&!showingDshPanel&&!switcherOpen&&!isRemoteFileUri(activeTab.path)?inlineCompletion:undefined} onCompletionError={setError} breakpoints={(debugState.breakpoints[activeTab.path]??[]).map(row=>row.line)} pausedLine={debugState.frames.find(frame=>{if(frame.path===undefined)return false;const norm=(v:string)=>v.replace(/\\/g,'/');return norm(frame.path).endsWith(norm(activeTab.path))})?.line} onToggleBreakpoint={line=>{if(sessionId!==undefined&&activeTab.referenceUri===undefined&&!isRemoteFileUri(activeTab.path))debugController.toggleBreakpoint(sessionId,activeTab.path,line)}} onAddToDsh={activeTab.referenceUri===undefined?selection=>addReferenceToDsh(activeTab.path,{selection}):undefined} value={activeTab.draft} theme={colorScheme} fontSize={fontSize} minimap={minimap} line={activeTab.line} endLine={activeTab.endLine} column={activeTab.column} highlight={activeTab.highlight} focusOnReveal={activeTab.focusOnReveal} blame={gitLineBlame&&sessionId&&activeTab.referenceUri===undefined&&!isRemoteFileUri(activeTab.path)?{sessionId,path:activeTab.path,revision:activeTab.revision,dirty:activeTab.dirty}:undefined} review={reviewEnabled&&inlineReviewChanges.length>0?{changes:inlineReviewChanges.map(change=>({...change,...(reviewSnapshot.conflicts[change.id]===undefined?{}:{conflict:reviewSnapshot.conflicts[change.id]})})),activeId:reviewActiveId,busy:reviewSnapshot.busy||reviewSnapshot.working,rejectDisabled:reviewSnapshot.busy||reviewSnapshot.working||activeTab.dirty,onFocus:setReviewActiveId,onKeep:changeId=>keepReview([changeId]),onReject:changeId=>rejectReview([changeId]),onAsk:change=>askFileToDsh(activeTab.path,locateReviewChange(activeTab.draft,change))}:undefined} onChange={draft=>setTabs(rows=>rows.map(tab=>tab.path===activeTab.path?{...tab,draft,dirty:draft!==tab.content}:tab))} onSave={()=>void save(activeTab)}/>}</div></div></>
   }
 
   // ---- editor groups -------------------------------------------------------
+  const paneUnderPointer = (event: DragEvent | globalThis.DragEvent) => paneAtPoint([...document.querySelectorAll<HTMLElement>('.dvw-pane')], event.clientX, event.clientY) ?? null
   const paneDragOver = (event: DragEvent) => {
-    if (draggedTab === undefined && draggedEntry === undefined) return
+    const conversation = isConversationDrag(event)
+    if (!conversation && draggedTab === undefined && draggedEntry === undefined) return
     // The drop target is usually an open editor, and Monaco handles drag-and-drop itself: claim the
     // gesture here so its dragover/drop never sees it, and the pane logic below still runs.
     event.stopPropagation()
     // A drop is only delivered when dragover cancelled the default; do it before any early return,
     // or a valid-looking preview ends with a browser-refused drop.
     event.preventDefault()
-    if (draggedTab !== undefined) {
-      const pane = (event.target as HTMLElement | null)?.closest<HTMLElement>('.dvw-pane')
+    if (conversation || draggedTab !== undefined) {
+      const pane = paneUnderPointer(event)
       if (pane === null || pane === undefined) return
       event.preventDefault(); event.dataTransfer.dropEffect = 'move'
       const group = pane.dataset.group ?? ''
       const rect = pane.getBoundingClientRect()
-      const hit = dropPosition(rect, event.clientX - rect.left, event.clientY - rect.top)
+      const hit = (event.target as HTMLElement).closest('.dvw-tabs') !== null ? undefined : dropPosition(rect, event.clientX - rect.left, event.clientY - rect.top)
       if (hit !== undefined) {
-        if (paneCount(layout) >= MAX_PANES) { event.dataTransfer.dropEffect = 'none'; setPaneDrop(undefined); setTabDrop(undefined); return }
+        if (paneCount(layout) + dropPaneCount(hit) > MAX_PANES) { event.dataTransfer.dropEffect = 'none'; setPaneDrop(undefined); setTabDrop(undefined); return }
         setTabDrop(undefined)
-        if (paneDrop?.group !== group || paneDrop.direction !== hit.direction || paneDrop.position !== hit.position) setPaneDrop({ group, ...hit })
+        if (paneDrop?.group !== group || paneDrop.direction !== hit.direction || paneDrop.position !== hit.position || paneDrop.vertical !== hit.vertical) setPaneDrop({ group, ...hit })
         return
       }
       // Inside the body: insert into this group at the position the pointer implies.
@@ -2318,20 +2450,20 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     if (draggedEntry === undefined) return
     // A folder carries no editor content of its own: show the not-allowed cursor instead of ignoring the drag.
     if (draggedEntry.kind !== "file") { if (event.target instanceof HTMLElement && event.target.closest(".dvw-pane") !== null) event.dataTransfer.dropEffect = "none"; return }
-    const pane = (event.target as HTMLElement | null)?.closest<HTMLElement>('.dvw-pane')
+    const pane = paneUnderPointer(event)
     if (pane === null || pane === undefined) return
     event.preventDefault(); event.dataTransfer.dropEffect = 'copy'
     const rect = pane.getBoundingClientRect()
     const hit = dropPosition(rect, event.clientX - rect.left, event.clientY - rect.top)
     // At the cap only a split is refused; opening in the pane itself stays available.
-    if (hit !== undefined && paneCount(layout) >= MAX_PANES) {
+    if (hit !== undefined && paneCount(layout) + dropPaneCount(hit) > MAX_PANES) {
       event.dataTransfer.dropEffect = 'none'
       if (paneDrop !== undefined) setPaneDrop(undefined)
       return
     }
     const group = pane.dataset.group ?? ''
     if (hit === undefined) { if (paneDrop !== undefined) setPaneDrop(undefined); return }
-    if (paneDrop?.group !== group || paneDrop.direction !== hit.direction || paneDrop.position !== hit.position) setPaneDrop({ group, ...hit })
+    if (paneDrop?.group !== group || paneDrop.direction !== hit.direction || paneDrop.position !== hit.position || paneDrop.vertical !== hit.vertical) setPaneDrop({ group, ...hit })
   }
   const paneDragLeave = (event: DragEvent) => {
     const host = (event.currentTarget as HTMLElement | null)
@@ -2340,15 +2472,16 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     if (next === null) return
     setPaneDrop(undefined); setTabDrop(undefined)
   }
-  const splitGroup = (groupId: string, direction: SplitDirection, position: SplitPosition, path: string) => {
+  const splitGroup = (groupId: string, split: PaneDropPosition, path: string) => {
     setPaneDrop(undefined)
-    if (paneCount(layout) >= MAX_PANES) return
-    const added = `pane-${Date.now().toString(36)}`
-    setGroups(current => [...current, { id: added, tabs: [] }])
-    setLayout(current => splitAt(current, groupId, direction, added, position, `split-${added}`))
+    if (paneCount(layout) + dropPaneCount(split) > MAX_PANES) return
+    const added = `pane-${crypto.randomUUID()}`
+    const empty = `${added}-empty`
+    setGroups(current => [...current, { id: added, tabs: [] }, ...(split.vertical === undefined ? [] : [{ id: empty, tabs: [] }])])
+    setLayout(current => splitForDrop(current, groupId, split, added, empty))
     openInGroup(added, path)
   }
-  const moveTabInto = (from: string, path: string, to: string, index: number | undefined, split?: { direction: SplitDirection; position: SplitPosition }) => {
+  const moveTabInto = (from: string, path: string, to: string, index: number | undefined, split?: PaneDropPosition) => {
     const source = groups.find(row => row.id === from)
     const tab = source?.tabs.find(row => row.path === path)
     if (source === undefined || tab === undefined) return
@@ -2359,42 +2492,50 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
         if (to !== from) { focusGroup(to); setActiveIn(to, path) }
         return
       }
-      const emptied = moved.some(row => row.id === from && row.tabs.length === 0)
+      const emptied = dockedConversation?.group !== from && moved.some(row => row.id === from && row.tabs.length === 0)
       const next = emptied && moved.length > 1 ? moved.filter(row => row.id !== from) : moved
       if (emptied && moved.length > 1) setLayout(current => removeGroup(current, from) ?? createLeaf(next[0]!.id))
       setGroups(next)
+      if (dockedConversation?.group === from && next.some(group => group.id === from && group.tabs.length === 0)) setConversationTab(current => current && { ...current, active: true })
+      deactivateConversationIn(to)
       focusGroup(to)
       return
     }
-    if (paneCount(layout) >= MAX_PANES) return
-    const targetId = `pane-${Date.now().toString(36)}`
+    if (paneCount(layout) + dropPaneCount(split) > MAX_PANES) return
+    const targetId = `pane-${crypto.randomUUID()}`
+    const empty = `${targetId}-empty`
     const rest = source.tabs.filter(row => row.path !== path)
-    const collapses = rest.length === 0
+    const collapses = rest.length === 0 && dockedConversation?.group !== from && from !== to
     let next: EditorGroup[] = groups.map(row => row.id !== from ? row : { ...row, tabs: rest, active: row.active === path ? rest.at(-1)?.path : row.active })
-    next = [...next, { id: targetId, tabs: [tab], active: path }]
+    next = [...next, { id: targetId, tabs: [tab], active: path }, ...(split.vertical === undefined ? [] : [{ id: empty, tabs: [] }])]
     if (collapses) next = next.filter(row => row.id !== from)
     setLayout(current => {
-      const tree = splitAt(current, from, split.direction, targetId, split.position, `split-${targetId}`)
+      const tree = splitForDrop(current, to, split, targetId, empty)
       return collapses ? (removeGroup(tree, from) ?? createLeaf(targetId)) : tree
     })
     setGroups(next)
+    if (dockedConversation?.group === from && rest.length === 0) setConversationTab(current => current && { ...current, active: true })
     focusGroup(targetId)
   }
   // Two panes, two files: dropping one on the other trades places, which is what comparing them
   // looks like. A target with no file, or one already showing this file, falls through to a move.
   const swapTabs = (from: string, path: string, to: string) => {
+    if (dockedConversation?.group === to && dockedConversation.active) { moveTabInto(from, path, to, undefined); return }
     const next = swapActiveTab(groups, from, path, to)
     if (next === undefined) { moveTabInto(from, path, to, undefined); return }
     setGroups(next)
+    deactivateConversationIn(to)
     focusGroup(to)
   }
 
   // Where the pointer is now, not where the preview last rendered. A quick release can arrive
   // before the final dragover commits, and reading that state dropped the file one zone away.
   const dropTargetAt = (event: DragEvent) => {
-    const pane = (event.target as HTMLElement | null)?.closest<HTMLElement>('.dvw-pane') ?? null
+    const pane = paneUnderPointer(event)
     const rect = pane?.getBoundingClientRect()
-    const hit = rect === undefined ? undefined : dropPosition(rect, event.clientX - rect.left, event.clientY - rect.top)
+    const target = event.target
+    const inTabs = target instanceof Element && target.closest('.dvw-tabs') !== null
+    const hit = rect === undefined || inTabs ? undefined : dropPosition(rect, event.clientX - rect.left, event.clientY - rect.top)
     let index: number | undefined
     if (hit === undefined && pane !== null) {
       const marks = [...pane.querySelectorAll<HTMLElement>('[data-tab-path]')]
@@ -2404,17 +2545,25 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   }
 
   const paneDropHandler = (event: DragEvent) => {
-    if (draggedTab === undefined && draggedEntry === undefined) return
+    const conversation = isConversationDrag(event)
+    if (!conversation && draggedTab === undefined && draggedEntry === undefined) return
     event.stopPropagation()
     event.preventDefault()
+    if (conversation) {
+      const { pane, hit, index } = dropTargetAt(event)
+      endConversationDrag()
+      setPaneDrop(undefined); setTabDrop(undefined)
+      if (pane?.dataset.group !== undefined) dockConversation(pane.dataset.group, index, hit)
+      return
+    }
     if (draggedTab !== undefined) {
       const tab = draggedTab
       endTabDrag()
       const { pane, hit, index } = dropTargetAt(event)
       const groupId = pane?.dataset.group ?? tab.group
       setPaneDrop(undefined); setTabDrop(undefined)
-      if (hit !== undefined) moveTabInto(tab.group, tab.path, groupId, undefined, { direction: hit.direction, position: hit.position })
-      else if (groupId !== tab.group) swapTabs(tab.group, tab.path, groupId)
+      if (hit !== undefined) moveTabInto(tab.group, tab.path, groupId, undefined, hit)
+      else if (groupId !== tab.group && (event.target as HTMLElement).closest('.dvw-tabs') === null) swapTabs(tab.group, tab.path, groupId)
       else moveTabInto(tab.group, tab.path, groupId, index)
       return
     }
@@ -2424,9 +2573,13 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     const { pane, hit } = dropTargetAt(event)
     const groupId = pane?.dataset.group ?? focusedRef.current
     setPaneDrop(undefined); setTabDrop(undefined)
-    if (hit !== undefined) splitGroup(groupId, hit.direction, hit.position, entry.path)
+    if (hit !== undefined) splitGroup(groupId, hit, entry.path)
     else openInGroup(groupId, entry.path)
   }
+  // Handle pane hits at document capture even when the target is Monaco inside
+  // the workbench: host capture handlers can cancel propagation before React.
+  // preventDefault alone means "allow drop", not that our internal drag is done.
+  dragCaptureRef.current = { over: paneDragOver, drop: paneDropHandler }
 
   const closeInGroup = (groupId: string, tab: Tab) => {
     const group = groups.find(row => row.id === groupId)
@@ -2434,7 +2587,7 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     if (tab.dirty && !confirm(`${tab.path} 有未保存更改，确定关闭？`)) return
     loadingTabs.current.delete(tabLoadKey(groupId,tab.path))
     const rest = group.tabs.filter(row => row.path !== tab.path)
-    if (rest.length === 0 && groups.length > 1) {
+    if (rest.length === 0 && groups.length > 1 && dockedConversation?.group !== groupId) {
       const remaining = groups.filter(row => row.id !== groupId)
       setGroups(remaining)
       setLayout(current => removeGroup(current, groupId) ?? createLeaf(remaining[0]!.id))
@@ -2442,6 +2595,7 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
       return
     }
     setGroups(current => current.map(row => row.id !== groupId ? row : { ...row, tabs: rest, active: row.active === tab.path ? rest.at(-1)?.path : row.active }))
+    if (rest.length === 0 && dockedConversation?.group === groupId) setConversationTab(current => current && { ...current, active: true })
   }
   const dragSplitter = (event: ReactPointerEvent<HTMLElement>, id: string, direction: SplitDirection) => {
     if (event.button !== 0) return
@@ -2471,32 +2625,34 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   }
   const renderPane = (groupId: string) => {
     const group = groups.find(row => row.id === groupId) ?? { id: groupId, tabs: [] }
-    const paneTab = group.tabs.find(row => row.path === group.active)
+    const paneActive = dockedConversation?.group === groupId && dockedConversation.active ? undefined : group.active
+    const paneTab = group.tabs.find(row => row.path === paneActive)
     const focused = groupId === focusedId
     const drop = paneDrop !== undefined && paneDrop.group === groupId ? paneDrop : undefined
     const paneMarkdown = paneTab !== undefined && !paneTab.path.startsWith('diff:') && /\.md$/i.test(paneTab.path)
     const paneDiffMarkdown = paneTab?.diff !== undefined && /\.md$/i.test(paneTab.diffSourcePath ?? '')
     const panePreview = paneMarkdown || (paneDiffMarkdown && paneTab?.preview === true)
     return (
-      <section className="dvw-pane" key={groupId} data-group={groupId} data-focused={focused || undefined} data-drop={drop === undefined ? undefined : `${drop.direction}-${drop.position}`} data-tab-target={tabDrop?.group === groupId || undefined} onClickCapture={() => { if (focusedRef.current !== groupId) focusGroup(groupId) }}>
-        {drop !== undefined && <div className="dvw-pane-drop" data-direction={drop.direction} data-position={drop.position}/>}
-        {renderPaneChrome(group, group.tabs, group.active, paneTab, focused, paneMarkdown, paneDiffMarkdown, panePreview)}
+      <section className="dvw-pane" key={groupId} data-group={groupId} data-focused={focused || undefined} data-drop={drop === undefined ? undefined : `${drop.direction}-${drop.position}${drop.vertical === undefined ? '' : `-${drop.vertical}`}`} data-tab-target={tabDrop?.group === groupId || undefined} onClickCapture={() => { if (focusedRef.current !== groupId) focusGroup(groupId) }}>
+        {drop !== undefined && <PaneDropPreview {...drop}/>}
+        {renderPaneChrome(group, group.tabs, paneActive, paneTab, focused, paneMarkdown, paneDiffMarkdown, panePreview)}
       </section>
     )
   }
-  return <div ref={overlayRef} className="dvw-overlay" data-dvw-theme={colorScheme} data-dvw-theme-name={theme} data-dvw-chat={chatShown||undefined} data-dvw-primary-side={primarySideVisible||undefined} data-dvw-status={statusVisible||undefined} data-dvw-bottom-panel={snapshot.bottomPanel||undefined} data-dvw-float={floating||undefined} data-dvw-float-max={floating&&floatMax||undefined} data-dvw-float-fullscreen={floating&&floatFullscreen||undefined} style={{...(floatStyle??{}),'--dvw-side-width':`${nativeLayout.sideWidth}px`,'--dvw-chat-width':`${nativeLayout.chatWidth}px`} as CSSProperties} role="dialog" aria-label="VS Code 工作台" onDragEnterCapture={suppressAttachmentDrop} onDragOverCapture={suppressAttachmentDrop} onDropCapture={suppressAttachmentDrop}>
+  return <div ref={overlayRef} className="dvw-overlay" data-dvw-theme={colorScheme} data-dvw-theme-name={theme} data-dvw-chat={chatShown||undefined} data-dvw-conversation={conversationShown&&!floatSurfacePaused} data-dvw-editor-empty={chatShown&&!editorHasContent||undefined} data-dvw-primary-side={primarySideVisible||undefined} data-dvw-status={statusVisible||undefined} data-dvw-bottom-panel={snapshot.bottomPanel||undefined} data-dvw-float={floating||undefined} data-dvw-float-max={floating&&floatMax||undefined} data-dvw-float-fullscreen={floating&&floatFullscreen||undefined} style={{...(floatStyle??{}),'--dvw-side-width':`${nativeLayout.sideWidth}px`,'--dvw-chat-width':`${nativeLayout.chatWidth}px`} as CSSProperties} role="dialog" aria-label="VS Code 工作台" onDragEnterCapture={suppressAttachmentDrop} onDragOverCapture={suppressAttachmentDrop} onDropCapture={suppressAttachmentDrop}>
     {floating&&<>
       {!floatMax&&!floatFullscreen&&FLOAT_HANDLES.map(mode=><div key={mode} className="dvw-float-handle" data-handle={mode} onPointerDown={event=>beginFloatGesture(event,mode)}/>)}
       <FloatBar name={workspace?.name} fullscreen={floatFullscreen} onPointerDown={event=>beginFloatGesture(event,'move')} onToggleFullscreen={()=>void toggleFloatFullscreen()} onClose={()=>service.hide()}/>
     </>}
     <WorkbenchTitlebar name={workspace?.name}/>
+    <DshConversationMenu menus={conversationMenus} sessionId={sessionId} editor={dockedConversation!==undefined} onOpen={()=>dockConversation(focusedId)} onReturn={returnConversation} onClose={closeConversationBar} onOpenSidebar={rightSidebar===undefined?undefined:()=>{if(!nativeSidebar.shown)nativeSidebar.toggle()}}/>
     {dshTabId!==undefined&&<DshPanelPage panelId={dshTabId} active={showingDshPanel&&!floatSurfacePaused} floating={floating}/>}
-    <DshConversationPanel visible={chatShown&&!floatSurfacePaused} width={nativeLayout.chatWidth} statusHeight={statusVisible?30:6} floating={floating} onRootChange={setConversationRoot}/>
-    <DshConversationTheme visible={chatShown} colorScheme={colorScheme} followDsh={false}/>
-    {sessionId !== undefined && <SshChatTarget key={sessionId} conversationRoot={conversationRoot} sessionId={sessionId} visible={chatShown && !floatSurfacePaused} status={sshChatStatus} localName={workspace?.name}
+    <DshConversationPanel editor={conversationEditorShown} visible={conversationShown&&!floatSurfacePaused} width={nativeLayout.chatWidth} statusHeight={statusVisible?30:6} floating={floating} onRootChange={setConversationRoot}/>
+    <DshConversationTheme visible={conversationShown} colorScheme={colorScheme} followDsh={false}/>
+    {sessionId !== undefined && <SshChatTarget key={sessionId} conversationRoot={conversationRoot} sessionId={sessionId} visible={conversationShown && !floatSurfacePaused} status={sshChatStatus} localName={workspace?.name}
       onSelect={selectSshChat} onOpenSsh={() => { setPrimarySideVisible(true); service.show('ssh') }}/>}
-    <DshReviewActions visible={chatShown&&reviewEnabled} files={reviewFiles} count={reviewSnapshot.changes.length} disabled={reviewSnapshot.busy||reviewSnapshot.working} onOpen={path=>void openPath(path)} onAcceptAll={keepAllReview} onRejectAll={()=>void rejectAllReview()}/>
-    {chatShown&&<aside className="dvw-chat"><PanelResizer className="dvw-chat-resizer" label="拖动调整 DSH 对话栏宽度" size={nativeLayout.chatWidth} min={DSH_CHAT_MIN_WIDTH} max={chatWidthLimit} defaultSize={DSH_CHAT_DEFAULT_WIDTH} direction={-1} hideBelow={200} onHide={()=>setChatVisible(false)} onResize={setChatWidth}/>{!floating&&<header className="dvw-chat-head"><span><DshMark/> DSH</span><button className="dvw-icon" title="关闭 DSH 对话栏" onClick={()=>setChatVisible(false)}><Icon name="close"/></button></header>}<div className="dvw-chat-body"/></aside>}
+    <DshReviewActions visible={conversationShown&&reviewEnabled} files={reviewFiles} count={reviewSnapshot.changes.length} disabled={reviewSnapshot.busy||reviewSnapshot.working} onOpen={path=>void openPath(path)} onAcceptAll={keepAllReview} onRejectAll={()=>void rejectAllReview()}/>
+    {chatShown&&<aside className="dvw-chat"><PanelResizer className="dvw-chat-resizer" label="拖动调整 DSH 对话栏宽度" size={nativeLayout.chatWidth} min={Math.min(DSH_CHAT_MIN_WIDTH,chatWidthLimit)} max={chatWidthLimit} defaultSize={DSH_CHAT_DEFAULT_WIDTH} direction={-1} hideBelow={200} onHide={()=>setChatVisible(false)} onResize={resizeChat}/>{!floating&&<header className="dvw-chat-head"><span><DshMark/> DSH</span><button className="dvw-icon" title="关闭 DSH 对话栏" onClick={()=>setChatVisible(false)}><Icon name="close"/></button></header>}<div className="dvw-chat-body"/></aside>}
     {switcherOpen&&<WorkspaceSwitcher choices={switcherChoices} activeSessionId={sessionId} unavailable={navigation?.available===false} busy={switcherBusy} error={switcherError} theme={colorScheme} onCreate={()=>void createWorkspace()} onNewSession={newSession} onSwitch={switchSession} onOpenWorkspace={enterWorkspace} onClose={()=>setSwitcherOpen(false)}/>}
     {settingsNode!==undefined&&createPortal(settingsPage,settingsNode)}
     {unsupportedTab!==undefined&&sessionId!==undefined&&<CenteredOpenWith key={unsupportedTab.path} sessionId={sessionId} path={unsupportedTab.path} label={unsupportedTab.label}/>}
@@ -2508,7 +2664,7 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
           {id:'ssh',label:'SSH 远程开发',icon:<Icon name="remote-explorer"/>,active:primarySideVisible&&snapshot.view==='ssh',onActivate:()=>selectView('ssh')},
           {id:'debug',label:snapshot.bottomPanel==='debug'?'隐藏调试面板（F5 启动调试）':'调试：断点 / 调用栈 / 变量（F5 启动）',icon:<Icon name="debug-alt"/>,active:snapshot.bottomPanel==='debug',onActivate:()=>service.toggleBottomPanel('debug')},
           {id:'terminal',label:terminalAvailable?(snapshot.bottomPanel==='terminal'?'隐藏终端':'显示终端'):'终端适配器未安装',icon:<Icon name="terminal"/>,active:snapshot.bottomPanel==='terminal',disabled:!terminalAvailable,onActivate:()=>toggleTerminal(service)},
-          {id:'chat',label:showingDshPanel?'返回 DSH 对话 (Ctrl+Alt+B)':chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)',icon:<DshMark size={22}/>,active:chatShown,onActivate:()=>{if(showingDshPanel||chatSuppressedBySidebar)showConversation();else setChatVisible(value=>!value)}},
+          {id:'chat',label:showingDshPanel?'返回 DSH 对话 (Ctrl+Alt+B)':dockedConversation!==undefined?'显示 DSH 对话标签 (Ctrl+Alt+B)':chatVisible?'关闭 DSH 对话栏 (Ctrl+Alt+B)':'显示 DSH 对话栏 (Ctrl+Alt+B)',icon:<DshMark size={22}/>,active:conversationShown,onActivate:()=>{if(showingDshPanel||chatSuppressedBySidebar||dockedConversation!==undefined)showConversation();else setChatVisible(value=>!value)}},
         ]}
         fixed={[
           {id:'workspaces',label:'打开工作区 / 切换会话',icon:<Icon name="folder-opened"/>,active:false,onActivate:openSwitcher},
@@ -2531,8 +2687,8 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     </section>}</>} {workspace && <SearchView key={JSON.stringify([sessionId, workspace.cwd])} sessionId={sessionId} cwd={workspace.cwd} visible={snapshot.view==='search' && primarySideVisible} focus={searchFocus} isDirty={hasUnsavedSearchFile} onChanged={refreshChangedTabs} onOpen={openFromView}/>} {sessionId!==undefined&&<SSHView key={`ssh:${sessionId}`} sessionId={sessionId} chatConnectionId={sshChatStatus?.target?.id} visible={snapshot.view==='ssh'&&primarySideVisible} isDirty={hasUnsavedSearchFile} onOpen={openFromView} onOpenSource={openSourceFromView}
       onAddToDsh={(connection, entry) => addReferenceToDsh(remoteFileUri(connection.id, entry.path), { directory: entry.kind === 'directory' })}
       onDiff={(path,diff,title,source)=>{leaveDshPanel();openDiff(path,diff,title,source)}} onChanged={refreshChangedTabs} onTerminal={(connection,options)=>{requestSshTerminal(connection);if(options?.open!==false&&snapshot.bottomPanel!=='ssh-terminal')service.toggleBottomPanel('ssh-terminal')}}/>} {(snapshot.view==='git'||(workspace&&statusVisible))&&<GitView visible={snapshot.view==='git'} statusSlot={statusVisible?gitStatusSlot:null} sessionId={sessionId} preferences={commitPreferences} model={commitModel} key={`git:${sessionId}`} onOpenFile={openFromView} modelConfigured={commitModelConfigured} modelAvailable={commitModelAvailable} modelHint={commitModelHint} onDiff={(path,diff,title,source,preview)=>{leaveDshPanel();openDiff(path,diff,title,source,preview)}}/>}</aside>
-    {nativeLayout.sideWidth>0&&<PanelResizer className="dvw-side-resizer" label="拖动调整源码管理侧边栏宽度" size={nativeLayout.sideWidth} min={Math.min(210,sideWidthLimit)} max={sideWidthLimit} defaultSize={Math.min(210,sideWidthLimit)} direction={1} hideBelow={Math.min(105,Math.floor(nativeLayout.sideWidth))} onHide={()=>setPrimarySideVisible(false)} onResize={setSideWidth}/>}
-    <main className="dvw-main" onDragOverCapture={paneDragOver} onDragLeaveCapture={paneDragLeave} onDropCapture={paneDropHandler}><div className="dvw-panes">{renderNode(layout)}</div>{snapshot.bottomPanel===undefined&&<div className="dvw-bottom-reveal" title="向上拖动打开终端" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();service.toggleBottomPanel('terminal');const statusHeight=statusVisible?24:0;const heightAt=(clientY:number)=>Math.max(120,Math.min(window.innerHeight-160,window.innerHeight-clientY-statusHeight));const move=(e:PointerEvent)=>setPanelHeight(heightAt(e.clientY));const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>}</main>
+    {nativeLayout.sideWidth>0&&<PanelResizer className="dvw-side-resizer" label="拖动调整源码管理侧边栏宽度" size={nativeLayout.sideWidth} min={Math.min(210,sideWidthLimit)} max={sideWidthLimit} defaultSize={Math.min(210,sideWidthLimit)} direction={1} hideBelow={Math.min(105,Math.floor(nativeLayout.sideWidth))} onHide={()=>setPrimarySideVisible(false)} onResize={resizeSide}/>}
+    <main className="dvw-main" onDragOverCapture={paneDragOver} onDragLeaveCapture={paneDragLeave} onDropCapture={paneDropHandler}><div className="dvw-panes">{renderNode(displayedLayout)}</div>{snapshot.bottomPanel===undefined&&<div className="dvw-bottom-reveal" title="向上拖动打开终端" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();service.toggleBottomPanel('terminal');const statusHeight=statusVisible?24:0;const heightAt=(clientY:number)=>Math.max(120,Math.min(window.innerHeight-160,window.innerHeight-clientY-statusHeight));const move=(e:PointerEvent)=>setPanelHeight(heightAt(e.clientY));const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>}</main>
     {tabMenu&&menuTab&&<div className="dvw-context-menu dvw-tab-menu" role="menu" style={{left:Math.min(tabMenu.x,window.innerWidth-240),top:Math.min(tabMenu.y,window.innerHeight-180)}} onPointerDown={event=>event.stopPropagation()}>
       <button role="menuitem" onClick={()=>{setTabMenu(undefined);close(menuTab)}}>关闭<span>Ctrl+F4</span></button>
       <button role="menuitem" disabled={tabs.length<=1} onClick={()=>removeTabs(tabs.filter(row=>row.path!==menuTab.path),'关闭其他标签页')}>关闭其他</button>
@@ -2540,7 +2696,6 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
       <button role="menuitem" disabled={savedTabs.length===0} onClick={()=>removeTabs(savedTabs,'关闭已保存标签页')}>关闭已保存<span>Ctrl+K U</span></button>
       <button role="menuitem" onClick={closeAll}>全部关闭<span>Ctrl+K W</span></button>
     </div>}
-    {sessionId!==undefined&&browserTabs.map(tab=><DshBrowserPage key={tab.id} sessionId={sessionId} tabId={tab.id} colorScheme={colorScheme} active={browserId===tab.id&&!dshTabActive&&!switcherOpen&&!nativeSidebar.shown&&snapshot.visible}/>)}
     {snapshot.bottomPanel&&<section className="dvw-bottom" style={{height:panelHeight}}><div className="dvw-bottom-resizer" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();const startY=event.clientY,startHeight=panelHeight;const move=(e:PointerEvent)=>setPanelHeight(Math.max(120,Math.min(window.innerHeight-160,startHeight+startY-e.clientY)));const up=(e:PointerEvent)=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);if(startHeight+startY-e.clientY<80)service.toggleBottomPanel(snapshot.bottomPanel!)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/><div className="dvw-bottom-head">
       {terminalAvailable&&<button type="button" className="dvw-bottom-title" aria-pressed={snapshot.bottomPanel==='terminal'}
         onClick={()=>{if(snapshot.bottomPanel!=='terminal')service.toggleBottomPanel('terminal')}}>终端</button>}

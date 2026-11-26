@@ -4,8 +4,25 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
 import { useNativeSidebar } from '../src/client/nativeSidebar.ts'
+import { installStyles } from '../src/client/styles.ts'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+
+it('lets a terminal dragged out of the native dock keep its viewport layer when the dock is dismissed', () => {
+  document.body.innerHTML = '<style>[data-sidebar-right-panel="fullscreen"]{--dsh-dockkit-dock-layer:40;--dsh-dockkit-float-layer:60}</style><div data-rightbar-col><div data-sidebar-right-panel="fullscreen"><div data-dockkit-host="float"><section data-dockkit-float="terminal"></section></div></div></div><div data-shell-overlay><div class="dvw-overlay"></div></div>'
+  const removeStyles = installStyles()
+  try {
+    const column = document.querySelector<HTMLElement>('[data-rightbar-col]')!
+    const panel = document.querySelector<HTMLElement>('[data-sidebar-right-panel]')!
+    expect(getComputedStyle(column).isolation).not.toBe('isolate')
+    // Background docks stay below the shell overlay (20); floats retain their native layer (60).
+    expect(getComputedStyle(panel).getPropertyValue('--dsh-dockkit-dock-layer').trim()).toBe('10')
+    expect(getComputedStyle(panel).getPropertyValue('--dsh-dockkit-float-layer').trim()).toBe('60')
+  } finally {
+    removeStyles()
+    document.body.replaceChildren()
+  }
+})
 
 it('presents only the requested session dock and releases it after native collapse or workbench exit', async () => {
   document.body.innerHTML = `

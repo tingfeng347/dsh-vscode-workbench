@@ -175,8 +175,9 @@ button.dvw-bottom-title{cursor:pointer}.dvw-bottom-title:hover,.dvw-bottom-title
 html[data-platform=darwin] [data-dvw-conversation-panel]{top:var(--dvw-titlebar-height)!important}
 body[data-dvw-palette=light] [data-dvw-conversation-panel]{--dsw-alias-bg-base:#fff;--dsw-specific-sidebar-fill:#fff;--dsw-alias-bg-layer-1:#fff;--dsw-alias-bg-layer-2:#fff;--dsw-alias-bg-layer-3:#fff;--dsw-alias-border-l2:#e2e2e2;--dsw-alias-border-l3:#efefef;background:#fff!important}
 body[data-dvw-palette=dark] [data-dvw-conversation-panel]{--dsw-alias-bg-base:#191a1b;--dsw-specific-sidebar-fill:#191a1b;--dsw-alias-bg-layer-1:#202122;--dsw-alias-bg-layer-2:#252526;--dsw-alias-bg-layer-3:#2a2b2c;--dsw-alias-label-primary:#bfbfbf;--dsw-alias-label-secondary:#8c8c8c;--dsw-alias-label-tertiary:#6e6e6e;--dsw-alias-border-l2:#2a2b2c;--dsw-alias-border-l3:#303132;--dsw-alias-interactive-bg-hover:#ffffff12;--dsw-alias-interactive-bg-active:#ffffff1f}
-/* Keep background native browser tabs mounted without letting a fullscreen dock cover the workbench. */
-[data-rightbar-col]:not([data-dvw-native-sidebar]):has(~ [data-shell-overlay] .dvw-overlay){isolation:isolate}
+/* Lower only background docks. Isolating the whole column traps terminals
+   dragged into native floats behind the workbench when their dock is dismissed. */
+[data-rightbar-col]:not([data-dvw-native-sidebar]):has(~ [data-shell-overlay] .dvw-overlay) [data-sidebar-right-panel]{--dsh-dockkit-dock-layer:10}
 [data-rightbar-col][data-dvw-native-sidebar] :is([data-sidebar-right-mode],[data-sidebar-right-toggle]),
 [data-rightbar-col][data-dvw-native-sidebar] ~ [data-side=rightbar]{-webkit-app-region:no-drag}
 [data-rightbar-col][data-dvw-native-sidebar=fullscreen] ~ [data-shell-overlay] .dvw-titlebar{-webkit-app-region:no-drag}

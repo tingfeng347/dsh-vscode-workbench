@@ -46,8 +46,14 @@ Installing from the DSH Plugins page or a marketplace enables the plugin automat
 | AI assistance | Use Off, Manual, or Automatic code completion. Review all or the latest AI changes by block, file, or batch, with optional auto-follow. |
 | Remote SSH development | Connect with an OpenSSH alias or address using ssh-agent, a private key, or a password. Edit, download, and drag and drop remote files. Use search and replace, Git, and the terminal. The SSH selector below the DSH composer switches between connected workspaces and supports remote file and line references. |
 | Documents and web pages | Preview Markdown, images, PDFs, Excel, Word, and PowerPoint in tabs, and open web links or local HTML in the built-in or system browser. |
-| Terminal and DSH chat | Use the official Harness terminal with multiple sessions, renaming, and splits. Add files or editor selections to DSH chat and open generated file links from the current session. |
-| Workspaces, layout, and window | Manage workspaces and sessions, arrange the activity bar, sidebars, chat, terminal, themes, and font size. Floating windows support dragging, resizing, fullscreen, and remembered geometry. |
+| Terminal and DSH chat | Use the official Harness terminal with multiple sessions, renaming, and splits. Add files or editor selections to DSH chat and open generated file links from the current session. Keep a conversation in the official sidebar or open it as an editor tab from the session menu. |
+| Workspaces, layout, and window | Manage workspaces and sessions, arrange the activity bar, sidebars, chat, terminal, themes, and font size. The editor supports half and quarter-screen drops; when files are open, chat leaves one quarter of the editor area available, and it can fill an empty editor area otherwise. Floating windows support dragging, resizing, fullscreen, and remembered geometry. |
+
+### Conversations and layout
+
+- In the official conversation header's `…` menu, choose **Open conversation in editor** to open the current session as an editor tab. The same menu can move it back to the sidebar or close the conversation panel.
+- Conversation tabs, file tabs, and Explorer files can be dropped on any editor edge for half- or quarter-screen groups; dropping in the center moves the item into the current editor group.
+- The official browser and its start page remain in the official right sidebar instead of being redirected into workbench editor tabs. An empty editor group can open a workspace or be closed.
 
 ## Demo
 
@@ -72,8 +78,8 @@ Installing from the DSH Plugins page or a marketplace enables the plugin automat
 </p>
 
 <p align="center">
-  <img src="assets/screenshots/welcome-light.png" width="800" alt="Start a terminal or open the browser from the empty editor">
-  <br><em>Start a terminal or open the browser from the empty editor</em>
+  <img src="assets/screenshots/welcome-light.png" width="800" alt="Legacy welcome-page screenshot">
+  <br><em>Legacy welcome-page screenshot (for reference only)</em>
 </p>
 
 <p align="center">

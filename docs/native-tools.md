@@ -33,3 +33,16 @@
 - 浏览器验收使用真实 Workbench、NativeBrowser、Monaco、快捷键和官方 MenuRegistry；浏览器 body、右栏服务、菜单弹出层和图标插槽渲染为夹具，不等同 Desktop 实测。证据：`/tmp/dvw-browser-official-qa/browser-result.json`、`browser-review-result.json`、`browser-run.mjs`。
 - 已通过 Desktop 官方插件管理器更新并启用本地 0.4.1 构建，精确来源为 `file:/Users/tingfeng/.dsh/local-plugins/dsh-vscode-workbench/dsh-vscode-workbench-0.4.1-official-browser-a7b5cfe163.tgz`。185 个归档文件与实际安装目录全部一致，源码及构建文件与工作区一致，无旧 `DshBrowserPage` 文件，其他直接依赖声明未变。客户端 SHA-256：`a7b5cfe16362e3beb61b82d19327b5592c1d9085efb1c6e30d6895de4ccc4976`。核验：`/tmp/dvw-browser-official-qa/local-install-result.json`；安装前备份：`/Users/tingfeng/.dsh/backups/dsh-vscode-workbench-browser-default-20261126-dytxtf3h`。
 - 真实 Desktop CUA 已确认：浏览器启动页和 `https://example.com/` 均留在官方右栏，不生成工作台网页标签；「打开侧边栏」可打开且重复执行不收起；仅打开 `package.json` 时编辑器恢复，随后关闭测试文件和网页。保留原会话与空草稿，未发送消息或保存文件。Desktop 比例测量与菜单图标视觉确认未完成：AX 不提供上限，唯一一次截图畸变，未继续坐标操作。本次安装打开的「插件（DSH 官方页面）」标签保留，仍属编辑内容。证据：`/tmp/dvw-browser-official-qa/desktop-cua-result.json`。
+
+## 关闭对话时直接打开原生侧栏（2026-11-26）
+
+用户原文：「当没有打开聊天界面时，直接打开侧边栏，会有聊天界面的过渡，导致动画卡顿，我想打开侧边栏直接打开」。
+
+- 目标：工作台对话关闭时，原生右侧栏直接展示，打开途中也不露出后台聊天界面；不改变聊天的关闭偏好、会话、文件和草稿。
+- 验收入口：活动栏「DSH 原生右侧栏」。除最终状态检查外，使用真实工作台与官方布局样式逐帧检查打开过程；替身验证和 Desktop CUA 结论分别记录。
+- 已复现原因：工作台一次让出右栏完整宽度，官方 frame 轨道和 dock 仍在滑入，间隙短暂露出底层常驻聊天，并非关闭偏好被重置。修复仅在工作台激活、对话关闭、原生列已请求展示时，让 frame 轨道与已展开的 dock/empty/divider 直接到达最终位置；不命中浮动终端，不改变聊天已展示或退出工作台后的官方过渡。对话显示判断复用与 `DshConversationPanel.visible` 相同的 render 布尔值，同时覆盖侧栏聊天与编辑区聊天，不依赖尺寸更新时会短暂清理的 body 生命周期标记。
+- 红绿验证：`node /tmp/dvw-direct-sidebar-qa/frame-run.mjs` 在修复前 41 帧中有 18 帧露出底层聊天（点击后 25–308ms）；修复后同一脚本 `FRAME_LABEL=green` 为 0/41 帧，首个开栏样本的工作台右边界与 dock 左边界均为 1100px，运行时异常 0。使用真实 Workbench、官方 AppFrame/SidebarRight CSS 和 Chromium 指针/rAF，宿主 React/sidebar 服务与 HTTP 为夹具，不等同 Desktop 帧性能实测。证据：`/tmp/dvw-direct-sidebar-qa/frame-red.json`、`frame-green.json`。
+- 扩展帧对照通过：聊天关闭时首次开栏与重复打开两次均为 0 露底／0 滑入中间帧；聊天展示时保留 23 个实际动画插值帧，与旧样式基线一致。浮动工作台位置尺寸不变，受控 native float 探针的几何与自有过渡不变；不代表完整官方 Dockkit 性能。所有草稿、聊天偏好保留，运行时异常 0。证据：`/tmp/dvw-direct-sidebar-qa/frame-boundaries-green.json`、`frame-boundaries-comparison.json`。
+- 永久回归加载官方真实过渡规则和 `installStyles()` 计算样式，覆盖直接开栏、聊天展示、placement 标记刷新、工作台未激活、右栏未请求以及 float 过渡保留；新增测试先红后绿，当前相关 12 项通过，类型检查和 Impeccable 检测通过。日志：`/tmp/dvw-direct-sidebar-qa/native-transition-red.log`、`native-conversation-marker-red.log`、`native-transition-green.log`、`typecheck.log`、`design.log`。
+- 最终全量 639 项通过、4 项跳过，干净生产构建和打包通过。并发验证的前一轮曾在未改动的 `workspace-watch-host` 文件事件时序断言失败；该文件 5 项单独复验通过，停止帧夹具后全量复验通过，未改监听实现或测试。日志：`/tmp/dvw-direct-sidebar-qa/tests.log`、`tests-concurrent-failure.log`、`watch-recheck.log`、`pack.log`。
+- 已通过 Desktop 官方插件管理器安装并立即启用本地最终构建，准确来源为 `file:/Users/tingfeng/.dsh/local-plugins/dsh-vscode-workbench/dsh-vscode-workbench-0.4.1-direct-sidebar-ebf7ee147d.tgz`，AX 确认启用为 on、1 个组件运行中。185 个归档文件与安装目录全部一致，其他直接依赖声明未变；客户端 SHA-256：`ebf7ee147d0db2c7aa92aeab5fc3246db8ffcc78b38bd5f3e3a9f56cdcedc991`。安装核验：`/tmp/dvw-direct-sidebar-qa/local-install-result.json`；配置备份：`/Users/tingfeng/.dsh/backups/dsh-vscode-workbench-direct-sidebar-20261126-6f24ho_o`。中间构建曾安装但未启用，已由最终构建替换。

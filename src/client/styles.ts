@@ -190,6 +190,11 @@ body[data-dvw-palette=dark] [data-dvw-conversation-panel]{--dsw-alias-bg-base:#1
 /* Lift the native dock and reserve its full push width in the embedded workbench. */
 [data-rightbar-col][data-dvw-native-sidebar]{z-index:21}
 [data-rightbar-col][data-dvw-native-sidebar] ~ [data-side=rightbar]{z-index:22}
+/* The workbench reserves the full dock width at once. With chat closed, show
+   the dock in place so its slide cannot expose the resident conversation.
+   Use render visibility; placement effects release their body marker on resize. */
+body[data-dvw-workbench-active] [data-animating]:has(> [data-rightbar-col][data-dvw-native-sidebar]):has(> [data-shell-overlay] .dvw-overlay[data-dvw-conversation=false]:not([data-dvw-float=true])),
+body[data-dvw-workbench-active] [data-rightbar-col][data-dvw-native-sidebar]:has(~ [data-shell-overlay] .dvw-overlay[data-dvw-conversation=false]:not([data-dvw-float=true])) [data-sidebar-right-open=true] :is([data-dockkit-host=dock],[data-dockkit-empty],[data-dockkit-divider]){transition:none!important}
 body[data-dvw-workbench-active] .dvw-overlay:not([data-dvw-float=true]){right:var(--dvw-native-sidebar-width,0px)}
 body[data-dvw-workbench-active] [data-dvw-conversation-panel]{right:calc(3px + var(--dvw-native-sidebar-width,0px))!important}
 body[data-dvw-workbench-active] .dvw-chat-resizer{right:calc(var(--dvw-chat-width) - 5px + var(--dvw-native-sidebar-width,0px))}

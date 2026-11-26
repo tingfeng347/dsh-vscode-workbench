@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, expect, it, vi } from 'vitest'
-import { CONVERSATION_OPEN_ICON, DshConversationMenu, DshConversationOpenIcon, DshConversationPanel, DshReviewActions, findDshConversationRoot, type DshConversationMenus } from '../src/client/DshConversationPanel.tsx'
+import { CONVERSATION_CLOSE_ICON, CONVERSATION_OPEN_ICON, DshConversationCloseIcon, DshConversationMenu, DshConversationOpenIcon, DshConversationPanel, DshReviewActions, findDshConversationRoot, type DshConversationMenus } from '../src/client/DshConversationPanel.tsx'
 import { SshChatTarget } from '../src/client/SshChatTarget.tsx'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
@@ -21,7 +21,7 @@ it('keeps native menu registration stable and ignores actions from a previous se
     await act(async () => root.render(<DshConversationMenu menus={menus} sessionId="a" editor={false} onOpen={open} onReturn={back} onClose={close}/>))
     const oldAction = contribution!.resolve({ sessionId: 'a' })[0]!
     expect(oldAction).toMatchObject({ label: '在编辑区打开对话', icon: { key: CONVERSATION_OPEN_ICON } })
-    expect(contribution!.resolve({ sessionId: 'a' })[1]).toMatchObject({ label: '关闭对话栏' })
+    expect(contribution!.resolve({ sessionId: 'a' })[1]).toMatchObject({ label: '关闭对话栏', icon: { key: CONVERSATION_CLOSE_ICON } })
     await act(async () => root.render(<DshConversationMenu menus={menus} sessionId="a" editor={false} onOpen={latestOpen} onReturn={back} onClose={close}/>))
     oldAction.run()
     expect(open).not.toHaveBeenCalled()
@@ -33,7 +33,7 @@ it('keeps native menu registration stable and ignores actions from a previous se
     expect(latestOpen).toHaveBeenCalledTimes(1)
     expect(contribution!.resolve({ sessionId: 'a' })).toEqual([])
     expect(contribution!.resolve({ sessionId: 'b' })[0]!.label).toBe('移回侧栏')
-    expect(contribution!.resolve({ sessionId: 'b' })[1]).toMatchObject({ label: '关闭对话栏' })
+    expect(contribution!.resolve({ sessionId: 'b' })[1]).toMatchObject({ label: '关闭对话栏', icon: { key: CONVERSATION_CLOSE_ICON } })
     expect(menus.register).toHaveBeenCalledTimes(1)
     expect(node.childNodes).toHaveLength(0)
   } finally {
@@ -42,7 +42,7 @@ it('keeps native menu registration stable and ignores actions from a previous se
   expect(dispose).toHaveBeenCalledTimes(1)
 })
 
-it.each([DshConversationOpenIcon])('renders the conversation menu icon as a compact current-color glyph: %s', async Icon => {
+it.each([DshConversationOpenIcon, DshConversationCloseIcon])('renders the conversation menu icon as a compact current-color glyph: %s', async Icon => {
   const node = document.createElement('div')
   document.body.append(node)
   const root = createRoot(node)

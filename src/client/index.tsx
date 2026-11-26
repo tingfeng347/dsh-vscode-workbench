@@ -28,7 +28,7 @@ import { mainViewSession } from './session.ts'
 import { createDshNavigation } from './dshNavigation.ts'
 import type { DshNavigation } from './dshNavigation.ts'
 import { installDshChangedFilesOpenInterceptor, installGeneratedFileOpenInterceptor } from './generatedFileLinks.ts'
-import { CONVERSATION_OPEN_ICON, DshConversationOpenIcon, type DshConversationMenus } from './DshConversationPanel.tsx'
+import { CONVERSATION_CLOSE_ICON, CONVERSATION_OPEN_ICON, DshConversationCloseIcon, DshConversationOpenIcon, type DshConversationMenus } from './DshConversationPanel.tsx'
 
 export type { BottomPanelContribution, BottomPanelProps, VscodeWorkbench, WorkbenchCommand, WorkbenchSnapshot, WorkbenchView } from './service.ts'
 
@@ -146,6 +146,7 @@ export function apply(ctx: ClientContext): void {
     }),
   }, Overlay))
   ctx.slots.inject('contextMenu.icon', () => ctx.slots.register({ name: 'contextMenu.icon', key: CONVERSATION_OPEN_ICON }, DshConversationOpenIcon))
+  ctx.slots.inject('contextMenu.icon', () => ctx.slots.register({ name: 'contextMenu.icon', key: CONVERSATION_CLOSE_ICON }, DshConversationCloseIcon))
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: SETTINGS_SECTION_ID, order: 40, label: '工作台' }, WorkbenchSettingsSection))
   ctx.slots.inject('settings.section.icon', () => ctx.slots.register({ name: 'settings.section.icon', id: SETTINGS_SECTION_ID }, WorkbenchSettingsIcon))
   ctx.effect(() => {

@@ -4,11 +4,18 @@ import { placeDshSurface, watchDshPlacement } from './dshPlacement.ts'
 import type { WorkbenchColorScheme } from './service.ts'
 
 export const CONVERSATION_OPEN_ICON = 'dsh-vscode-workbench.open-conversation'
+export const CONVERSATION_CLOSE_ICON = 'dsh-vscode-workbench.close-conversation'
 
 /** Window with an inward arrow, sized by the official context menu's icon cell. */
 export function DshConversationOpenIcon() {
   return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
     <path d="M6 2.5h7.5v11H6M6 5.5h7.5M2 8h7M6.5 5.5 9 8l-2.5 2.5"/>
+  </svg>
+}
+
+export function DshConversationCloseIcon() {
+  return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" aria-hidden="true">
+    <path d="m4 4 8 8M12 4l-8 8"/>
   </svg>
 }
 
@@ -63,6 +70,7 @@ export function DshConversationMenu(props: {
         {
           id: 'close-conversation-bar',
           label: '关闭对话栏',
+          icon: { key: CONVERSATION_CLOSE_ICON },
           separatorBefore: false,
           run: () => {
             const latest = current.current

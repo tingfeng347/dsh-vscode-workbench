@@ -134,6 +134,16 @@ it('keeps the full-window layout untouched by default', async () => {
   expect(document.querySelector('.dvw-tab') ?? document.querySelector('.dvw-empty')).not.toBeNull()
 })
 
+it.each(['white', 'light'])('restores the %s preference as the unified light theme', async savedTheme => {
+  localStorage.setItem('dvw:theme', savedTheme)
+  await mount()
+
+  const overlay = document.querySelector<HTMLElement>('.dvw-overlay')!
+  expect(overlay.dataset.dvwTheme).toBe('light')
+  expect(overlay.dataset.dvwThemeName).toBe('light')
+  expect(localStorage.getItem('dvw:theme')).toBe('light')
+})
+
 it('renders the workbench settings page even when no session is selected', async () => {
   vi.stubGlobal('WebSocket', FakeSocket)
   vi.stubGlobal('fetch', vi.fn(async () => ({ ok: true, json: async () => ({ ok: true, value: { models: [], unavailable: [] } }) })))

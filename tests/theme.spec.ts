@@ -53,7 +53,7 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('.dvw-activity{grid-row:1/3;background:var(--dvw-base);border:1px solid var(--dvw-border);border-radius:8px 0 0 8px;')
     expect(styles).toContain('.dvw-act[data-active=true]::before{background:var(--dvw-tab-active)}')
     expect(styles).toContain('.dvw-tab[data-active=true]{background:var(--dvw-surface-1)')
-    expect(styles).toContain('--dvw-tab-active:#e8e8e8')
+    expect(styles).toContain('.dvw-overlay[data-dvw-theme=light] .dvw-act[data-active=true]::before{background:#00000010}')
     expect(workbench).toContain('<DshMark size={22}/>')
     expect(styles).toContain('.dvw-tab{border-radius:10px 10px 0 0;border-right:0}')
     expect(styles).toContain('.dvw-tab[data-active=true]::before,.dvw-tab[data-active=true]::after{content:"";position:absolute;bottom:0;width:10px;height:10px;background:var(--dvw-surface-1);pointer-events:none}')
@@ -139,12 +139,12 @@ describe('workbench dark theme', () => {
     expect(styles).toContain('.dvw-tab-menu{min-width:220px}')
   })
 
-  it('uses VS Code light surfaces and separators', () => {
+  it('keeps editor and terminal borders with the white-based light surfaces', () => {
     const styles = read('src/client/styles.ts')
-    expect(styles).toContain('--dvw-base:#f9fafb')
-    expect(styles).toContain('--dvw-side:#f9fafb')
-    expect(styles).toContain('--dvw-gutter:#f9fafb')
-    expect(styles).toContain('--dvw-border:#e5e5e5')
+    const lightPalette = styles.match(/\.dvw-overlay\[data-dvw-theme=light\]\{([^}]+)\}/)?.[1]
+    expect(lightPalette).toContain('--dvw-side:#fff')
+    expect(lightPalette).toContain('--dvw-gutter:#fff')
+    expect(lightPalette).toContain('--dvw-border:#e2e2e2')
     expect(styles).toContain('border-left:1px solid var(--dvw-border);border-top:1px solid var(--dvw-border);border-right:1px solid var(--dvw-border);border-bottom:1px solid var(--dvw-border);border-radius:8px;margin-left:3px;overflow:hidden}')
     expect(styles).not.toContain('.dvw-overlay[data-dvw-bottom-panel] .dvw-main')
     expect(styles).toContain('.dvw-tabs[data-empty]{display:none}')
@@ -160,7 +160,6 @@ describe('workbench dark theme', () => {
     expect(styles).not.toContain('.dvw-status{grid-column:1/4;grid-row:3;background:var(--dvw-base);color:var(--dvw-text);border-top')
     expect(styles).toContain('[data-dvw-conversation-panel]{position:fixed!important;top:calc(var(--dvw-titlebar-height) + 6px)!important;right:3px!important;bottom:var(--dvw-status-height,30px)!important')
     expect(read('src/client/Workbench.tsx')).toContain('statusHeight={statusVisible?30:6}')
-    expect(styles).toContain('body[data-dvw-palette=light] [data-dvw-conversation-panel]{--dsw-alias-bg-base:#f9fafb;--dsw-specific-sidebar-fill:#f9fafb;--dsw-alias-border-l2:#e5e5e5;background:#f9fafb!important}')
     expect(styles).toContain('.dvw-tabs{height:35px')
     expect(styles).toContain('.dvw-tab{position:relative;height:35px')
     expect(styles).toContain('.dvw-tree-row{display:flex;align-items:center;height:22px;')
@@ -229,16 +228,17 @@ describe('workbench dark theme', () => {
     expect(read('src/client/styles.ts')).toContain('border-bottom:0;background:var(--dvw-base)}.dvw-terminal-actions')
   })
 
-  it('offers pure-white and eye-care themes with matching surfaces', () => {
+  it('offers one white-based light theme with a gray file tab strip, and an eye-care theme', () => {
     const styles = read('src/client/styles.ts')
-    const workbench = read('src/client/Workbench.tsx')
     const panel = read('src/client/SettingsPanel.tsx')
     const monaco = read('src/client/MonacoEditor.tsx')
-    expect(panel).toContain("['white', '纯白']")
+    expect(panel).toContain("['light', '浅色']")
+    expect(panel).not.toContain("['white', '纯白']")
     expect(panel).toContain("['eyecare', '护眼']")
-    expect(styles).toContain('.dvw-overlay[data-dvw-theme=white]{--dvw-base:#fff;--dvw-surface-1:#fff')
+    expect(styles).toContain('.dvw-overlay[data-dvw-theme=light]{--dvw-base:#fff;--dvw-surface-1:#fff')
+    expect(styles).toContain('.dvw-overlay[data-dvw-theme=light] .dvw-tabs{--dvw-base:#f9fafb')
     expect(styles).toContain('.dvw-overlay[data-dvw-theme=eyecare]{--dvw-base:#f7ebc8;--dvw-surface-1:#f7ebc8')
-    expect(styles).toContain('body[data-dvw-palette=white] [data-dvw-conversation-panel]')
+    expect(styles).toContain('body[data-dvw-palette=light] [data-dvw-conversation-panel]{--dsw-alias-bg-base:#fff')
     expect(styles).toContain('body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]')
     // The DSH composer draws on --dsw-specific-input-major; leaving it white punches a white box into the yellow panel.
     expect(styles).toContain('--dsw-specific-input-major:#f7ebc8')

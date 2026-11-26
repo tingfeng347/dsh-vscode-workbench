@@ -1,6 +1,7 @@
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { placeDshSurface, watchDshPlacement } from './dshPlacement.ts'
+import type { WorkbenchColorScheme } from './service.ts'
 
 /** Locate the resident DSH conversation without depending on generated CSS module names. */
 export function findDshConversationRoot(documentRoot: Document = document): HTMLElement | null {
@@ -73,7 +74,7 @@ export function DshConversationPanel({ visible, width, statusHeight, floating = 
 }
 
 /** Temporarily align the official DSH panel palette with a fixed workbench palette. */
-export function DshConversationTheme({ visible, colorScheme, followDsh }: { visible: boolean; colorScheme: 'dark' | 'light' | 'white' | 'eyecare'; followDsh: boolean }) {
+export function DshConversationTheme({ visible, colorScheme, followDsh }: { visible: boolean; colorScheme: WorkbenchColorScheme; followDsh: boolean }) {
   useLayoutEffect(() => {
     if (!visible) return
     const body = document.body

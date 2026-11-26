@@ -1,5 +1,6 @@
 import { useLayoutEffect, useSyncExternalStore } from 'react'
 import { settingsHost } from './settingsHost.ts'
+import type { WorkbenchColorScheme } from './service.ts'
 
 /** Present the original browser DOM without moving React-owned nodes or rebuilding webviews. */
 const PALETTE: Record<string, string> = {
@@ -10,7 +11,7 @@ const PALETTE: Record<string, string> = {
   '--dsw-alias-interactive-bg-hover': '--dvw-hover', '--dsw-alias-interactive-bg-active': '--dvw-active',
 }
 
-export function DshBrowserPage({ sessionId, tabId, active, colorScheme }: { sessionId: string; tabId: string; active: boolean; colorScheme: 'dark' | 'light' | 'white' | 'eyecare' }) {
+export function DshBrowserPage({ sessionId, tabId, active, colorScheme }: { sessionId: string; tabId: string; active: boolean; colorScheme: WorkbenchColorScheme }) {
   // The adopted page lives in the top layer, so it would paint over DSH's settings dialog.
   // Step back into the sidebar while settings is open and adopt the page again when it closes.
   const settingsOpen = useSyncExternalStore(settingsHost.subscribe, settingsHost.getSnapshot) !== undefined

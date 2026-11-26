@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { Icon } from './Icon.tsx'
 import type { WorkspaceChoice } from './dshNavigation.ts'
+import type { WorkbenchColorScheme } from './service.ts'
 
 /** Centered switcher: existing workspaces, their sessions, and a new-workspace action. */
 export function WorkspaceSwitcher({ choices, activeSessionId, unavailable, busy, error, theme, onCreate, onNewSession, onSwitch, onOpenWorkspace, onClose }: {
@@ -10,7 +11,7 @@ export function WorkspaceSwitcher({ choices, activeSessionId, unavailable, busy,
   unavailable: boolean
   busy: boolean
   error?: string
-  theme?: 'dark' | 'light' | 'white' | 'eyecare'
+  theme?: WorkbenchColorScheme
   onCreate(): void
   onNewSession(workspaceId?: string): void
   onSwitch(sessionId: string): void

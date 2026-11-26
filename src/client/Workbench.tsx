@@ -9,7 +9,7 @@ import type { CancellationToken, languages, Uri } from 'monaco-editor'
 import type { FileDocument, FileEntry, GitBranch, GitChange, GitCommit, GitCommitFile, GitDiff, GitStatus } from '../types.ts'
 import { ApiError, api, readApiResponse } from './api.ts'
 import { AiReviewController, latestReviewFollowChange, locateReviewChange, type AiReviewSnapshot, type ReviewChange, type ReviewMode } from './aiReview.ts'
-import type { VscodeWorkbench, WorkbenchView } from './service.ts'
+import type { VscodeWorkbench, WorkbenchColorScheme, WorkbenchTheme, WorkbenchView } from './service.ts'
 import { Icon } from './Icon.tsx'
 import { SearchView } from './SearchView.tsx'
 import { PanelResizer, resizedPanelWidth } from './PanelResizer.tsx'
@@ -59,7 +59,6 @@ import { outermostTreeEntries, remapTreeSelectionPaths, selectAllTreePaths, sele
 interface Tab extends FileDocument { referenceUri?: string; instance?: symbol; dirty: boolean; draft: string; loaded?: boolean; loadError?: string; line?: number; endLine?: number; column?: number; highlight?: string; focusOnReveal?: boolean; external?: boolean; preview?: boolean; title?: string; diff?: GitDiff; diffSourcePath?:string; imageUrl?:string; documentPreview?:DocumentPreviewKind; documentUrl?:string }
 type GitDiffMode = 'inline' | 'split'
 const GIT_DIFF_MODE_KEY = 'dvw:git-diff-mode'
-type WorkbenchTheme = 'dsh' | 'dark' | 'light' | 'white' | 'eyecare'
 export type MarkdownDefaultView = 'preview' | 'source'
 export const MARKDOWN_DEFAULT_VIEW_KEY = 'dvw:markdown-default-view'
 export type DefaultBrowser = 'builtin' | 'system'
@@ -1272,7 +1271,11 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   const tabListRef=useRef<HTMLDivElement>(null)
   const workspaceRequests=useRef(new WorkspaceRequestScope());const loadedWorkspace=useRef<{cwd:string;name:string}>();const loadingTabs=useRef(new Map<string, symbol>())
   const dshDark = useDshDarkTheme()
-  const [theme,setTheme]=useState<WorkbenchTheme>(()=>{const saved=localStorage.getItem('dvw:theme');return saved==='dark'||saved==='light'||saved==='white'||saved==='eyecare'?saved:'dsh'})
+  const [theme, setTheme] = useState<WorkbenchTheme>(() => {
+    const saved = storedValue('dvw:theme')
+    if (saved === 'white') return 'light'
+    return saved === 'dark' || saved === 'light' || saved === 'eyecare' ? saved : 'dsh'
+  })
   const [markdownView,setMarkdownView]=useState<MarkdownDefaultView>(()=>markdownDefaultView())
   const [reviewMode,setReviewMode]=useState<ReviewMode>(()=>{
     const saved=storedValue('dvw:ai-review-mode')
@@ -1379,7 +1382,7 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     setCommitModelConfigured(false)
     setCommitModel(availableDefault)
   },[commitModel,commitModelConfigured,commitModels])
-  const colorScheme: 'dark' | 'light' | 'white' | 'eyecare' = theme === 'dsh' ? dshDark ? 'dark' : 'light' : theme
+  const colorScheme: WorkbenchColorScheme = theme === 'dsh' ? dshDark ? 'dark' : 'light' : theme
   const commitPreferences=useMemo<CommitMessagePreferences>(()=>({detail:commitDetail,language:commitLanguage}),[commitDetail,commitLanguage])
   useEffect(()=>localStorage.setItem('dvw:theme',theme),[theme])
   useEffect(()=>localStorage.setItem(MARKDOWN_DEFAULT_VIEW_KEY,markdownView),[markdownView])

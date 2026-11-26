@@ -34,7 +34,7 @@ afterEach(async () => {
   document.body.replaceChildren()
 })
 
-async function mount(dshPanelId?: string, onOpenDshPanel?: (id: string) => void): Promise<WorkbenchController> {
+async function mount(dshPanelId?: string, onOpenDshPanel?: (id: string) => void, overrides: Pick<Parameters<typeof Workbench>[0], 'rightSidebar' | 'browser'> = {}): Promise<WorkbenchController> {
   vi.stubGlobal('WebSocket', FakeSocket)
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     const method = url.split('/').at(-1)
@@ -46,7 +46,8 @@ async function mount(dshPanelId?: string, onOpenDshPanel?: (id: string) => void)
             { provider: 'deepseek-official', model: 'deepseek-v4-pro', id: 'deepseek-v4-pro', name: 'DeepSeek-V4-Pro', providerName: 'DeepSeek' },
           ], unavailable: [], defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' } }
         : method === 'git.status' ? {repository:'/tmp/audit', branch:'main', ahead:0, behind:0, changes:[]}
-        : ['fs.list', 'search', 'lsp.status', 'terminal.list'].includes(method ?? '') ? [] : {}
+        : method === 'fs.list' ? [{ name: 'sidebar-reference.txt', path: 'sidebar-reference.txt', kind: 'file' }]
+        : ['search', 'lsp.status', 'terminal.list'].includes(method ?? '') ? [] : {}
     return { ok: true, json: async () => ({ ok: true, value }) }
   }))
   const service = new WorkbenchController()
@@ -54,7 +55,7 @@ async function mount(dshPanelId?: string, onOpenDshPanel?: (id: string) => void)
   const node = document.createElement('div')
   document.body.append(node)
   root = createRoot(node)
-  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" dshPanelId={dshPanelId} onOpenDshPanel={onOpenDshPanel}/>) })
+  await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" dshPanelId={dshPanelId} onOpenDshPanel={onOpenDshPanel} {...overrides}/>) })
   return service
 }
 
@@ -279,4 +280,128 @@ it('falls back to filling the DSH window when the host rejects fullscreen', asyn
   expect(overlay.style.height).toBe(`${window.innerHeight - 48}px`)
   expect(localStorage.getItem('dvw:float-max')).toBe('1')
   expect(document.querySelectorAll('.dvw-float-handle')).toHaveLength(0)
+})
+
+it('fits the conversation and restores an existing browser after opening the native sidebar', async () => {
+  vi.stubGlobal('innerWidth', 1000)
+  const column = document.createElement('div')
+  column.setAttribute('data-rightbar-col', '')
+  column.innerHTML = '<div data-sidebar-right-panel="push" data-sidebar-right-session="s"></div>'
+  document.body.append(column)
+  const panel = column.firstElementChild as HTMLElement
+  vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue({ width: 300 } as DOMRect)
+  const isExpanded = () => panel.hasAttribute('data-sidebar-right-open')
+  const rightSidebar = {
+    mounted: { getSnapshot: () => 's', subscribe: () => () => {} },
+    isExpanded,
+    toggleExpanded: vi.fn(() => {
+      if (isExpanded()) panel.removeAttribute('data-sidebar-right-open')
+      else panel.setAttribute('data-sidebar-right-open', 'true')
+    }),
+  } as unknown as Parameters<typeof Workbench>[0]['rightSidebar']
+  const focus = vi.fn()
+  const browser = {
+    getSnapshot: () => ({ available: true, tabs: [{ id: 'existing', sessionId: 's', title: 'Existing browser' }] }),
+    subscribe: () => () => {},
+    focus,
+  } as unknown as Parameters<typeof Workbench>[0]['browser']
+  await mount(undefined, undefined, { rightSidebar, browser })
+
+  const overlay = document.querySelector<HTMLElement>('.dvw-overlay')!
+  const sidebarToggle = document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!
+  const browserTab = document.querySelector<HTMLButtonElement>('[data-dvw-browser-tab="existing"]')!
+  await act(async () => sidebarToggle.click())
+  expect(sidebarToggle.getAttribute('aria-expanded')).toBe('true')
+  expect(document.body.style.getPropertyValue('--dvw-native-sidebar-width')).toBe('300px')
+  expect(overlay.dataset.dvwChat).toBe('true')
+  expect(overlay.style.getPropertyValue('--dvw-chat-width')).toBe('440px')
+  expect(overlay.style.getPropertyValue('--dvw-side-width')).toBe('112px')
+
+  await act(async () => browserTab.click())
+  expect(sidebarToggle.getAttribute('aria-expanded')).toBe('false')
+  expect(focus).toHaveBeenCalledWith('existing')
+  expect(browserTab.dataset.active).toBe('true')
+  expect(document.body.style.getPropertyValue('--dvw-native-sidebar-width')).toBe('')
+
+  await act(async () => sidebarToggle.click())
+  vi.stubGlobal('innerWidth', 850)
+  await act(async () => window.dispatchEvent(new Event('resize')))
+  expect(overlay.hasAttribute('data-dvw-chat')).toBe(false)
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyB', ctrlKey: true, altKey: true })))
+  expect(sidebarToggle.getAttribute('aria-expanded')).toBe('false')
+  expect(overlay.dataset.dvwChat).toBe('true')
+})
+
+function mockNativeDock(mode: 'push' | 'fullscreen', width = 360) {
+  const column = document.createElement('div')
+  column.setAttribute('data-rightbar-col', '')
+  column.innerHTML = `<div data-sidebar-right-panel="${mode}" data-sidebar-right-session="s"></div>`
+  document.body.append(column)
+  const panel = column.firstElementChild as HTMLElement
+  vi.spyOn(panel, 'getBoundingClientRect').mockReturnValue({ width } as DOMRect)
+  return {
+    mounted: { getSnapshot: () => 's', subscribe: () => () => {} },
+    isExpanded: () => panel.hasAttribute('data-sidebar-right-open'),
+    toggleExpanded: () => panel.toggleAttribute('data-sidebar-right-open')
+      ? panel.setAttribute('data-sidebar-right-open', 'true') : undefined,
+  } as unknown as Parameters<typeof Workbench>[0]['rightSidebar']
+}
+
+it('returns from the fullscreen native dock to the conversation with Ctrl+Alt+B', async () => {
+  await mount(undefined, undefined, { rightSidebar: mockNativeDock('fullscreen') })
+  const button = document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!
+  await act(async () => button.click())
+  expect(button.getAttribute('aria-expanded')).toBe('true')
+  await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { code: 'KeyB', ctrlKey: true, altKey: true })))
+  expect(button.getAttribute('aria-expanded')).toBe('false')
+  expect(document.querySelector('.dvw-overlay')?.getAttribute('data-dvw-chat')).toBe('true')
+})
+
+it('reveals the conversation when adding a file from a cramped workspace', async () => {
+  vi.stubGlobal('innerWidth', 950)
+  const conversation = document.createElement('div')
+  conversation.dataset.phase = 'active'
+  conversation.innerHTML = '<div data-conversation-scroll></div><div data-composer-card><textarea>draft</textarea></div>'
+  document.body.append(conversation)
+  await mount(undefined, undefined, { rightSidebar: mockNativeDock('push', 370) })
+  const button = document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!
+  await act(async () => button.click())
+  expect(document.querySelector('.dvw-overlay')?.hasAttribute('data-dvw-chat')).toBe(false)
+  const row = document.querySelector<HTMLElement>('[data-tree-path="sidebar-reference.txt"]')!
+  await act(async () => row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })))
+  const menuItem = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')].find(item => item.textContent?.includes('添加到 DSH 对话'))!
+  await act(async () => menuItem.click())
+  expect(button.getAttribute('aria-expanded')).toBe('false')
+  expect(document.querySelector('.dvw-overlay')?.getAttribute('data-dvw-chat')).toBe('true')
+  await vi.waitFor(() => expect(conversation.querySelector('textarea')?.value).toContain('sidebar-reference.txt'))
+  expect(conversation.querySelector('textarea')?.value).toContain('draft')
+})
+
+it('never focuses an older browser tab while changing to another session', async () => {
+  const focus = vi.fn()
+  const previous = { id: 'old', sessionId: 's', title: 'Old browser' }
+  const browser = {
+    getSnapshot: () => ({ available: true, tabs: [previous] }),
+    subscribe: () => () => {},
+    focus,
+  } as unknown as Parameters<typeof Workbench>[0]['browser']
+  const service = await mount(undefined, undefined, { rightSidebar: mockNativeDock('push'), browser })
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-dvw-browser-tab="old"]')!.click())
+  expect(focus).toHaveBeenCalledWith('old')
+  const toggle = document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!
+  await act(async () => toggle.click())
+  focus.mockClear()
+  await act(async () => root!.render(<Workbench service={service} browser={browser} sessionId="other" cwd="/tmp/audit"/>))
+  expect(focus).not.toHaveBeenCalled()
+  expect(document.querySelector('[data-dvw-browser-tab="old"]')).toBeNull()
+})
+
+it('reports and applies the separator range at the fitted left-pane width', async () => {
+  vi.stubGlobal('innerWidth', 1042)
+  await mount(undefined, undefined, { rightSidebar: mockNativeDock('push', 299.4) })
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!.click())
+  const separator = document.querySelector<HTMLElement>('.dvw-side-resizer')!
+  expect(separator.getAttribute('aria-valuenow')).toBe('154')
+  expect(Number(separator.getAttribute('aria-valuemin'))).toBeLessThanOrEqual(154)
+  expect(separator.getAttribute('aria-valuemax')).toBe('154')
 })

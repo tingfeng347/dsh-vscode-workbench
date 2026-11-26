@@ -1,0 +1,143 @@
+import type { ISidebarRight } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
+import { useCallback, useLayoutEffect, useState, useSyncExternalStore } from 'react'
+
+type NativeSidebarApi = Pick<ISidebarRight, 'mounted' | 'isExpanded' | 'toggleExpanded'>
+
+const ignoreMount = () => () => {}
+const noSession = () => undefined
+const presentation = 'data-dvw-native-sidebar'
+const sidebarWidth = '--dvw-native-sidebar-width'
+const panelSelector = '[data-rightbar-col] [data-sidebar-right-panel][data-sidebar-right-session]'
+
+interface DockLayout { width: number; fullscreen: boolean }
+
+function findPanel(sessionId: string, open = false) {
+  return Array.from(document.querySelectorAll<HTMLElement>(panelSelector)).find(node =>
+    node.dataset.sidebarRightSession === sessionId && node.closest('[hidden]') === null
+      && (!open || node.dataset.sidebarRightOpen === 'true'),
+  )
+}
+
+/** Lift the host's current dock above the workbench without moving its React tree. */
+function watchNativeSidebar(sessionId: string, onLayout: (layout: DockLayout | undefined) => void): () => void {
+  let panel: HTMLElement | undefined
+  let column: HTMLElement | null = null
+  let measured: DockLayout | undefined
+
+  const release = () => {
+    resize?.disconnect()
+    column?.removeAttribute(presentation)
+    document.body.style.removeProperty(sidebarWidth)
+  }
+  const measure = () => {
+    const fullscreen = panel?.dataset.sidebarRightPanel === 'fullscreen'
+    const layout = panel === undefined ? undefined : { width: fullscreen ? 0 : panel.getBoundingClientRect().width, fullscreen }
+    if (layout?.width === measured?.width && layout?.fullscreen === measured?.fullscreen) return
+    measured = layout
+    if (layout !== undefined) document.body.style.setProperty(sidebarWidth, `${layout.width}px`)
+    onLayout(layout)
+  }
+  const update = () => {
+    const next = findPanel(sessionId, true)
+    const nextColumn = next?.closest<HTMLElement>('[data-rightbar-col]') ?? null
+    if (next !== panel || nextColumn !== column) {
+      release()
+      // A replacement panel may have exactly the same width as its predecessor.
+      if (next !== undefined) measured = undefined
+      panel = next
+      column = nextColumn
+      column?.setAttribute(presentation, '')
+      if (panel !== undefined) resize?.observe(panel)
+    }
+    measure()
+  }
+
+  const resize = typeof ResizeObserver === 'undefined' ? undefined : new ResizeObserver(measure)
+  const rightbarColumn = '[data-rightbar-col]'
+  const observer = new MutationObserver(records => {
+    if (records.some(record => (record.target instanceof Element && record.target.closest(rightbarColumn) !== null)
+      || [...record.addedNodes, ...record.removedNodes].some(node => node instanceof Element
+        && (node.matches(rightbarColumn) || node.querySelector(rightbarColumn) !== null)))) update()
+  })
+  observer.observe(document.body, {
+    subtree: true, childList: true, attributes: true,
+    attributeFilter: ['data-sidebar-right-session', 'data-sidebar-right-open', 'data-sidebar-right-panel', 'hidden'],
+  })
+  window.addEventListener('resize', measure)
+  update()
+  return () => {
+    observer.disconnect()
+    window.removeEventListener('resize', measure)
+    release()
+  }
+}
+
+export function useNativeSidebar(sidebar: NativeSidebarApi | undefined, sessionId: string | undefined, visible: boolean) {
+  const mounted = useSyncExternalStore(
+    sidebar?.mounted.subscribe ?? ignoreMount,
+    sidebar?.mounted.getSnapshot ?? noSession,
+  )
+  const ready = sidebar !== undefined && sessionId !== undefined && mounted === sessionId
+  const [requestedSession, setRequestedSession] = useState<string>()
+  const [dock, setDock] = useState<(DockLayout & { sessionId: string })>()
+  const dismiss = useCallback(() => setRequestedSession(undefined), [])
+
+  useLayoutEffect(() => {
+    if (!visible || requestedSession !== sessionId) setRequestedSession(undefined)
+  }, [visible, sessionId, requestedSession])
+
+  useLayoutEffect(() => {
+    if (!visible || !ready || requestedSession !== sessionId || sessionId === undefined) return
+    // Browser tabs can expand the DSH dock internally. Present it only after the workbench toggle
+    // was used, and stop presenting when DSH's own collapse control closes it.
+    let wasOpen = false
+    const stop = watchNativeSidebar(sessionId, layout => {
+      const open = layout !== undefined
+      setDock(layout === undefined ? undefined : { sessionId, ...layout })
+      if (!open && wasOpen) setRequestedSession(undefined)
+      wasOpen = open
+    })
+    return () => {
+      stop()
+      setDock(undefined)
+    }
+  }, [visible, ready, requestedSession, sessionId])
+
+  const shown = visible && ready && requestedSession === sessionId && dock !== undefined && dock.sessionId === sessionId
+  const toggle = () => {
+    if (sidebar === undefined || sessionId === undefined || sidebar.mounted.getSnapshot() !== sessionId) return
+    if (shown) {
+      dismiss()
+      if (sidebar.isExpanded()) sidebar.toggleExpanded()
+    } else {
+      setRequestedSession(sessionId)
+      if (!sidebar.isExpanded()) {
+        const panel = findPanel(sessionId)
+        const pushWidth = panel?.style.getPropertyValue('--dsh-sidebar-right-panel-width').trim() || panel?.style.width
+        const fullscreen = pushWidth === '0px' && panel?.dataset.sidebarRightPanel === 'push'
+          ? panel.querySelector<HTMLButtonElement>('[data-sidebar-right-mode="fullscreen"]') : null
+        const frame = panel?.closest('[data-rightbar-col]')?.parentElement
+        const expand = Array.from(frame?.querySelectorAll<HTMLButtonElement>('[data-sidebar-right-expand]:not(:disabled)') ?? [])
+          .find(button => button.closest('[hidden]') === null)
+        if (fullscreen && expand) {
+          // The native opener writes without flushing. Set fullscreen in the same React event,
+          // before the host checks the push track. The public toggle flushes immediately.
+          expand.click()
+          fullscreen.click()
+        } else sidebar.toggleExpanded()
+      }
+    }
+  }
+  return { ready, shown, fullscreen: shown && dock.fullscreen, width: shown ? dock.width : 0, toggle, dismiss }
+}
+
+export function fitNativeSidebarLayout(viewportWidth: number, dockWidth: number, sideWidth: number, chatWidth: number, minChatWidth: number, chatVisible: boolean) {
+  if (dockWidth === 0) return { sideWidth, chatWidth, chatFits: true, sideLimit: Infinity, chatLimit: Infinity }
+  // Keep room for the 48px activity rail and at least 100px of editor space.
+  const available = Math.max(0, Math.floor(viewportWidth - dockWidth - 148))
+  const chatFits = available >= minChatWidth
+  const fittedChatWidth = Math.min(chatWidth, available)
+  const visibleChatWidth = chatVisible && chatFits ? fittedChatWidth : 0
+  const sideLimit = available - visibleChatWidth
+  return { sideWidth: Math.min(sideWidth, sideLimit), chatWidth: fittedChatWidth, chatFits, sideLimit, chatLimit: available }
+}

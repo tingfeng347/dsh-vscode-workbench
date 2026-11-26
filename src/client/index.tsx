@@ -4,7 +4,7 @@ import type {} from '@deepseek-ai/dsh-api-terminal-controller/remote'
 import type {} from '@deepseek-ai/dsh-api-gateway/client'
 import { TerminalWorkspaces } from './terminal.ts'
 import { NativeBrowser } from './browser.ts'
-import type {} from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
+import type { ISidebarRight } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 import { useLayoutEffect } from 'react'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
@@ -33,13 +33,13 @@ export type { BottomPanelContribution, BottomPanelProps, VscodeWorkbench, Workbe
 
 declare module '@deepseek-ai/cordis' { interface Context { vscodeWorkbench: VscodeWorkbench } }
 
-const Overlay = ({ service, browser, useSessions, usePanelInfo, navigation, openDshPanel, restoreConversation, closeDshPanel, openSettings }: PropsRuntime<'shell.overlay'> & { service: VscodeWorkbench; browser: NativeBrowser; navigation: DshNavigation; openDshPanel(panelId: string): void; restoreConversation(): void; closeDshPanel(): void; openSettings(): void }) => {
+const Overlay = ({ service, browser, rightSidebar, useSessions, usePanelInfo, navigation, openDshPanel, restoreConversation, closeDshPanel, openSettings }: PropsRuntime<'shell.overlay'> & { rightSidebar: ISidebarRight; service: VscodeWorkbench; browser: NativeBrowser; navigation: DshNavigation; openDshPanel(panelId: string): void; restoreConversation(): void; closeDshPanel(): void; openSettings(): void }) => {
   const session = useSessions(mainViewSession)
   const cwd = session?.projectionValues?.workingDirectory ?? session?.cwd
   const activePanelId = usePanelInfo(info => info.activePanelId)
   // DSH's own panel entry is not a page; every other global panel is shown inside the workbench.
   const dshPanelId = activePanelId === null || activePanelId === WORKBENCH_PANEL_ID ? undefined : activePanelId
-  return <Workbench key={cwd ?? 'no-workspace'} service={service} browser={browser} sessionId={session?.id} cwd={cwd} navigation={navigation} dshPanelId={dshPanelId} onOpenDshPanel={openDshPanel} onRestoreConversation={restoreConversation} onCloseDshPanel={closeDshPanel} openSettings={openSettings}/>
+  return <Workbench key={cwd ?? 'no-workspace'} service={service} browser={browser} rightSidebar={rightSidebar} sessionId={session?.id} cwd={cwd} navigation={navigation} dshPanelId={dshPanelId} onOpenDshPanel={openDshPanel} onRestoreConversation={restoreConversation} onCloseDshPanel={closeDshPanel} openSettings={openSettings}/>
 }
 
 const WORKBENCH_PANEL_ID = 'vscode-workbench' as MainPanelId
@@ -64,6 +64,7 @@ function WorkbenchSettingsIcon({ size }: { size: number }) {
 
 export const inject = ['slots', 'layout', 'remote', 'remote.terminal', 'sidebarRight', 'sidebarRightTabs']
 export function apply(ctx: ClientContext): void {
+  const rightSidebar = ctx.sidebarRight
   const service = new WorkbenchController()
   const browser = new NativeBrowser(ctx)
   ctx.effect(() => () => browser.dispose(), 'dsh-vscode-workbench: browser')
@@ -129,7 +130,7 @@ export function apply(ctx: ClientContext): void {
     const disposeIcon = ctx.slots.register({ name: 'sidebar.panellist', id: WORKBENCH_PANEL_ID, order: 60, label: () => 'VS Code 工作台' }, WorkbenchPanelIcon)
     return () => { disposeIcon(); disposeMain() }
   }))
-  ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'dsh-vscode-workbench-overlay', inject: () => ({ service, browser, navigation, openDshPanel, restoreConversation, closeDshPanel, openSettings }) }, Overlay))
+  ctx.slots.inject('shell.overlay', () => ctx.slots.register({ name: 'shell.overlay', id: 'dsh-vscode-workbench-overlay', inject: () => ({ service, browser, rightSidebar, navigation, openDshPanel, restoreConversation, closeDshPanel, openSettings }) }, Overlay))
   ctx.slots.inject('settings.section', () => ctx.slots.register({ name: 'settings.section', id: SETTINGS_SECTION_ID, order: 40, label: '工作台' }, WorkbenchSettingsSection))
   ctx.slots.inject('settings.section.icon', () => ctx.slots.register({ name: 'settings.section.icon', id: SETTINGS_SECTION_ID }, WorkbenchSettingsIcon))
   ctx.effect(() => {

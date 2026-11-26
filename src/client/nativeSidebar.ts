@@ -186,13 +186,14 @@ export function fitNativeSidebarLayout({ viewportWidth, dockWidth, sideWidth, ch
   chatVisible: boolean; sideVisible: boolean; editorVisible: boolean
 }) {
   const available = Math.max(0, Math.floor(viewportWidth - dockWidth - 48))
-  // Empty editors yield their space. With content, keep the default layout usable;
-  // an explicit chat resize may still consume the full remaining width.
-  const editorReserve = editorVisible ? 100 : 0
-  const chatFits = available >= minChatWidth + editorReserve
-  const sideLimit = Math.max(0, available - editorReserve - (chatVisible && chatFits ? minChatWidth : 0))
+  // Open content always retains a quarter of the editor/chat area; empty editors yield it all.
+  const minContentWidth = editorVisible ? Math.ceil(minChatWidth * 4 / 3) : minChatWidth
+  const chatFits = available >= minContentWidth
+  const contentReserve = chatVisible && chatFits ? minContentWidth : editorVisible ? 100 : 0
+  const sideLimit = Math.max(0, available - contentReserve)
   const fittedSideWidth = sideVisible ? Math.min(sideWidth, sideLimit) : 0
-  const chatLimit = Math.max(0, available - fittedSideWidth)
+  const contentWidth = Math.max(0, available - fittedSideWidth)
+  const chatLimit = editorVisible ? Math.floor(contentWidth * 3 / 4) : contentWidth
   const fittedChatWidth = !editorVisible && chatVisible ? chatLimit : Math.min(chatWidth, chatLimit)
   return { sideWidth: fittedSideWidth, chatWidth: fittedChatWidth, chatFits, sideLimit, chatLimit }
 }

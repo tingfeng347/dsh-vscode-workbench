@@ -13,17 +13,17 @@ it('gives an empty editor’s space to the conversation beside the native dock',
   expect(layout.sideWidth + layout.chatWidth + 48 + 500).toBe(1440)
 })
 
-it('can fill the available window instead of capping the conversation at half width', () => {
+it('reserves a quarter of the content area for open editors', () => {
   const layout = fitNativeSidebarLayout({ ...base, sideVisible: false, chatWidth: 2000 })
-  expect(layout.chatLimit).toBe(1392)
-  expect(layout.chatWidth).toBe(1392)
+  expect(layout.chatLimit).toBe(1044)
+  expect(layout.chatWidth).toBe(1044)
   expect(layout.sideWidth).toBe(0)
 })
 
 it('fits a restored wide conversation to a smaller floating window', () => {
   const layout = fitNativeSidebarLayout({ ...base, viewportWidth: 898, chatWidth: 1800 })
-  expect(layout.chatWidth).toBe(640)
-  expect(layout.sideWidth + layout.chatWidth + 48).toBe(898)
+  expect(layout.chatWidth).toBe(480)
+  expect(layout.sideWidth + layout.chatWidth + 160 + 48).toBe(898)
 })
 
 it('keeps the preferred chat width when an editor is open again', () => {

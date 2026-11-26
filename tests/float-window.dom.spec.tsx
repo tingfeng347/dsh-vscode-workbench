@@ -327,7 +327,7 @@ it('fits the conversation and restores an existing browser after opening the nat
   expect(document.body.style.getPropertyValue('--dvw-native-sidebar-width')).toBe('300px')
   expect(overlay.dataset.dvwChat).toBe('true')
   expect(overlay.style.getPropertyValue('--dvw-chat-width')).toBe('440px')
-  expect(overlay.style.getPropertyValue('--dvw-side-width')).toBe('112px')
+  expect(overlay.style.getPropertyValue('--dvw-side-width')).toBe('65px')
 
   await act(async () => browserTab.click())
   expect(sidebarToggle.getAttribute('aria-expanded')).toBe('false')
@@ -371,13 +371,14 @@ it('reclaims an empty editor for chat and the native dock, then restores it when
   await act(async () => document.querySelector<HTMLElement>('[data-tree-path="sidebar-reference.txt"]')!.click())
   expect(document.querySelector('[data-tab-path="sidebar-reference.txt"]')).not.toBeNull()
   expect(overlay.hasAttribute('data-dvw-editor-empty')).toBe(false)
-  expect(overlay.style.getPropertyValue('--dvw-chat-width')).toBe('520px')
+  expect(overlay.style.getPropertyValue('--dvw-chat-width')).toBe('511px')
+  expect(localStorage.getItem('dvw:dsh-chat-width')).toBe('520')
   await act(async () => document.querySelector<HTMLElement>('[data-tab-path="sidebar-reference.txt"] .dvw-tab-close')!.click())
   expect(overlay.dataset.dvwEditorEmpty).toBe('true')
   expect(overlay.style.getPropertyValue('--dvw-chat-width')).toBe('682px')
 })
 
-it('resizes chat beyond 720px to the full available width and restores that preference', async () => {
+it('limits chat resizing to three quarters of the content area while a file is open', async () => {
   vi.stubGlobal('innerWidth', 1600)
   localStorage.setItem('dvw:dsh-chat-width', '950')
   localStorage.setItem('dvw:primary-side-visible', 'closed')
@@ -385,14 +386,23 @@ it('resizes chat beyond 720px to the full available width and restores that pref
   await act(async () => document.querySelector<HTMLElement>('[data-tree-path="sidebar-reference.txt"]')!.click())
   const separator = document.querySelector<HTMLElement>('.dvw-chat-resizer')!
   expect(separator.getAttribute('aria-valuenow')).toBe('950')
-  expect(separator.getAttribute('aria-valuemax')).toBe('1552')
+  expect(separator.getAttribute('aria-valuemax')).toBe('1164')
   await act(async () => {
     separator.dispatchEvent(pointer('pointerdown', 650, 120))
     window.dispatchEvent(pointer('pointermove', 0, 120))
     window.dispatchEvent(pointer('pointerup', 0, 120))
   })
-  expect(separator.getAttribute('aria-valuenow')).toBe('1552')
-  expect(localStorage.getItem('dvw:dsh-chat-width')).toBe('1552')
+  expect(separator.getAttribute('aria-valuenow')).toBe('1164')
+  expect(localStorage.getItem('dvw:dsh-chat-width')).toBe('1164')
+})
+
+it('reports a usable chat separator range when a narrow window reserves space for a file', async () => {
+  vi.stubGlobal('innerWidth', 620)
+  await mount()
+  await act(async () => document.querySelector<HTMLElement>('[data-tree-path="sidebar-reference.txt"]')!.click())
+  const separator = document.querySelector<HTMLElement>('.dvw-chat-resizer')!
+  expect(separator.getAttribute('aria-valuemin')).toBe('271')
+  expect(separator.getAttribute('aria-valuemax')).toBe('271')
 })
 
 it('keeps the empty editor accessible when chat is closed or the bottom panel is open', async () => {
@@ -485,9 +495,9 @@ it('reports the fitted separator range without saving the temporary left-pane wi
   const toggle = document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!
   await act(async () => toggle.click())
   const separator = document.querySelector<HTMLElement>('.dvw-side-resizer')!
-  expect(separator.getAttribute('aria-valuenow')).toBe('154')
-  expect(Number(separator.getAttribute('aria-valuemin'))).toBeLessThanOrEqual(154)
-  expect(separator.getAttribute('aria-valuemax')).toBe('154')
+  expect(separator.getAttribute('aria-valuenow')).toBe('107')
+  expect(Number(separator.getAttribute('aria-valuemin'))).toBeLessThanOrEqual(107)
+  expect(separator.getAttribute('aria-valuemax')).toBe('107')
   await act(async () => {
     separator.dispatchEvent(pointer('pointerdown', 200, 120))
     window.dispatchEvent(pointer('pointerup', 200, 120))

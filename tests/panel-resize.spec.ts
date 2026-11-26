@@ -36,7 +36,7 @@ describe('resizedPanelWidth', () => {
     expect(resizer).toMatch(/if \(hideBelow !== undefined && nextSize < hideBelow\) \{\s+onHide\?\.\(\)\s+return/)
     expect(workbench).toContain('hideBelow={200} onHide={()=>setChatVisible(false)}')
     expect(workbench).toContain('hideBelow={Math.min(105,Math.floor(nativeLayout.sideWidth))} onHide={()=>setPrimarySideVisible(false)}')
-    expect(workbench).toContain('min={DSH_CHAT_MIN_WIDTH} max={chatWidthLimit} defaultSize={DSH_CHAT_DEFAULT_WIDTH}')
+    expect(workbench).toContain('min={Math.min(DSH_CHAT_MIN_WIDTH,chatWidthLimit)} max={chatWidthLimit} defaultSize={DSH_CHAT_DEFAULT_WIDTH}')
     expect(styles).toContain('.dvw-chat-resizer{position:fixed;top:var(--dvw-titlebar-height);right:calc(var(--dvw-chat-width) - 5px);z-index:22}')
     expect(styles).toContain('.dvw-overlay[data-dvw-editor-empty=true]>.dvw-main{display:none}')
     expect(styles).not.toContain('--dvw-chat-effective')

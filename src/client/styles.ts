@@ -149,7 +149,8 @@ button.dvw-bottom-title{cursor:pointer}.dvw-bottom-title:hover,.dvw-bottom-title
 .dvw-overlay[data-dvw-chat=true]:not([data-dvw-primary-side=true]){grid-template-columns:48px 0 minmax(0,1fr) var(--dvw-chat-width)}
 .dvw-overlay:not([data-dvw-primary-side=true]) .dvw-side{visibility:hidden;border-right:0}.dvw-overlay:not([data-dvw-primary-side=true]) .dvw-activity{border-radius:8px}.dvw-overlay:not([data-dvw-primary-side=true]) .dvw-side-resizer{display:none}
 .dvw-overlay:not([data-dvw-status=true]){grid-template-rows:minmax(0,1fr) auto 6px}.dvw-overlay:not([data-dvw-status=true]) .dvw-status{display:none}
-.dvw-overlay[data-dvw-chat=true] .dvw-status{grid-column:1/-1;padding-right:calc(var(--dvw-chat-width) + 6px)}
+.dvw-overlay[data-dvw-chat=true] .dvw-status{grid-column:1/-1}
+.dvw-overlay[data-dvw-status=true]:not([data-dvw-float=true]) .dvw-chat-resizer{bottom:30px}
 .dvw-chat{grid-column:4;grid-row:1/3;min-width:0;background:var(--dvw-gutter);border-left:1px solid var(--dvw-border);position:relative}
 .dvw-chat-head{height:36px;display:flex;align-items:center;justify-content:space-between;padding:0 6px 0 12px;border-bottom:1px solid var(--dvw-border);background:var(--dvw-base);font-weight:600}
 .dvw-chat-head>span{display:flex;align-items:center;gap:7px}.dvw-chat-body{height:calc(100% - 36px);background:var(--dvw-base)}
@@ -174,7 +175,7 @@ body[data-dvw-palette=light] [data-dvw-conversation-panel]{--dsw-alias-bg-base:#
 [data-rightbar-col]:not([data-dvw-native-sidebar]):has(~ [data-shell-overlay] .dvw-overlay){isolation:isolate}
 [data-rightbar-col][data-dvw-native-sidebar] :is([data-sidebar-right-mode],[data-sidebar-right-toggle]),
 [data-rightbar-col][data-dvw-native-sidebar] ~ [data-side=rightbar]{-webkit-app-region:no-drag}
-[data-rightbar-col][data-dvw-native-sidebar]:has([data-sidebar-right-panel=fullscreen][data-sidebar-right-open=true]) ~ [data-shell-overlay] .dvw-titlebar{-webkit-app-region:no-drag}
+[data-rightbar-col][data-dvw-native-sidebar=fullscreen] ~ [data-shell-overlay] .dvw-titlebar{-webkit-app-region:no-drag}
 /* Lift the native dock and reserve its full push width in the embedded workbench. */
 [data-rightbar-col][data-dvw-native-sidebar]{z-index:21}
 [data-rightbar-col][data-dvw-native-sidebar] ~ [data-side=rightbar]{z-index:22}
@@ -211,7 +212,7 @@ body[data-dvw-workbench-active] [data-sidebar-toggle]{display:none!important}
 .dvw-terminal-list,.dvw-terminal-host .xterm-viewport{scrollbar-width:none}.dvw-terminal-list::-webkit-scrollbar,.dvw-terminal-host .xterm-viewport::-webkit-scrollbar{display:none}
 /* 官方 xterm.css 的必备规则：选区层是不透明的，只有 .xterm-decoration-top 把选中文字抬到它上面，否则文字会被整条盖住。 */
 .dvw-terminal-host .xterm-scroll-area{visibility:hidden}.dvw-terminal-host .xterm-decoration-top{z-index:2;position:relative}.dvw-terminal-host .xterm-dim{opacity:1!important}.dvw-terminal-host .xterm-underline-1{text-decoration:underline}.dvw-terminal-host .xterm-underline-2{text-decoration:double underline}.dvw-terminal-host .xterm-underline-3{text-decoration:wavy underline}.dvw-terminal-host .xterm-underline-4{text-decoration:dotted underline}.dvw-terminal-host .xterm-underline-5{text-decoration:dashed underline}.dvw-terminal-host .xterm-overline{text-decoration:overline}.dvw-terminal-host .xterm-overline.xterm-underline-1{text-decoration:overline underline}.dvw-terminal-host .xterm-overline.xterm-underline-2{text-decoration:overline double underline}.dvw-terminal-host .xterm-overline.xterm-underline-3{text-decoration:overline wavy underline}.dvw-terminal-host .xterm-overline.xterm-underline-4{text-decoration:overline dotted underline}.dvw-terminal-host .xterm-overline.xterm-underline-5{text-decoration:overline dashed underline}.dvw-terminal-host .xterm-strikethrough{text-decoration:line-through}.dvw-terminal-host .xterm.enable-mouse-events{cursor:default}.dvw-terminal-host .xterm.column-select.focus{cursor:crosshair}.dvw-terminal-host .xterm-accessibility-tree:not(.debug) *::selection{color:transparent}.dvw-terminal-menu button:disabled{opacity:.45;cursor:default}.dvw-terminal-menu button:disabled:hover{background:transparent}
-@media(max-width:900px){.dvw-overlay[data-dvw-chat=true]{--dvw-chat-effective:max(440px,min(var(--dvw-chat-width),calc(100vw - 254px)));grid-template-columns:44px min(210px,var(--dvw-side-width),max(0px,calc(100vw - 164px - var(--dvw-chat-effective)))) minmax(0,1fr) var(--dvw-chat-effective)}.dvw-overlay[data-dvw-chat=true] .dvw-status{padding-right:calc(var(--dvw-chat-effective) + 6px)}.dvw-chat-resizer{right:calc(var(--dvw-chat-effective) - 5px)}[data-dvw-conversation-panel]{width:calc(max(440px,min(var(--dvw-chat-width),calc(100vw - 254px))) - 6px)!important}}
+@media(max-width:900px){.dvw-overlay[data-dvw-chat=true]{--dvw-chat-effective:max(440px,min(var(--dvw-chat-width),calc(100vw - 254px)));grid-template-columns:44px min(210px,var(--dvw-side-width),max(0px,calc(100vw - 164px - var(--dvw-chat-effective)))) minmax(0,1fr) var(--dvw-chat-effective)}.dvw-chat-resizer{right:calc(var(--dvw-chat-effective) - 5px)}[data-dvw-conversation-panel]{width:calc(max(440px,min(var(--dvw-chat-width),calc(100vw - 254px))) - 6px)!important}}
 /* Slightly larger explorer rows for comfortable reading without shrinking the file list. */
 .dvw-tree-row{height:24px;font-size:13px}
 /* Keep the open file filled; hover another row with a lighter tint instead of clearing it.
@@ -460,7 +461,6 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 [data-dvw-floating-surface]::backdrop{background:transparent;pointer-events:none}
 .dvw-overlay[data-dvw-float=true][data-dvw-chat=true]{--dvw-float-chat-width:min(var(--dvw-chat-width),49%);grid-template-columns:48px min(var(--dvw-side-width),24%) minmax(0,1fr) var(--dvw-float-chat-width)}
 .dvw-overlay[data-dvw-float=true][data-dvw-chat=true]:not([data-dvw-primary-side=true]){grid-template-columns:48px 0 minmax(0,1fr) var(--dvw-float-chat-width)}
-.dvw-overlay[data-dvw-float=true][data-dvw-chat=true] .dvw-status{padding-right:calc(var(--dvw-float-chat-width) + 6px)}
 .dvw-overlay[data-dvw-float=true] .dvw-chat-resizer{position:absolute;top:0;bottom:0;left:-6px;right:auto}
 .dvw-overlay[data-dvw-float=true] .dvw-chat-body{height:100%;margin:0 3px}
 .dvw-overlay[data-dvw-float=true] .dvw-titlebar{display:none}
@@ -547,7 +547,8 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-debug-toolbar{display:flex;align-items:center;gap:4px;padding:4px 8px;border-bottom:1px solid var(--dvw-border-soft)}
 .dvw-debug-toolbar .dvw-icon{width:24px;height:22px;font-size:12px}
 .dvw-status{min-width:0;white-space:nowrap;gap:clamp(4px,1%,18px)}
-.dvw-status-git,.dvw-scm-status,.dvw-scm-status .dvw-branch{min-width:0}
+.dvw-status-git{min-width:min-content}
+.dvw-scm-status .dvw-branch{min-width:0}
 .dvw-status > span,.dvw-status-branch-name{min-width:0;overflow:hidden;text-overflow:ellipsis}
 .dvw-status-path{flex:1 1 auto}
 .dvw-status>button,.dvw-scm-status .dvw-branch:not(:first-child){flex:none}

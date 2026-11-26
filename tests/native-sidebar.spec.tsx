@@ -106,20 +106,34 @@ it.each(['removed', 'replaced'] as const)('synchronizes presentation when the ho
   }
 })
 
-it('opens the host fullscreen pane when the push track has no room', async () => {
+it.each(['room returns', 'workbench closes', 'host collapses'] as const)('restores the push mode after a fullscreen fallback when %s', async scenario => {
   document.body.innerHTML = `
     <div data-rightbar-col>
       <div data-sidebar-right-panel="push" data-sidebar-right-session="s" style="--dsh-sidebar-right-panel-width: 0px">
         <button data-sidebar-right-mode="fullscreen"></button>
+        <button data-sidebar-right-toggle></button>
       </div>
     </div><button data-sidebar-right-expand></button><div id="mount"></div>`
   const panel = document.querySelector<HTMLElement>('[data-sidebar-right-panel]')!
-  const mode = panel.querySelector('button')!
+  const mode = panel.querySelector<HTMLButtonElement>('[data-sidebar-right-mode]')!
+  const collapse = panel.querySelector<HTMLButtonElement>('[data-sidebar-right-toggle]')!
+  let columnWidth = 0
+  vi.spyOn(panel.parentElement!, 'getBoundingClientRect').mockImplementation(() => new DOMRect(0, 0, columnWidth, 500))
   const isExpanded = () => panel.hasAttribute('data-sidebar-right-open')
-  mode.onclick = () => { if (isExpanded()) panel.dataset.sidebarRightPanel = 'fullscreen' }
+  mode.onclick = () => {
+    if (!isExpanded()) return
+    panel.dataset.sidebarRightPanel = mode.dataset.sidebarRightMode!
+    mode.dataset.sidebarRightMode = panel.dataset.sidebarRightPanel === 'fullscreen' ? 'push' : 'fullscreen'
+    if (panel.dataset.sidebarRightPanel === 'push' && columnWidth === 0) {
+      queueMicrotask(() => panel.removeAttribute('data-sidebar-right-open'))
+    }
+  }
+  collapse.onclick = () => panel.removeAttribute('data-sidebar-right-open')
   document.querySelector<HTMLButtonElement>('[data-sidebar-right-expand]')!.onclick = () => {
     panel.dataset.sidebarRightOpen = 'true'
-    queueMicrotask(() => { if (panel.dataset.sidebarRightPanel === 'push') panel.removeAttribute('data-sidebar-right-open') })
+    queueMicrotask(() => {
+      if (panel.dataset.sidebarRightPanel === 'push' && columnWidth === 0) panel.removeAttribute('data-sidebar-right-open')
+    })
   }
   const sidebar = {
     mounted: { getSnapshot: () => 's', subscribe: () => () => {} },
@@ -128,8 +142,8 @@ it('opens the host fullscreen pane when the push track has no room', async () =>
     toggleExpanded() { panel.removeAttribute('data-sidebar-right-open') },
   } as unknown as ISidebarRight
   const root = createRoot(document.querySelector('#mount')!)
-  function Toggle() {
-    const { shown, toggle } = useNativeSidebar(sidebar, 's', true)
+  function Toggle({ visible = true }: { visible?: boolean }) {
+    const { shown, toggle } = useNativeSidebar(sidebar, 's', visible)
     return <button aria-expanded={shown} onClick={toggle}/>
   }
   try {
@@ -138,6 +152,18 @@ it('opens the host fullscreen pane when the push track has no room', async () =>
     await act(async () => button.click())
     expect(panel.dataset.sidebarRightPanel).toBe('fullscreen')
     expect(button.getAttribute('aria-expanded')).toBe('true')
+    await act(async () => {
+      if (scenario === 'room returns') {
+        columnWidth = 340
+        window.dispatchEvent(new Event('resize'))
+      } else if (scenario === 'workbench closes') {
+        root.render(<Toggle visible={false}/>)
+      } else {
+        collapse.click()
+      }
+    })
+    expect(panel.dataset.sidebarRightPanel).toBe('push')
+    expect(isExpanded()).toBe(scenario === 'room returns')
   } finally {
     await act(async () => root.unmount())
     document.body.replaceChildren()

@@ -8,14 +8,46 @@ const noSession = () => undefined
 const presentation = 'data-dvw-native-sidebar'
 const sidebarWidth = '--dvw-native-sidebar-width'
 const panelSelector = '[data-rightbar-col] [data-sidebar-right-panel][data-sidebar-right-session]'
+const fullscreenFallbacks = new WeakMap<NativeSidebarApi, Set<string>>()
 
-interface DockLayout { width: number; fullscreen: boolean }
+interface DockLayout { width: number; fullscreen: boolean; pushAvailable: boolean }
 
 function findPanel(sessionId: string, open = false) {
   return Array.from(document.querySelectorAll<HTMLElement>(panelSelector)).find(node =>
     node.dataset.sidebarRightSession === sessionId && node.closest('[hidden]') === null
       && (!open || node.dataset.sidebarRightOpen === 'true'),
   )
+}
+
+function findExpandButton(panel: HTMLElement) {
+  const frame = panel.closest('[data-rightbar-col]')?.parentElement
+  const buttons = frame?.querySelectorAll<HTMLButtonElement>('[data-sidebar-right-expand]:not(:disabled)') ?? []
+  return Array.from(buttons).find(button => button.closest('[hidden]') === null)
+}
+
+function restorePushMode(sidebar: NativeSidebarApi, sessionId: string) {
+  const fallbacks = fullscreenFallbacks.get(sidebar)
+  if (!fallbacks?.has(sessionId) || sidebar.mounted.getSnapshot() !== sessionId) return
+  const panel = findPanel(sessionId)
+  if (panel === undefined) return
+  if (panel.dataset.sidebarRightPanel === 'push') {
+    fallbacks.delete(sessionId)
+    return
+  }
+  const exit = panel.querySelector<HTMLButtonElement>('[data-sidebar-right-mode="push"]')
+  if (!exit) return
+  const expanded = sidebar.isExpanded()
+  const collapse = panel.querySelector<HTMLButtonElement>('[data-sidebar-right-toggle]')
+  if (!expanded) {
+    if (!collapse) return
+    // The host only changes modes on an expanded dock. Batch the native
+    // opener, mode change and collapse to preserve its final visibility.
+    findExpandButton(panel)?.click()
+    if (!sidebar.isExpanded()) return
+  }
+  fallbacks.delete(sessionId)
+  exit.click()
+  if (!expanded && sidebar.isExpanded()) collapse?.click()
 }
 
 /** Lift the host's current dock above the workbench without moving its React tree. */
@@ -31,10 +63,14 @@ function watchNativeSidebar(sessionId: string, onLayout: (layout: DockLayout | u
   }
   const measure = () => {
     const fullscreen = panel?.dataset.sidebarRightPanel === 'fullscreen'
-    const layout = panel === undefined ? undefined : { width: fullscreen ? 0 : panel.getBoundingClientRect().width, fullscreen }
-    if (layout?.width === measured?.width && layout?.fullscreen === measured?.fullscreen) return
+    const pushAvailable = fullscreen && (column?.getBoundingClientRect().width ?? 0) > 0
+    const layout = panel === undefined ? undefined : { width: fullscreen ? 0 : panel.getBoundingClientRect().width, fullscreen, pushAvailable }
+    if (layout?.width === measured?.width && layout?.fullscreen === measured?.fullscreen && layout?.pushAvailable === measured?.pushAvailable) return
     measured = layout
-    if (layout !== undefined) document.body.style.setProperty(sidebarWidth, `${layout.width}px`)
+    if (layout !== undefined) {
+      column?.setAttribute(presentation, fullscreen ? 'fullscreen' : 'push')
+      document.body.style.setProperty(sidebarWidth, `${layout.width}px`)
+    }
     onLayout(layout)
   }
   const update = () => {
@@ -46,7 +82,7 @@ function watchNativeSidebar(sessionId: string, onLayout: (layout: DockLayout | u
       if (next !== undefined) measured = undefined
       panel = next
       column = nextColumn
-      column?.setAttribute(presentation, '')
+      if (column !== null) resize?.observe(column)
       if (panel !== undefined) resize?.observe(panel)
     }
     measure()
@@ -87,18 +123,30 @@ export function useNativeSidebar(sidebar: NativeSidebarApi | undefined, sessionI
   }, [visible, sessionId, requestedSession])
 
   useLayoutEffect(() => {
-    if (!visible || !ready || requestedSession !== sessionId || sessionId === undefined) return
+    if (ready && fullscreenFallbacks.get(sidebar)?.has(sessionId)) {
+      queueMicrotask(() => restorePushMode(sidebar, sessionId))
+    }
+  }, [ready, sidebar, sessionId])
+
+  useLayoutEffect(() => {
+    if (!visible || !ready || requestedSession !== sessionId) return
     // Browser tabs can expand the DSH dock internally. Present it only after the workbench toggle
     // was used, and stop presenting when DSH's own collapse control closes it.
     let wasOpen = false
     const stop = watchNativeSidebar(sessionId, layout => {
       const open = layout !== undefined
       setDock(layout === undefined ? undefined : { sessionId, ...layout })
+      if (layout && (!layout.fullscreen || layout.pushAvailable)) restorePushMode(sidebar, sessionId)
       if (!open && wasOpen) setRequestedSession(undefined)
       wasOpen = open
     })
     return () => {
       stop()
+      // The host opener can be clicked again once the collapse commit ends.
+      // During that commit its store has not yet accepted a new expansion.
+      if (fullscreenFallbacks.get(sidebar)?.has(sessionId)) {
+        queueMicrotask(() => restorePushMode(sidebar, sessionId))
+      }
       setDock(undefined)
     }
   }, [visible, ready, requestedSession, sessionId])
@@ -107,6 +155,7 @@ export function useNativeSidebar(sidebar: NativeSidebarApi | undefined, sessionI
   const toggle = () => {
     if (sidebar === undefined || sessionId === undefined || sidebar.mounted.getSnapshot() !== sessionId) return
     if (shown) {
+      restorePushMode(sidebar, sessionId)
       dismiss()
       if (sidebar.isExpanded()) sidebar.toggleExpanded()
     } else {
@@ -116,12 +165,13 @@ export function useNativeSidebar(sidebar: NativeSidebarApi | undefined, sessionI
         const pushWidth = panel?.style.getPropertyValue('--dsh-sidebar-right-panel-width').trim() || panel?.style.width
         const fullscreen = pushWidth === '0px' && panel?.dataset.sidebarRightPanel === 'push'
           ? panel.querySelector<HTMLButtonElement>('[data-sidebar-right-mode="fullscreen"]') : null
-        const frame = panel?.closest('[data-rightbar-col]')?.parentElement
-        const expand = Array.from(frame?.querySelectorAll<HTMLButtonElement>('[data-sidebar-right-expand]:not(:disabled)') ?? [])
-          .find(button => button.closest('[hidden]') === null)
+        const expand = panel && findExpandButton(panel)
         if (fullscreen && expand) {
           // The native opener writes without flushing. Set fullscreen in the same React event,
           // before the host checks the push track. The public toggle flushes immediately.
+          const fallbacks = fullscreenFallbacks.get(sidebar) ?? new Set<string>()
+          fullscreenFallbacks.set(sidebar, fallbacks)
+          fallbacks.add(sessionId)
           expand.click()
           fullscreen.click()
         } else sidebar.toggleExpanded()

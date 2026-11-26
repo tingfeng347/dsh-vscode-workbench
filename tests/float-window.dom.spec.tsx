@@ -396,12 +396,20 @@ it('never focuses an older browser tab while changing to another session', async
   expect(document.querySelector('[data-dvw-browser-tab="old"]')).toBeNull()
 })
 
-it('reports and applies the separator range at the fitted left-pane width', async () => {
+it('reports the fitted separator range without saving the temporary left-pane width', async () => {
   vi.stubGlobal('innerWidth', 1042)
   await mount(undefined, undefined, { rightSidebar: mockNativeDock('push', 299.4) })
-  await act(async () => document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!.click())
+  const toggle = document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!
+  await act(async () => toggle.click())
   const separator = document.querySelector<HTMLElement>('.dvw-side-resizer')!
   expect(separator.getAttribute('aria-valuenow')).toBe('154')
   expect(Number(separator.getAttribute('aria-valuemin'))).toBeLessThanOrEqual(154)
   expect(separator.getAttribute('aria-valuemax')).toBe('154')
+  await act(async () => {
+    separator.dispatchEvent(pointer('pointerdown', 200, 120))
+    window.dispatchEvent(pointer('pointerup', 200, 120))
+  })
+  await act(async () => toggle.click())
+  expect(separator.getAttribute('aria-valuenow')).toBe('210')
+  expect(separator.getAttribute('aria-valuemin')).toBe('210')
 })

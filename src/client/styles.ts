@@ -150,6 +150,9 @@ button.dvw-bottom-title{cursor:pointer}.dvw-bottom-title:hover,.dvw-bottom-title
 .dvw-overlay[data-dvw-chat=true]{grid-template-columns:48px var(--dvw-side-width) minmax(0,1fr) var(--dvw-chat-width)}
 .dvw-overlay:not([data-dvw-primary-side=true]){grid-template-columns:48px 0 minmax(0,1fr)}
 .dvw-overlay[data-dvw-chat=true]:not([data-dvw-primary-side=true]){grid-template-columns:48px 0 minmax(0,1fr) var(--dvw-chat-width)}
+/* Keep empty groups mounted, so opening a file restores their layout and focus. */
+.dvw-overlay[data-dvw-editor-empty=true]>.dvw-main{display:none}
+.dvw-overlay[data-dvw-editor-empty=true] .dvw-chat-resizer{display:none}
 .dvw-overlay:not([data-dvw-primary-side=true]) .dvw-side{visibility:hidden;border-right:0}.dvw-overlay:not([data-dvw-primary-side=true]) .dvw-activity{border-radius:8px}.dvw-overlay:not([data-dvw-primary-side=true]) .dvw-side-resizer{display:none}
 .dvw-overlay:not([data-dvw-status=true]){grid-template-rows:minmax(0,1fr) auto 6px}.dvw-overlay:not([data-dvw-status=true]) .dvw-status{display:none}
 .dvw-overlay[data-dvw-chat=true] .dvw-status{grid-column:1/-1}
@@ -169,7 +172,7 @@ button.dvw-bottom-title{cursor:pointer}.dvw-bottom-title:hover,.dvw-bottom-title
 .dvw-chat{border-left-color:transparent!important}
 .dvw-side-resizer::after,.dvw-chat-resizer::after{background:transparent;left:3px;width:4px}
 .dvw-side-resizer:hover::after,.dvw-side-resizer:focus-visible::after,.dvw-side-resizer[data-dragging=true]::after,.dvw-chat-resizer:hover::after,.dvw-chat-resizer:focus-visible::after,.dvw-chat-resizer[data-dragging=true]::after{background:var(--dvw-accent)}
-[data-dvw-conversation-panel]{position:fixed!important;top:calc(var(--dvw-titlebar-height) + 6px)!important;right:3px!important;bottom:var(--dvw-status-height,30px)!important;left:auto!important;width:calc(var(--dvw-chat-width) - 6px)!important;height:auto!important;min-width:0!important;z-index:21!important;border:1px solid var(--dsw-alias-border-l2)!important;border-radius:8px!important;overflow:hidden!important;box-shadow:none!important}
+[data-dvw-conversation-panel]{position:fixed!important;top:calc(var(--dvw-titlebar-height) + 6px)!important;right:3px!important;bottom:var(--dvw-status-height,30px)!important;left:auto!important;width:calc(var(--dvw-chat-width) - 6px)!important;height:auto!important;min-width:0!important;z-index:21!important;border:1px solid var(--dsw-alias-border-l2)!important;border-radius:8px!important;overflow:hidden!important;box-shadow:none!important;box-sizing:border-box!important}
 [data-dvw-conversation-panel=""] [data-conversation-content]{font-size:14px}
 [data-dvw-conversation-panel=""] [data-conversation-content] pre{font-size:12px}
 [data-dvw-conversation-editor]{position:absolute;inset:0}
@@ -190,7 +193,6 @@ body[data-dvw-palette=dark] [data-dvw-conversation-panel]{--dsw-alias-bg-base:#1
 body[data-dvw-workbench-active] .dvw-overlay:not([data-dvw-float=true]){right:var(--dvw-native-sidebar-width,0px)}
 body[data-dvw-workbench-active] [data-dvw-conversation-panel]{right:calc(3px + var(--dvw-native-sidebar-width,0px))!important}
 body[data-dvw-workbench-active] .dvw-chat-resizer{right:calc(var(--dvw-chat-width) - 5px + var(--dvw-native-sidebar-width,0px))}
-@media(max-width:900px){body[data-dvw-workbench-active] .dvw-chat-resizer{right:calc(var(--dvw-chat-effective) - 5px + var(--dvw-native-sidebar-width,0px))}}
 body[data-dvw-workbench-active] [data-sidebar-right-expand],body[data-dvw-conversation-active] [data-sidebar-right-expand]{display:none!important}
 body[data-dvw-workbench-active] [data-shell-leading]{display:none!important}
 body[data-dvw-workbench-active] [data-sidebar-toggle]{display:none!important}
@@ -220,7 +222,6 @@ body[data-dvw-workbench-active] [data-sidebar-toggle]{display:none!important}
 .dvw-terminal-list,.dvw-terminal-host .xterm-viewport{scrollbar-width:none}.dvw-terminal-list::-webkit-scrollbar,.dvw-terminal-host .xterm-viewport::-webkit-scrollbar{display:none}
 /* 官方 xterm.css 的必备规则：选区层是不透明的，只有 .xterm-decoration-top 把选中文字抬到它上面，否则文字会被整条盖住。 */
 .dvw-terminal-host .xterm-scroll-area{visibility:hidden}.dvw-terminal-host .xterm-decoration-top{z-index:2;position:relative}.dvw-terminal-host .xterm-dim{opacity:1!important}.dvw-terminal-host .xterm-underline-1{text-decoration:underline}.dvw-terminal-host .xterm-underline-2{text-decoration:double underline}.dvw-terminal-host .xterm-underline-3{text-decoration:wavy underline}.dvw-terminal-host .xterm-underline-4{text-decoration:dotted underline}.dvw-terminal-host .xterm-underline-5{text-decoration:dashed underline}.dvw-terminal-host .xterm-overline{text-decoration:overline}.dvw-terminal-host .xterm-overline.xterm-underline-1{text-decoration:overline underline}.dvw-terminal-host .xterm-overline.xterm-underline-2{text-decoration:overline double underline}.dvw-terminal-host .xterm-overline.xterm-underline-3{text-decoration:overline wavy underline}.dvw-terminal-host .xterm-overline.xterm-underline-4{text-decoration:overline dotted underline}.dvw-terminal-host .xterm-overline.xterm-underline-5{text-decoration:overline dashed underline}.dvw-terminal-host .xterm-strikethrough{text-decoration:line-through}.dvw-terminal-host .xterm.enable-mouse-events{cursor:default}.dvw-terminal-host .xterm.column-select.focus{cursor:crosshair}.dvw-terminal-host .xterm-accessibility-tree:not(.debug) *::selection{color:transparent}.dvw-terminal-menu button:disabled{opacity:.45;cursor:default}.dvw-terminal-menu button:disabled:hover{background:transparent}
-@media(max-width:900px){.dvw-overlay[data-dvw-chat=true]{--dvw-chat-effective:max(440px,min(var(--dvw-chat-width),calc(100vw - 254px)));grid-template-columns:44px min(210px,var(--dvw-side-width),max(0px,calc(100vw - 164px - var(--dvw-chat-effective)))) minmax(0,1fr) var(--dvw-chat-effective)}.dvw-chat-resizer{right:calc(var(--dvw-chat-effective) - 5px)}[data-dvw-conversation-panel]{width:calc(max(440px,min(var(--dvw-chat-width),calc(100vw - 254px))) - 6px)!important}}
 /* Slightly larger explorer rows for comfortable reading without shrinking the file list. */
 .dvw-tree-row{height:24px;font-size:14px}
 .dvw-tree .dvw-file-icon{width:19px;height:19px}
@@ -459,8 +460,6 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 .dvw-overlay[data-dvw-float=true]{position:fixed;inset:auto;z-index:100;padding-top:34px;border:1px solid var(--dvw-border);border-radius:10px;box-shadow:0 18px 48px rgba(0,0,0,.45)}
 [data-dvw-floating-surface]{right:auto!important;bottom:auto!important;z-index:106!important;margin:0!important;max-width:none!important;max-height:none!important;box-sizing:border-box!important;-webkit-app-region:no-drag}
 [data-dvw-floating-surface]::backdrop{background:transparent;pointer-events:none}
-.dvw-overlay[data-dvw-float=true][data-dvw-chat=true]{--dvw-float-chat-width:min(var(--dvw-chat-width),49%);grid-template-columns:48px min(var(--dvw-side-width),24%) minmax(0,1fr) var(--dvw-float-chat-width)}
-.dvw-overlay[data-dvw-float=true][data-dvw-chat=true]:not([data-dvw-primary-side=true]){grid-template-columns:48px 0 minmax(0,1fr) var(--dvw-float-chat-width)}
 .dvw-overlay[data-dvw-float=true] .dvw-chat-resizer{position:absolute;top:0;bottom:0;left:-6px;right:auto}
 .dvw-overlay[data-dvw-float=true] .dvw-chat-body{height:100%;margin:0 3px}
 .dvw-overlay[data-dvw-float=true] .dvw-titlebar{display:none}

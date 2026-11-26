@@ -181,13 +181,18 @@ export function useNativeSidebar(sidebar: NativeSidebarApi | undefined, sessionI
   return { ready, shown, fullscreen: shown && dock.fullscreen, width: shown ? dock.width : 0, toggle, dismiss }
 }
 
-export function fitNativeSidebarLayout(viewportWidth: number, dockWidth: number, sideWidth: number, chatWidth: number, minChatWidth: number, chatVisible: boolean) {
-  if (dockWidth === 0) return { sideWidth, chatWidth, chatFits: true, sideLimit: Infinity, chatLimit: Infinity }
-  // Keep room for the 48px activity rail and at least 100px of editor space.
-  const available = Math.max(0, Math.floor(viewportWidth - dockWidth - 148))
-  const chatFits = available >= minChatWidth
-  const fittedChatWidth = Math.min(chatWidth, available)
-  const visibleChatWidth = chatVisible && chatFits ? fittedChatWidth : 0
-  const sideLimit = available - visibleChatWidth
-  return { sideWidth: Math.min(sideWidth, sideLimit), chatWidth: fittedChatWidth, chatFits, sideLimit, chatLimit: available }
+export function fitNativeSidebarLayout({ viewportWidth, dockWidth, sideWidth, chatWidth, minChatWidth, chatVisible, sideVisible, editorVisible }: {
+  viewportWidth: number; dockWidth: number; sideWidth: number; chatWidth: number; minChatWidth: number
+  chatVisible: boolean; sideVisible: boolean; editorVisible: boolean
+}) {
+  const available = Math.max(0, Math.floor(viewportWidth - dockWidth - 48))
+  // Empty editors yield their space. With content, keep the default layout usable;
+  // an explicit chat resize may still consume the full remaining width.
+  const editorReserve = editorVisible ? 100 : 0
+  const chatFits = available >= minChatWidth + editorReserve
+  const sideLimit = Math.max(0, available - editorReserve - (chatVisible && chatFits ? minChatWidth : 0))
+  const fittedSideWidth = sideVisible ? Math.min(sideWidth, sideLimit) : 0
+  const chatLimit = Math.max(0, available - fittedSideWidth)
+  const fittedChatWidth = !editorVisible && chatVisible ? chatLimit : Math.min(chatWidth, chatLimit)
+  return { sideWidth: fittedSideWidth, chatWidth: fittedChatWidth, chatFits, sideLimit, chatLimit }
 }

@@ -5,6 +5,7 @@ import { afterEach, expect, it, vi } from 'vitest'
 import { Workbench } from '../src/client/Workbench.tsx'
 import { WorkbenchController } from '../src/client/service.ts'
 import { settingsHost } from '../src/client/settingsHost.ts'
+import type { DshConversationMenus } from '../src/client/DshConversationPanel.tsx'
 
 vi.mock('../src/client/MonacoEditor.tsx', () => ({
   MonacoEditor: () => null,
@@ -34,7 +35,7 @@ afterEach(async () => {
   document.body.replaceChildren()
 })
 
-async function mount(dshPanelId?: string, onOpenDshPanel?: (id: string) => void, overrides: Pick<Parameters<typeof Workbench>[0], 'rightSidebar' | 'browser'> = {}): Promise<WorkbenchController> {
+async function mount(dshPanelId?: string, onOpenDshPanel?: (id: string) => void, overrides: Pick<Parameters<typeof Workbench>[0], 'rightSidebar' | 'browser' | 'conversationMenus'> = {}): Promise<WorkbenchController> {
   vi.stubGlobal('WebSocket', FakeSocket)
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     const method = url.split('/').at(-1)
@@ -47,6 +48,7 @@ async function mount(dshPanelId?: string, onOpenDshPanel?: (id: string) => void,
           ], unavailable: [], defaultModel: { provider: 'deepseek-official', model: 'deepseek-flash' } }
         : method === 'git.status' ? {repository:'/tmp/audit', branch:'main', ahead:0, behind:0, changes:[]}
         : method === 'fs.list' ? [{ name: 'sidebar-reference.txt', path: 'sidebar-reference.txt', kind: 'file' }]
+        : method === 'fs.read' ? { path: 'sidebar-reference.txt', content: 'hello', revision: 'r1', size: 5, binary: false, tooLarge: false }
         : ['search', 'lsp.status', 'terminal.list'].includes(method ?? '') ? [] : {}
     return { ok: true, json: async () => ({ ok: true, value }) }
   }))
@@ -357,6 +359,75 @@ function mockNativeDock(mode: 'push' | 'fullscreen', width = 360) {
   } as unknown as Parameters<typeof Workbench>[0]['rightSidebar']
 }
 
+it('reclaims an empty editor for chat and the native dock, then restores it when a file opens', async () => {
+  vi.stubGlobal('innerWidth', 1440)
+  localStorage.setItem('dvw:dsh-chat-width', '520')
+  await mount(undefined, undefined, { rightSidebar: mockNativeDock('push', 500) })
+  const overlay = document.querySelector<HTMLElement>('.dvw-overlay')!
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!.click())
+  expect(overlay.dataset.dvwEditorEmpty).toBe('true')
+  expect(overlay.style.getPropertyValue('--dvw-chat-width')).toBe('682px')
+  expect(localStorage.getItem('dvw:dsh-chat-width')).toBe('520')
+  await act(async () => document.querySelector<HTMLElement>('[data-tree-path="sidebar-reference.txt"]')!.click())
+  expect(document.querySelector('[data-tab-path="sidebar-reference.txt"]')).not.toBeNull()
+  expect(overlay.hasAttribute('data-dvw-editor-empty')).toBe(false)
+  expect(overlay.style.getPropertyValue('--dvw-chat-width')).toBe('520px')
+  await act(async () => document.querySelector<HTMLElement>('[data-tab-path="sidebar-reference.txt"] .dvw-tab-close')!.click())
+  expect(overlay.dataset.dvwEditorEmpty).toBe('true')
+  expect(overlay.style.getPropertyValue('--dvw-chat-width')).toBe('682px')
+})
+
+it('resizes chat beyond 720px to the full available width and restores that preference', async () => {
+  vi.stubGlobal('innerWidth', 1600)
+  localStorage.setItem('dvw:dsh-chat-width', '950')
+  localStorage.setItem('dvw:primary-side-visible', 'closed')
+  await mount()
+  await act(async () => document.querySelector<HTMLElement>('[data-tree-path="sidebar-reference.txt"]')!.click())
+  const separator = document.querySelector<HTMLElement>('.dvw-chat-resizer')!
+  expect(separator.getAttribute('aria-valuenow')).toBe('950')
+  expect(separator.getAttribute('aria-valuemax')).toBe('1552')
+  await act(async () => {
+    separator.dispatchEvent(pointer('pointerdown', 650, 120))
+    window.dispatchEvent(pointer('pointermove', 0, 120))
+    window.dispatchEvent(pointer('pointerup', 0, 120))
+  })
+  expect(separator.getAttribute('aria-valuenow')).toBe('1552')
+  expect(localStorage.getItem('dvw:dsh-chat-width')).toBe('1552')
+})
+
+it('keeps the empty editor accessible when chat is closed or the bottom panel is open', async () => {
+  const service = await mount()
+  const overlay = document.querySelector<HTMLElement>('.dvw-overlay')!
+  expect(overlay.dataset.dvwEditorEmpty).toBe('true')
+  await act(async () => service.toggleBottomPanel('terminal'))
+  expect(overlay.hasAttribute('data-dvw-editor-empty')).toBe(false)
+  await act(async () => service.toggleBottomPanel('terminal'))
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-act-id="chat"]')!.click())
+  expect(overlay.hasAttribute('data-dvw-editor-empty')).toBe(false)
+})
+
+it('temporarily yields empty split groups to a conversation tab beside the native sidebar', async () => {
+  vi.stubGlobal('innerWidth', 1440)
+  localStorage.setItem('dvw:/tmp/audit', JSON.stringify({
+    groups: [{ id: 'pane-1', paths: [] }, { id: 'pane-2', paths: [] }], focused: 'pane-2',
+    layout: { kind: 'split', id: 's1', direction: 'row', ratio: 0.5, first: { kind: 'leaf', group: 'pane-1' }, second: { kind: 'leaf', group: 'pane-2' } },
+  }))
+  let menu: Parameters<DshConversationMenus['register']>[0] | undefined
+  await mount(undefined, undefined, {
+    rightSidebar: mockNativeDock('push', 500),
+    conversationMenus: { register: value => { menu = value; return () => {} } },
+  })
+  await act(async () => menu!.resolve({ sessionId: 's' })[0]!.run())
+  const toggle = document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(2)
+  await act(async () => toggle.click())
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(1)
+  expect(document.querySelector('[data-dvw-conversation-editor]')).not.toBeNull()
+  await act(async () => toggle.click())
+  expect(document.querySelectorAll('.dvw-pane')).toHaveLength(2)
+  expect(document.querySelector('[data-dvw-conversation-editor]')).not.toBeNull()
+})
+
 it('returns from the fullscreen native dock to the conversation with Ctrl+Alt+B', async () => {
   await mount(undefined, undefined, { rightSidebar: mockNativeDock('fullscreen') })
   const button = document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!
@@ -374,6 +445,7 @@ it('reveals the conversation when adding a file from a cramped workspace', async
   conversation.innerHTML = '<div data-conversation-scroll></div><div data-composer-card><textarea>draft</textarea></div>'
   document.body.append(conversation)
   await mount(undefined, undefined, { rightSidebar: mockNativeDock('push', 370) })
+  await act(async () => document.querySelector<HTMLElement>('[data-tree-path="sidebar-reference.txt"]')!.click())
   const button = document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!
   await act(async () => button.click())
   expect(document.querySelector('.dvw-overlay')?.hasAttribute('data-dvw-chat')).toBe(false)
@@ -409,6 +481,7 @@ it('never focuses an older browser tab while changing to another session', async
 it('reports the fitted separator range without saving the temporary left-pane width', async () => {
   vi.stubGlobal('innerWidth', 1042)
   await mount(undefined, undefined, { rightSidebar: mockNativeDock('push', 299.4) })
+  await act(async () => document.querySelector<HTMLElement>('[data-tree-path="sidebar-reference.txt"]')!.click())
   const toggle = document.querySelector<HTMLButtonElement>('[data-act-id="native-sidebar"]')!
   await act(async () => toggle.click())
   const separator = document.querySelector<HTMLElement>('.dvw-side-resizer')!

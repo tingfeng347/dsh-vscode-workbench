@@ -92,7 +92,6 @@ interface CreatingEntry { kind: 'file' | 'directory'; directory: string; value: 
 
 
 export const DSH_CHAT_MIN_WIDTH = 440
-export const DSH_CHAT_MAX_WIDTH = 720
 export const DSH_CHAT_DEFAULT_WIDTH = 440
 
 const FLOAT_HANDLES: readonly FloatGesture[] = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw']
@@ -150,10 +149,10 @@ function persistFloatMax(max: boolean): void {
   try { localStorage.setItem(FLOAT_MAX_KEY, max ? '1' : '0') } catch { /* Browser privacy settings may deny storage. */ }
 }
 
-/** Keep persisted or dragged widths inside the range the DSH composer can lay out cleanly. */
+/** Preserve the preferred width; the current window supplies the effective maximum. */
 export function clampChatWidth(width: number): number {
   if (!Number.isFinite(width)) return DSH_CHAT_DEFAULT_WIDTH
-  return Math.max(DSH_CHAT_MIN_WIDTH, Math.min(DSH_CHAT_MAX_WIDTH, Math.round(width)))
+  return Math.max(DSH_CHAT_MIN_WIDTH, Math.round(width))
 }
 
 export { resizedPanelWidth } from './PanelResizer.tsx'
@@ -1204,17 +1203,23 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   const [floatFullscreen,setFloatFullscreen]=useState(false)
   const ownsFullscreen=useRef(false)
   const [viewport,setViewport]=useState(viewportSize)
-  const nativeLayout=fitNativeSidebarLayout(viewport.width,floating?0:nativeSidebar.width,sideWidth,chatWidth,DSH_CHAT_MIN_WIDTH,chatVisible&&!dshTabActive&&dockedConversation===undefined)
+  const [floatRect,setFloatRect]=useState<FloatRect>(()=>readFloatRect(storedValue(FLOAT_RECT_KEY),viewportSize(),dshTitlebarHeight()))
+  const [floatMax,setFloatMax]=useState(()=>readFloatMax(storedValue(FLOAT_MAX_KEY)))
+  const editorHasContent=groups.some(group=>group.tabs.length>0)||dockedConversation!==undefined||browserTabs.length>0||dshPanelId!==undefined||snapshot.bottomPanel!==undefined
+  const nativeLayout=fitNativeSidebarLayout({
+    viewportWidth:floating&&!floatMax&&!floatFullscreen?floatRect.width-2:viewport.width,
+    dockWidth:floating?0:nativeSidebar.width,sideWidth,chatWidth,minChatWidth:DSH_CHAT_MIN_WIDTH,
+    chatVisible:chatVisible&&!dshTabActive&&dockedConversation===undefined,
+    sideVisible:primarySideVisible,editorVisible:editorHasContent,
+  })
   const chatSuppressedBySidebar=nativeSidebar.shown&&(nativeSidebar.fullscreen||floating||!nativeLayout.chatFits)
   const sideWidthLimit=Math.min(640,nativeLayout.sideLimit)
-  const chatWidthLimit=Math.min(DSH_CHAT_MAX_WIDTH,nativeLayout.chatLimit)
+  const chatWidthLimit=nativeLayout.chatLimit
   const resizeSide = (width: number) => {
     if (sideWidthLimit < 210) return
     setSideWidth(width === sideWidthLimit ? Math.max(sideWidth, width) : width)
   }
   const resizeChat = (width: number) => setChatWidth(width === chatWidthLimit ? Math.max(chatWidth, width) : width)
-  const [floatRect,setFloatRect]=useState<FloatRect>(()=>readFloatRect(storedValue(FLOAT_RECT_KEY),viewportSize(),dshTitlebarHeight()))
-  const [floatMax,setFloatMax]=useState(()=>readFloatMax(storedValue(FLOAT_MAX_KEY)))
   useEffect(()=>{
     const sync=()=>{
       const active=ownsFullscreen.current&&document.fullscreenElement===document.body
@@ -2340,6 +2345,9 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   const chatShown=chatVisible&&!showingDshPanel&&!chatSuppressedBySidebar&&dockedConversation===undefined
   const conversationEditorShown=dockedConversation?.active===true&&(!showingDshPanel||dockedConversation.group!==focusedId)&&(browserId===undefined||dockedConversation.group!==focusedId)
   const conversationShown=chatShown||conversationEditorShown
+  // Only change presentation: the user's split tree returns when the native dock closes.
+  const conversationOnlyBesideSidebar=nativeSidebar.shown&&dockedConversation!==undefined&&groups.every(group=>group.tabs.length===0)&&browserTabs.length===0&&dshPanelId===undefined&&snapshot.bottomPanel===undefined
+  const displayedLayout=conversationOnlyBesideSidebar?createLeaf(dockedConversation.group):layout
   const floatSurfacePaused=floating&&(settingsOpen||switcherOpen)
   const detachConversation = (showSidebar: boolean) => {
     const group = groups.find(group => group.id === dockedConversation?.group)
@@ -2640,7 +2648,7 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
       </section>
     )
   }
-  return <div ref={overlayRef} className="dvw-overlay" data-dvw-theme={colorScheme} data-dvw-theme-name={theme} data-dvw-chat={chatShown||undefined} data-dvw-primary-side={primarySideVisible||undefined} data-dvw-status={statusVisible||undefined} data-dvw-bottom-panel={snapshot.bottomPanel||undefined} data-dvw-float={floating||undefined} data-dvw-float-max={floating&&floatMax||undefined} data-dvw-float-fullscreen={floating&&floatFullscreen||undefined} style={{...(floatStyle??{}),'--dvw-side-width':`${nativeLayout.sideWidth}px`,'--dvw-chat-width':`${nativeLayout.chatWidth}px`} as CSSProperties} role="dialog" aria-label="VS Code 工作台" onDragEnterCapture={suppressAttachmentDrop} onDragOverCapture={suppressAttachmentDrop} onDropCapture={suppressAttachmentDrop}>
+  return <div ref={overlayRef} className="dvw-overlay" data-dvw-theme={colorScheme} data-dvw-theme-name={theme} data-dvw-chat={chatShown||undefined} data-dvw-editor-empty={chatShown&&!editorHasContent||undefined} data-dvw-primary-side={primarySideVisible||undefined} data-dvw-status={statusVisible||undefined} data-dvw-bottom-panel={snapshot.bottomPanel||undefined} data-dvw-float={floating||undefined} data-dvw-float-max={floating&&floatMax||undefined} data-dvw-float-fullscreen={floating&&floatFullscreen||undefined} style={{...(floatStyle??{}),'--dvw-side-width':`${nativeLayout.sideWidth}px`,'--dvw-chat-width':`${nativeLayout.chatWidth}px`} as CSSProperties} role="dialog" aria-label="VS Code 工作台" onDragEnterCapture={suppressAttachmentDrop} onDragOverCapture={suppressAttachmentDrop} onDropCapture={suppressAttachmentDrop}>
     {floating&&<>
       {!floatMax&&!floatFullscreen&&FLOAT_HANDLES.map(mode=><div key={mode} className="dvw-float-handle" data-handle={mode} onPointerDown={event=>beginFloatGesture(event,mode)}/>)}
       <FloatBar name={workspace?.name} fullscreen={floatFullscreen} onPointerDown={event=>beginFloatGesture(event,'move')} onToggleFullscreen={()=>void toggleFloatFullscreen()} onClose={()=>service.hide()}/>
@@ -2689,7 +2697,7 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
       onAddToDsh={(connection, entry) => addReferenceToDsh(remoteFileUri(connection.id, entry.path), { directory: entry.kind === 'directory' })}
       onDiff={(path,diff,title,source)=>{leaveDshPanel();openDiff(path,diff,title,source)}} onChanged={refreshChangedTabs} onTerminal={(connection,options)=>{requestSshTerminal(connection);if(options?.open!==false&&snapshot.bottomPanel!=='ssh-terminal')service.toggleBottomPanel('ssh-terminal')}}/>} {(snapshot.view==='git'||(workspace&&statusVisible))&&<GitView visible={snapshot.view==='git'} statusSlot={statusVisible?gitStatusSlot:null} sessionId={sessionId} preferences={commitPreferences} model={commitModel} key={`git:${sessionId}`} onOpenFile={openFromView} modelConfigured={commitModelConfigured} modelAvailable={commitModelAvailable} modelHint={commitModelHint} onDiff={(path,diff,title,source,preview)=>{leaveDshPanel();openDiff(path,diff,title,source,preview)}}/>}</aside>
     {nativeLayout.sideWidth>0&&<PanelResizer className="dvw-side-resizer" label="拖动调整源码管理侧边栏宽度" size={nativeLayout.sideWidth} min={Math.min(210,sideWidthLimit)} max={sideWidthLimit} defaultSize={Math.min(210,sideWidthLimit)} direction={1} hideBelow={Math.min(105,Math.floor(nativeLayout.sideWidth))} onHide={()=>setPrimarySideVisible(false)} onResize={resizeSide}/>}
-    <main className="dvw-main" onDragOverCapture={paneDragOver} onDragLeaveCapture={paneDragLeave} onDropCapture={paneDropHandler}><div className="dvw-panes">{renderNode(layout)}</div>{snapshot.bottomPanel===undefined&&<div className="dvw-bottom-reveal" title="向上拖动打开终端" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();service.toggleBottomPanel('terminal');const statusHeight=statusVisible?24:0;const heightAt=(clientY:number)=>Math.max(120,Math.min(window.innerHeight-160,window.innerHeight-clientY-statusHeight));const move=(e:PointerEvent)=>setPanelHeight(heightAt(e.clientY));const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>}</main>
+    <main className="dvw-main" onDragOverCapture={paneDragOver} onDragLeaveCapture={paneDragLeave} onDropCapture={paneDropHandler}><div className="dvw-panes">{renderNode(displayedLayout)}</div>{snapshot.bottomPanel===undefined&&<div className="dvw-bottom-reveal" title="向上拖动打开终端" onPointerDown={event=>{if(event.button!==0)return;event.preventDefault();service.toggleBottomPanel('terminal');const statusHeight=statusVisible?24:0;const heightAt=(clientY:number)=>Math.max(120,Math.min(window.innerHeight-160,window.innerHeight-clientY-statusHeight));const move=(e:PointerEvent)=>setPanelHeight(heightAt(e.clientY));const up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up)};window.addEventListener('pointermove',move);window.addEventListener('pointerup',up)}}/>}</main>
     {tabMenu&&menuTab&&<div className="dvw-context-menu dvw-tab-menu" role="menu" style={{left:Math.min(tabMenu.x,window.innerWidth-240),top:Math.min(tabMenu.y,window.innerHeight-180)}} onPointerDown={event=>event.stopPropagation()}>
       <button role="menuitem" onClick={()=>{setTabMenu(undefined);close(menuTab)}}>关闭<span>Ctrl+F4</span></button>
       <button role="menuitem" disabled={tabs.length<=1} onClick={()=>removeTabs(tabs.filter(row=>row.path!==menuTab.path),'关闭其他标签页')}>关闭其他</button>

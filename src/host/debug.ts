@@ -239,7 +239,6 @@ class NodeDebugSession {
   private readonly pending = new Map<number, { resolve(value: unknown): void; reject(error: Error): void }>()
   private readonly breakpoints = new Map<string, DebugBreakpoint[]>()
   private frames: DebugFrame[] = []
-  private stopped = false
   /** The entry pause of `--inspect-brk` must be skipped unless the user asked to stop there. */
   private skipEntryPause = false
   /** Set once the debuggee finished; stops the socket close from finishing the session again. */
@@ -391,7 +390,7 @@ class NodeDebugSession {
       this.cleanup({ keepChild: true })
       return
     }
-    if (message.method === 'Debugger.resumed') { this.stopped = false; this.send({ type: 'state', state: 'running' }); return }
+    if (message.method === 'Debugger.resumed') { this.send({ type: 'state', state: 'running' }); return }
     if (message.method === 'Runtime.consoleAPICalled') {
       const params = message.params as { args?: CdpRemote[] } | undefined
       const text = (params?.args ?? []).map(arg => this.remoteText(arg)).join(' ')
@@ -406,7 +405,6 @@ class NodeDebugSession {
 
   /** Record the paused frames and report the stop; shared by real hits and a kept entry pause. */
   private handlePause(params: { reason?: string; callFrames?: CdpFrame[] } | undefined): void {
-    this.stopped = true
     this.objects.clear()
     this.scopeChains.clear()
     this.frames = (params?.callFrames ?? []).map(frame => {
@@ -582,7 +580,6 @@ class NodeDebugSession {
   }
 
   cleanup(options: { keepChild?: boolean } = {}): void {
-    this.stopped = false
     // Waiting requests must settle, or the serial command queue never reaches the next message.
     const waiting = [...this.pending.values()]
     this.pending.clear()
@@ -791,7 +788,6 @@ class DapBackend {
     // Adapters ask the client to open a terminal; ignoring the request stalls the session.
     if ((message as unknown as DapRequest).type === 'request') { void this.onRequest(message as unknown as DapRequest); return }
     if (message.type === 'response') {
-      const response = message as DapResponse
       const waiter = this.pending.get(message.request_seq)
       if (waiter === undefined) return
       this.pending.delete(message.request_seq)

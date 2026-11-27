@@ -2,7 +2,7 @@
 import { inspectReview, rejectReview, reviewFeed, reviewPath } from './host/review.ts'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises'
-import { appendFileSync, lstatSync, realpathSync } from 'node:fs'
+import { appendFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import type { IncomingMessage } from 'node:http'
 import { isAbsolute, join, join as joinPath, relative, sep } from 'node:path'

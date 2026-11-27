@@ -35,7 +35,7 @@ import { getWatchExpanded, mergeWatchPaths, nextRetryDelay, setWatchExpanded } f
 import { debugController } from '../debug/debug.ts'
 import type { NativeBrowser } from '../dsh/browser.ts'
 import { dshPanelLabel } from '../dsh/dshPanels.ts'
-import { ActivityBar, normalizeActivityLayout, normalizeActivityOrder, type ActivityView } from './ActivityBar.tsx'
+import { ActivityBar, normalizeActivityLayout, normalizeActivityOrder } from './ActivityBar.tsx'
 import { WorkspaceSwitcher } from '../workspace/WorkspaceSwitcher.tsx'
 import { CenteredOpenWith, openExternal } from '../workspace/OpenWith.tsx'
 import type { DshNavigation, WorkspaceChoice } from '../dsh/dshNavigation.ts'
@@ -138,10 +138,6 @@ function readStoredModel(key: string): CommitModelSelection | undefined {
       ? { provider: provider.trim(), model: model.trim() }
       : undefined
   } catch { return undefined }
-}
-
-function commitModelKey(model: CommitModelSelection): string {
-  return JSON.stringify([model.provider, model.model])
 }
 
 function persistFloatMax(max: boolean): void {
@@ -1318,7 +1314,6 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
   const openDshPanelRef=useRef(onOpenDshPanel);openDshPanelRef.current=onOpenDshPanel
   const restoreConversationRef=useRef(onRestoreConversation);restoreConversationRef.current=onRestoreConversation
   const leaveDshPanel=useCallback(()=>{const wasActive=dshTabActiveRef.current;setDshTabActive(false);if(wasActive)restoreConversationRef.current?.()},[])
-  const openDshTab=useCallback(()=>{const id=dshTabIdRef.current;if(id===undefined)return;setDshTabActive(true);if(hostDshPanelIdRef.current!==id)openDshPanelRef.current?.(id)},[])
   // Bring the official conversation back without requiring another tab: while a
   // DSH panel is pinned, the chat column is intentionally hidden, so the whale
   // button and Ctrl+Alt+B must first leave that panel.

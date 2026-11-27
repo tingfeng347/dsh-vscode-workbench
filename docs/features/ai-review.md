@@ -57,7 +57,3 @@ DSH 右侧生成的 `dsh-resource://file/session/<sessionId>/<path>` 链接在�
 - `src/client/workbench/Workbench.tsx`：标签计数、编辑器文件级提示条、全部接受/拒绝、空闲跟随、拒绝后的刷新和 DSH 文件打开事件。
 - `src/client/dsh/DshConversationPanel.tsx`：把全部改动入口挂到 DSH 输入框上方，同时保留官方对话组件。
 - `src/client/dsh/generatedFileLinks.ts`：DSH 生成文件地址拦截与本会话限制。
-
-## 验证
-
-后端测试覆盖事件过滤、路径越界、同文件多块、单块冲突不落盘、顺序修改、新文件创建后继续 AI 修改、外部修改保护和过期 revision；客户端测试覆盖三种审阅模式、持久化恢复、批量撤销、Monaco `^Y/^N`、文件级提示条、DSH 输入框入口、默认设置位置、文件链接跳转以及 1.5 秒空闲跟随。

@@ -1,6 +1,6 @@
 # Installation
 
-The plugin requires DeepSeek Harness `0.2.1-rc.1` or newer. Install the npm `latest` version. The development and CI versions are pinned in `package.json` and `pnpm-lock.yaml`. Architecture and the full compatibility table are in [Architecture](ARCHITECTURE.en.md).
+The plugin requires DeepSeek Harness `0.2.1-rc.1` or newer. Install the npm `latest` version. The development and CI versions are pinned in `package.json` and `pnpm-lock.yaml`. Architecture and the current compatibility range are in [Architecture](ARCHITECTURE.en.md).
 
 ## Install
 

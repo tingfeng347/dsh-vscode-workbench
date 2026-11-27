@@ -7,9 +7,8 @@
 - 设置入口显示「工作台」，分支占用标记显示「工作树」，编辑器加载错误、上传失败及模型设置提示使用中文。
 - 品牌名称、编程语言、快捷键名称和外部工具返回的原始技术详情继续保留原文。
 
-## 实现与验收
+## 实现与版本约束
 
 - 实现：`src/client/editor/monacoLocale.ts`；接入：`src/client/editor/MonacoEditor.tsx`。
-- `tests/editor/monaco-localization.spec.ts` 读取实际安装的中文包，验证补全时机、缺项覆盖及已有翻译保留；绑定当前包版本，升级 Monaco 后须重新核对索引。
-- 2026-11-18：`pnpm test` 354 项通过，`pnpm typecheck`、`pnpm build`、`git diff --check` 通过。
-- 独立 Chrome 无头页面加载实际 AMD 编辑器后，翻译空项为 0，当前可用的 126 个命令名称无纯英文遗漏；这不代表已经更新或验收本机 DSH 安装实例。
+- `tests/editor/monaco-localization.spec.ts` 读取实际安装的中文包，验证补全时机、缺项覆盖及已有翻译保留。
+- 翻译索引绑定 Monaco 包版本；升级 Monaco 后需重新核对索引。

@@ -135,11 +135,12 @@ pnpm build
 
 ## 文档
 
-- [架构适配](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/ARCHITECTURE.md)：挂载方式、DSH 服务接入与版本兼容范围。
+- [架构说明](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/ARCHITECTURE.md)：扩展点、宿主服务、兼容范围与源码布局。
 - [安装与升级](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.md)：CLI 与插件市场安装、终端依赖、旧版升级和排错。
-- [资源管理器多选](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/explorer-multiselect.md) · [Monaco 中文补全](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/localization.md)
+- [官方终端与浏览器](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/native-tools.md) · [数据保护与恢复](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/reliability.md)
+- [资源管理器多选](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/explorer-multiselect.md) · [Monaco 中文补全](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/localization.md) · [AI 改动审阅](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/ai-review.md)
 - [版本记录](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/CHANGELOG.md)：0.1.11 起的版本变化。
-- [发布检查](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/RELEASE-CHECKLIST.md)：发布前的验证与打包步骤。
+- [发布检查](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/maintenance/release-checklist.md)：发布前的验证与打包步骤。
 
 ## 许可证
 

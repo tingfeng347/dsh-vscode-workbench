@@ -13,13 +13,14 @@ permissions:
 
 concurrency:
   group: badges
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   refresh:
     name: Regenerate badge SVGs
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
 
     steps:
       - name: Check out main
@@ -27,24 +28,36 @@ jobs:
         with:
           ref: main
 
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: pnpm
+
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile --ignore-scripts
 
       - name: Regenerate badges
+        id: badges
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          EXPECTED_NPM_VERSION: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_branch || '' }}
         run: node scripts/update-badges.mjs
 
       - name: Commit refreshed badges
+        if: success() || (failure() && steps.badges.outcome == 'failure')
         run: |
-          if git diff --quiet -- assets/badges; then
+          if git diff --quiet -- assets/badges README.md README.en.md; then
             echo "Badges are already current."
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add assets/badges
+          git add assets/badges README.md README.en.md
           git commit -m "chore(badges): refresh README badges"
           git push

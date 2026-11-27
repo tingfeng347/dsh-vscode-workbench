@@ -35,6 +35,7 @@ git diff --check
 ## 发布后
 
 - [ ] 确认 npm 包可读取：`npm view dsh-vscode-workbench@<version> version`。
+- [ ] 发布完成触发的徽章任务通过，`assets/badges/npm-version.svg` 与 npm `latest` 一致。该任务会有界重试，等待新版本可见。首排六个徽章在本地生成，README 图片 URL 使用内容哈希刷新缓存。统计接口失败时保留旧图并报告失败，可从 Actions 重跑。
 - [ ] 在独立 profile 或干净 HOME 中，从插件市场安装已发布版本，确认工作台自动启用。
 - [ ] 在另一干净 profile 中按 README 从 npm 通过 CLI 安装，将插件加入 `dsh.profile.bundles`，重启后打开工作台。
 - [ ] 从装有上一版本的测试 profile 打开插件市场，确认能看到新版本，完成一次更新并打开工作台。

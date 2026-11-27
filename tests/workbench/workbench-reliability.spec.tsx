@@ -1355,6 +1355,15 @@ it('reloads external changes through the authenticated desktop socket carrier', 
   expect(createWebSocket).toHaveBeenCalledWith(expect.stringContaining('/dsh-vscode/ws/files?sessionId=s'))
 })
 
+it.each(['src/host.ts', 'docs/moved.md'])('shows a missing restored file once, in the affected tab: %s', async (path) => {
+  await setup(false, { paths: [path], active: path }, [], [], undefined, [], () =>
+    ({ code: 'not-found', message: 'path does not exist', status: 404 }))
+  const body = document.querySelector('.dvw-editor-body')!
+  expect(document.querySelector('.dvw-error')).toBeNull()
+  expect(body.querySelector('.dvw-message')?.textContent).toContain(path)
+  expect(body.textContent).toContain('重试读取文件')
+})
+
 it('shows a retry action after a local read fails and opens the recovered document', async () => {
   let failed = true
   await setup(false, undefined, [], [], undefined, [], () => failed

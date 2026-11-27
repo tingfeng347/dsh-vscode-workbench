@@ -34,7 +34,7 @@
 
 ## Harness 兼容性
 
-当前插件版本 `0.5.0` 在 `package.json` 中声明 Harness `>=0.2.1-rc.1`。开发和 CI 使用 Harness `0.2.2-rc.5`、Cordis `4.1.0` 作为验证基线。兼容性预检会在安装时检查 `engines.dsh` 和相关 peerDependencies；安装失败时见[排错说明](INSTALL.md#安装失败harness版本不兼容)。
+当前插件版本 `0.5.1` 在 `package.json` 中声明 Harness `>=0.2.1-rc.1`。开发和 CI 使用 Harness `0.2.2-rc.5`、Cordis `4.1.0` 作为验证基线。兼容性预检会在安装时检查 `engines.dsh` 和相关 peerDependencies；安装失败时见[排错说明](INSTALL.md#安装失败harness版本不兼容)。
 
 历史版本与已发布功能见[版本记录](CHANGELOG.md)。
 

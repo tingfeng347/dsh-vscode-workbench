@@ -34,7 +34,7 @@ This page describes the workbench's current extension points, host services, and
 
 ## Harness compatibility
 
-Plugin `0.5.0` declares Harness `>=0.2.1-rc.1` in `package.json`. Development and CI use Harness `0.2.2-rc.5` and Cordis `4.1.0` as the validation baseline. The install preflight checks `engines.dsh` and the relevant peer dependencies. See [installation troubleshooting](INSTALL.en.md#install-fails-incompatible-harness) if installation is rejected.
+Plugin `0.5.1` declares Harness `>=0.2.1-rc.1` in `package.json`. Development and CI use Harness `0.2.2-rc.5` and Cordis `4.1.0` as the validation baseline. The install preflight checks `engines.dsh` and the relevant peer dependencies. See [installation troubleshooting](INSTALL.en.md#install-fails-incompatible-harness) if installation is rejected.
 
 For older releases and features, see the [changelog](CHANGELOG.md).
 

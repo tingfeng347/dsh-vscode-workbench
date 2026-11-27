@@ -456,7 +456,9 @@ body[data-dvw-palette=eyecare] [data-dvw-conversation-panel]{--dsw-alias-bg-base
 /* The DSH host paints a -webkit-app-region:drag strip over the window's top-left corner. Real mouse presses
    inside it never reach the renderer, so the workbench has to carve the whole overlay out of it. */
 .dvw-review-removed{padding:0}
-.dvw-overlay{-webkit-app-region:no-drag}
+html:not([data-windows-titlebar]) .dvw-overlay,.dvw-overlay[data-dvw-float=true]{-webkit-app-region:no-drag}
+/* The Windows host owns this caption strip. Anchor it to the viewport while the panes scroll. */
+html[data-windows-titlebar]:not([data-fullscreen]) body[data-dvw-workbench-active] :has(> [data-shell-overlay])::before{position:fixed}
 /* Floating layout: the workbench stays inside the same native window but paints as a movable layer over DSH.
    Geometry and the top inset come from Workbench.tsx as inline styles; these rules only shape the shell. */
 .dvw-overlay[data-dvw-float=true]{position:fixed;inset:auto;z-index:100;padding-top:34px;border:1px solid var(--dvw-border);border-radius:10px;box-shadow:0 18px 48px rgba(0,0,0,.45)}

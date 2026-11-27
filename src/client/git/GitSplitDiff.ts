@@ -122,6 +122,7 @@ export function connectGitSplit(
   let folded = true
   let position = 0
   let height = 0
+  let contentTop = 0
   let max = 0
   let width = 0
   let paneWidths: Pair<number> = [0, 0]
@@ -237,12 +238,6 @@ export function connectGitSplit(
     for (const group of actionGroups.values()) group.hidden = true
     const mid = width / 2
     const [left, right] = appliedTop
-    const contentTop = Math.max(0, ...sides.map(side => {
-      const pane = side.getDomNode()
-      if (pane === null) return 0
-      const scroller = pane.querySelector<HTMLElement>('.monaco-scrollable-element')
-      return scroller === null ? 0 : scroller.getBoundingClientRect().top - pane.getBoundingClientRect().top
-    }))
     let low = 0, high = plots.length
     // A band can cross the viewport even when its two ends are both offscreen.
     while (low < high) {
@@ -387,6 +382,14 @@ export function connectGitSplit(
     geometryDirty = false
     height = Math.min(...sides.map(side=>side.getLayoutInfo().height))
     paneWidths = [hosts[0].getBoundingClientRect().width, hosts[1].getBoundingClientRect().width]
+    // The scroller's inset is layout geometry, independent of its scroll offset. Read it
+    // before applyScroll renders Monaco's token DOM, which would force layout here per frame.
+    contentTop = Math.max(0, ...sides.map(side => {
+      const pane = side.getDomNode()
+      if (pane === null) return 0
+      const scroller = pane.querySelector<HTMLElement>('.monaco-scrollable-element')
+      return scroller === null ? 0 : scroller.getBoundingClientRect().top - pane.getBoundingClientRect().top
+    }))
     points = [{at:0,offsets:[0,0]}]
     plots = []
     selectedPlot = undefined

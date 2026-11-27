@@ -8,12 +8,12 @@
   DeepSeek Harness 里的 VS Code 风格工作台，集成编辑、搜索、Git、SSH 远程开发、终端、文档与网页预览。</p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-version.svg" alt="npm 版本"></a>
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-monthly-downloads.svg" alt="npm 月下载量"></a>
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-total-downloads.svg" alt="npm 总下载量"></a>
-  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/stargazers"><img src="https://img.shields.io/github/stars/tingfeng347/dsh-vscode-workbench?logo=github&label=Stars" alt="GitHub Stars"></a>
-  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/commits/main"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/last-commit.svg" alt="最近提交"></a>
-  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tingfeng347/dsh-vscode-workbench?label=license" alt="MIT 许可证"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-version.svg?v=69fad02e4845" alt="npm 版本"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-monthly-downloads.svg?v=3878404eb3c6" alt="npm 月下载量"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-total-downloads.svg?v=706b83a6925d" alt="npm 总下载量"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/stargazers"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/github-stars.svg?v=740bd17315b3" alt="GitHub Stars"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/commits/main"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/last-commit.svg?v=038949c8a9d7" alt="最近提交"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/LICENSE"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/license.svg?v=01e60fcc216c" alt="MIT 许可证"></a>
   <br>
   <a href="https://awesome-dsh-plugin.com/p/tingfeng347/dsh-vscode-workbench/"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="https://dshpluginhub.ai/plugins/dsh-vscode-workbench"><img src="https://dshpluginhub.ai/badges/plugins/dsh-vscode-workbench.svg" alt="DSH Plugin Hub 已收录"></a>

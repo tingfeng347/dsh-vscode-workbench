@@ -140,6 +140,7 @@
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
     "@types/ws": "^8.18.0",
+    "badge-maker": "6.0.0",
     "immer": "^10.2.0",
     "jsdom": "29.1.1",
     "react": "^18.2.0",

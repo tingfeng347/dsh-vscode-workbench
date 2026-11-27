@@ -8,12 +8,12 @@
   A VS Code-style workspace for DeepSeek Harness with editing, search, Git, remote SSH development, a terminal, and document and web previews.</p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-version.svg" alt="npm version"></a>
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-monthly-downloads.svg" alt="npm monthly downloads"></a>
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-total-downloads.svg" alt="npm total downloads"></a>
-  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/stargazers"><img src="https://img.shields.io/github/stars/tingfeng347/dsh-vscode-workbench?logo=github&label=Stars" alt="GitHub stars"></a>
-  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/commits/main"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/last-commit.svg" alt="Last commit"></a>
-  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/LICENSE"><img src="https://img.shields.io/github/license/tingfeng347/dsh-vscode-workbench?label=license" alt="MIT license"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-version.svg?v=69fad02e4845" alt="npm version"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-monthly-downloads.svg?v=3878404eb3c6" alt="npm monthly downloads"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-total-downloads.svg?v=706b83a6925d" alt="npm total downloads"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/stargazers"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/github-stars.svg?v=740bd17315b3" alt="GitHub stars"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/commits/main"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/last-commit.svg?v=038949c8a9d7" alt="Last commit"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/LICENSE"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/license.svg?v=01e60fcc216c" alt="MIT license"></a>
   <br>
   <a href="https://awesome-dsh-plugin.com/p/tingfeng347/dsh-vscode-workbench/"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>
   <a href="https://dshpluginhub.ai/plugins/dsh-vscode-workbench"><img src="https://dshpluginhub.ai/badges/plugins/dsh-vscode-workbench.svg" alt="Listed on DSH Plugin Hub"></a>

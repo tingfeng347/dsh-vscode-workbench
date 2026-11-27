@@ -1,6 +1,6 @@
 {
   "name": "dsh-vscode-workbench",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "VS Code-style workbench for DeepSeek Harness: editor, search, Git, terminal, document and web preview",
   "keywords": [
     "dsh",
@@ -75,7 +75,7 @@
   "scripts": {
     "clean": "node scripts/clean.mjs lib dist",
     "badges": "node scripts/update-badges.mjs",
-    "build": "tsc -p tsconfig.build.json && tsdown",
+    "build": "node scripts/clean.mjs lib/types && tsc -p tsconfig.build.json && tsdown",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "pack:plugin": "pnpm build && node scripts/clean.mjs dist && pnpm pack --pack-destination dist"

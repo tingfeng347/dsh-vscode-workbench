@@ -51,13 +51,9 @@ DSH 右侧生成的 `dsh-resource://file/session/<sessionId>/<path>` 链接在�
 
 ## 关键实现
 
-- `src/review.ts`：会话事件提取、工作区路径校验、差异定位、批量还原、revision 冲突和新文件保护。
-- `src/client/aiReview.ts`：增量轮询、持久化水位、保留记录、检查与撤销请求。
-- `src/client/MonacoEditor.tsx`：绿色行装饰、红色删除 view zone、浮动 `^Y/^N` 块级操作以及不抢焦点的定位。
-- `src/client/Workbench.tsx`：标签计数、编辑器文件级提示条、全部接受/拒绝、空闲跟随、拒绝后的刷新和 DSH 文件打开事件。
-- `src/client/DshConversationPanel.tsx`：把全部改动入口挂到 DSH 输入框上方，同时保留官方对话组件。
-- `src/client/generatedFileLinks.ts`：DSH 生成文件地址拦截与本会话限制。
-
-## 验证
-
-后端测试覆盖事件过滤、路径越界、同文件多块、单块冲突不落盘、顺序修改、新文件创建后继续 AI 修改、外部修改保护和过期 revision；客户端测试覆盖三种审阅模式、持久化恢复、批量撤销、Monaco `^Y/^N`、文件级提示条、DSH 输入框入口、默认设置位置、文件链接跳转以及 1.5 秒空闲跟随。
+- `src/host/review.ts`：会话事件提取、工作区路径校验、差异定位、批量还原、revision 冲突和新文件保护。
+- `src/client/editor/aiReview.ts`：增量轮询、持久化水位、保留记录、检查与撤销请求。
+- `src/client/editor/MonacoEditor.tsx`：绿色行装饰、红色删除 view zone、浮动 `^Y/^N` 块级操作以及不抢焦点的定位。
+- `src/client/workbench/Workbench.tsx`：标签计数、编辑器文件级提示条、全部接受/拒绝、空闲跟随、拒绝后的刷新和 DSH 文件打开事件。
+- `src/client/dsh/DshConversationPanel.tsx`：把全部改动入口挂到 DSH 输入框上方，同时保留官方对话组件。
+- `src/client/dsh/generatedFileLinks.ts`：DSH 生成文件地址拦截与本会话限制。

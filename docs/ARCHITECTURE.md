@@ -1,78 +1,50 @@
-# 架构适配
+# 架构
 
-本文说明 `dsh-vscode-workbench` 如何接入 DeepSeek Harness，以及随 Harness 演进的适配记录。安装、升级与版本兼容表见[安装说明](INSTALL.md)。
+本文说明工作台当前的扩展点、宿主服务和数据边界。安装步骤见[安装与升级](INSTALL.md)，功能变化见[版本记录](CHANGELOG.md)。
 
-## 挂载方式
+## 挂载与界面
 
-工作台通过官方 `sidebar.footer.action` 与 `shell.overlay` 扩展点挂载，不替换或卸载 `ui-layout`。入口位于 DSH 侧栏的面板列表，与「插件」「自动化任务」等并列；DSH 对话栏由活动栏的鲸鱼图标开关。
+- 工作台通过 Harness 官方 `sidebar.footer.action` 和 `shell.overlay` 扩展点挂载，不替换 `ui-layout`。
+- DSH 对话栏使用官方会话界面；可以留在侧栏，也可以作为编辑器标签展示。会话与文件共享编辑器分组布局。
+- 浮动模式仍在同一原生窗口的 overlay 中渲染，通过固定定位实现移动和缩放，不创建独立系统窗口。
+- 工作台关闭对话栏后打开官方右侧栏时，布局直接到达目标状态，避免短暂露出隐藏的聊天内容；对话栏显示时保留官方过渡。
 
-「打开方式 → 浮动窗口」不是新的系统窗口：DSH Desktop 只有一个原生窗口，宿主会把 `window.open` 交给系统浏览器，因此工作台仍在 `shell.overlay` 里渲染，只是把 `.dvw-overlay` 从 `position: absolute; inset: 0` 改成 `position: fixed` 加内联的左上角与宽高。标题栏拖动和八向缩放由 React 指针事件计算。标题栏的全屏按钮和双击调用 `requestFullscreen()`，让整个文档进入浏览器全屏，工作台铺满屏幕并覆盖宿主的标题栏和侧栏，停靠在工作台内的原生面板可继续操作；`fullscreenchange` 同步按钮状态，`Esc` 由浏览器退出。全屏不可用时回退到原来的窗口内最大化，顶部保留 DSH 标题栏。打开方式、几何和内嵌最大化状态分别存在 `dvw:open-mode`、`dvw:float-rect`、`dvw:float-max`。浮动模式下，原生 DSH 对话停靠在工作台右侧，可用活动栏鲸鱼图标开关。插件页停靠在当前编辑区，并和对话栏一样随浮动窗口移动、缩放。
+## 宿主服务
 
-## 客户端接入
+- 客户端界面通过 `ui-renderer` 槽位注册，当前会话由 `ui-session` 提供。
+- 文件、搜索、Git 和终端操作根据当前 Session 的 `workingDirectory` 定位工作区。
+- HTTP 与 WebSocket 请求使用 Harness 认证，并检查 Host/Origin；终端接口还限制为 loopback。
+- 终端进程由官方 `ClientTerminals` 控制器管理；浏览器由官方浏览器面板管理。工作台不创建自建终端进程或浏览器页面。
 
-- 界面通过 `ui-renderer` 提供的槽位服务注册，使用 `ui-session` 的 `mainView` 引用选择当前会话，不再依赖已移除的 `dsh-client-runtime`。
-- 文件、搜索、Git 和新建终端通过 `workingDirectory.get(session)` 使用会话当前目录，跟随工作目录投影切换；失效会话返回 404。
-- HTTP 与 WebSocket 接口使用 `connection.requestRejection()`，共享 Harness 登录认证及 Host/Origin 校验；终端额外保留 loopback 限制。
-- 对话栏按官方 `data-phase` 容器定位，兼容新版 `conversation.content` 布局。
+## 源码布局
 
-## 版本适配
-
-安装前请确认 Harness 版本。插件在安装阶段用 `engines.dsh` 与 peerDependencies 做兼容性预检，不满足时会在 pnpm 执行前中止，详见[安装说明](INSTALL.md#安装失败harness-版本不兼容)。
-
-| 插件版本 | 需要的 Harness |
+| 路径 | 内容 |
 | --- | --- |
-| 0.3.0 | `0.2.1-rc.1` 及以上（默认基线 `0.2.2-rc.5`，Cordis `4.1.0`） |
-| 0.2.18 | `0.2.1-rc.1` 及以上（默认基线 `0.2.2-rc.5`，Cordis `4.1.0`） |
-| 0.2.17 | `0.2.1-rc.1` 及以上（默认基线 `0.2.2-rc.5`，Cordis `4.1.0`） |
-| 0.2.16 / 0.2.15 | `0.2.1-rc.1` 及以上（默认基线 `0.2.2-rc.3`，Cordis `4.1.0`） |
-| 0.2.14 | `0.2.1-rc.1` 及以上（默认基线 `0.2.2-rc.3`，Cordis `4.1.0`） |
-| 0.2.13 | `0.2.1-rc.1` 及以上（默认基线 `0.2.2-rc.3`，Cordis `4.1.0`） |
-| 0.2.12 | `0.2.1-rc.1` 及以上（默认基线 `0.2.2-rc.3`，Cordis `4.1.0`） |
-| 0.2.11 | `0.2.1-rc.1` 及以上（默认基线 `0.2.2-rc.3`，Cordis `4.1.0`） |
-| 0.2.10 | `0.2.1-rc.1` 及以上（默认基线 `0.2.2-rc.3`，Cordis `4.1.0`） |
-| 0.2.9 | `0.2.1-rc.1` 及以上（默认基线 `0.2.2-rc.1`，Cordis `4.1.0`） |
-| 0.2.8 | `0.2.1-rc.1` 及以上（默认基线 `0.2.2-rc.1`，Cordis `4.1.0`） |
-| 0.2.7 | `0.2.1-rc.1` 及以上（默认基线 `0.2.2-rc.1`，Cordis `4.1.0`） |
-| 0.2.6 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
-| 0.2.5 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
-| 0.2.4 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
-| 0.2.3 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
-| 0.2.2 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
-| 0.2.1 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
-| 0.2.0 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
-| 0.1.15 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
-| 0.1.14 | `0.2.2-rc.1`（Cordis `4.1.0`，默认基线）；另验证 `0.2.1-rc.5`（Cordis `4.0.5`） |
-| 0.1.12 | `0.2.1-rc.5`（Cordis `4.0.5`，默认基线）；另验证 `0.2.2-rc.1`（Cordis `4.1.0`，Node.js ≥24.9） |
-| 0.1.11 | `0.2.1-rc.5`（Cordis `4.0.5`，默认基线）；另验证 `0.2.2-rc.1`（Cordis `4.1.0`，Node.js ≥24.9） |
-| 0.1.10 | `0.2.1-rc.4`（Cordis `4.0.5`，旧版验证基线） |
-| 0.1.9 | `0.2.1-alpha.3`（Cordis `4.0.5-alpha.2`，旧版验证基线） |
-| 0.1.8 | `0.1.1-rc.2` |
+| `src/host/` | 宿主端的文件、Git、SSH、调试、预览、HTTP API 和文件监听。 |
+| `src/client/` | 工作台、DSH 接入、编辑器，以及 Git、终端、SSH、设置、搜索、LSP、预览等界面和服务。 |
+| `src/shared/` | 宿主与客户端共用的类型及纯逻辑。 |
+| `build/`、`tests/` | 构建入口与打包配置；测试按功能分组，公共工具位于 `tests/support/`。 |
 
-Harness `0.2.0-rc.2` 上没有可用的插件版本：0.1.9 依赖 Harness `0.2.1-alpha.2` 才引入的 `workingDirectory` 服务，0.1.8 又只适配 `0.1.1-rc.2`。请先把 Harness 升级到 `0.2.2-rc.1` 再安装 0.2.2。
+## 安全与数据保护
 
-`dsh plugin allow-version` 只跳过版本闸门，不会补上缺失的宿主服务，在 `0.2.0-rc.2` 上插件仍然加载不起来；请优先升级 Harness。
+- 本地文件路径限定在当前工作区，并检查目录穿越和符号链接越界。
+- 保存按文件版本校验，使用原子替换；草稿按 Session 与工作区隔离。
+- SSH 文件操作会在远端校验规范化路径，避免访问选定工作区之外的内容。
+- 详细边界见[数据保护与恢复](features/reliability.md)和[官方终端与浏览器](features/native-tools.md)。
 
-## 架构演进
+## Harness 兼容性
 
-`0.1.11` 起，插件把 DSH 开发依赖与 peerDependencies 同步到 `0.2.1-rc.5`（Cordis `4.0.5`），显式声明 `engines.dsh` 与 `0.2.2-rc.1` 的预发布依赖范围。安装版本闸门使用官方 `evaluatePluginCompatibility()` 验证，无需版本豁免。
+当前插件版本 `0.5.1` 在 `package.json` 中声明 Harness `>=0.2.1-rc.1`。开发和 CI 使用 Harness `0.2.2-rc.5`、Cordis `4.1.0` 作为验证基线。兼容性预检会在安装时检查 `engines.dsh` 和相关 peerDependencies；安装失败时见[排错说明](INSTALL.md#安装失败harness版本不兼容)。
 
-`0.2.0` 引入语言服务器托管：语言运行时与 LSP 分别检测、分别安装，自动安装的服务器写入插件私有目录，并新增 `/dsh-vscode/file-icons` 路由按需提供 `vscode-icons` 图标。
+历史版本与已发布功能见[版本记录](CHANGELOG.md)。
 
-`0.2.1` 修复会话尚未发布时的终端请求：切换工作区会等待会话就绪并自动重试；同版本确认了 `workingDirectory` 投影在会话切换后的目录跟随。
+## 搜索与替换 API
 
-`0.2.2` 增加 AI 提交信息、工作台设置面板、纯白与护眼主题、并排差异布局修复，并保留与 Harness `0.2.1-rc.5` 的兼容范围。功能层面的完整版本记录见[版本记录](CHANGELOG.md)。
-
-## 官方工具接入
-
-终端通过隔离的官方 `ClientTerminals` 管理进程、恢复和输入控制，工作台只保存 Session 内的终端标签身份及布局。删除自建 `/dsh-vscode-terminal/*` 接口和 `node-pty` 依赖。普通浏览器由官方 `sidebarRight` 导航和渲染，启动页与网页始终展示在官方右侧栏。工作台仅调用官方打开 API，不订阅浏览器清单、不创建中间浏览器标签、不改写页面 DOM 或样式。网页链接和 HTML 文件按设置里的默认浏览器分流；HTML 由带随机令牌的 localhost 静态服务加载，因此相对样式、脚本和图片可用。详细范围与验证见[官方工具接入](native-tools.md)。
-
-## 搜索与替换接口
-
-两个接口均向 `/dsh-vscode/api/` 下的对应方法发送 JSON，并通过 `sessionId` 定位会话。
+接口位于认证保护的 `/dsh-vscode/api/` 路径，并通过 `sessionId` 定位会话。
 
 | 方法 | 请求 | 返回 |
 | --- | --- | --- |
-| `search` | `query` 为搜索词。可选的 `caseSensitive`、`wholeWord`、`regex` 控制匹配方式，`include` 和 `exclude` 接收逗号分隔的文件模式，`captureGroups` 指定替换预览引用的正则组编号。 | `matches` 包含路径、从 1 开始的行和 UTF-16 列、原始行文本、匹配文本、行摘要，以及按需取得的捕获值。`limited` 表示还有未显示的匹配。 |
-| `search.replace` | `cwd` 为搜索时的工作区，`files` 按相对路径 `path` 分组。每项 `edits` 提供 `line`、`column`、原匹配的 UTF-16 长度 `length`、搜索返回的 `lineHash` 和替换文本 `text`。 | `changed` 列出成功处理的文件。`failures` 逐文件返回路径和失败原因，界面随后刷新搜索结果。 |
+| `search` | `query`；可选 `caseSensitive`、`wholeWord`、`regex`、`include`、`exclude`、`captureGroups`。 | `matches` 包含相对路径、行列、文本和按需捕获组；`limited` 表示结果已截断。 |
+| `search.replace` | `cwd` 与按相对路径分组的 `files`；每项编辑提供 `line`、`column`、匹配 `length`、`lineHash` 和替换文本 `text`。 | `changed` 列出成功处理的文件；`failures` 按文件返回失败原因。 |
 
-宿主对每个文件核对匹配行，再按文件版本原子保存。匹配过期、文件含二进制或非 UTF-8 内容、超出 5 MiB 时跳过该文件。结果超过 2000 条时仍可逐条替换，批量替换需先缩小搜索范围。
+替换前会重新校验匹配行和文件版本。二进制、非 UTF-8、超过 5 MiB 或匹配已变化的文件不会被写入。

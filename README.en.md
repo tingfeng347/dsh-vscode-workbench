@@ -135,11 +135,12 @@ Requires Node.js `^22.19 || >=24`, pnpm 11.7 and system Git. The workbench no lo
 
 ## Docs
 
-- [Architecture](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/ARCHITECTURE.en.md): mounting, DSH services, and Harness compatibility.
+- [Architecture](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/ARCHITECTURE.en.md): extension points, host services, compatibility, and source layout.
 - [Installation](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/INSTALL.en.md): CLI and marketplace installs, terminal prerequisites, upgrades, and troubleshooting.
-- [Explorer multi-select](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/explorer-multiselect.md) · [Monaco localization](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/localization.md) (Chinese)
+- [Official terminal and browser](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/native-tools.md) (Chinese) · [Data protection and recovery](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/reliability.md) (Chinese)
+- [Explorer multi-select](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/explorer-multiselect.md) · [Monaco localization](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/localization.md) · [AI change review](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/features/ai-review.md) (Chinese)
 - [Changelog](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/CHANGELOG.md) (Chinese) · [GitHub releases](https://github.com/tingfeng347/dsh-vscode-workbench/releases)
-- [Release checklist](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/RELEASE-CHECKLIST.md): validation and packaging steps.
+- [Release checklist](https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/docs/maintenance/release-checklist.md): validation and packaging steps.
 
 ## License
 

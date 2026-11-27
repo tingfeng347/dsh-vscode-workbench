@@ -1,3 +1,4 @@
+import { navigationScrollBehavior, scrollNavigationLeft } from '../ui/navigationScroll.ts'
 import { copyText } from '../ui/clipboard.ts'
 import { CommitHover } from '../git/CommitHover.tsx'
 import { ChangeList, ScmMenu, type ScmCommand } from '../git/ScmMenu.tsx'
@@ -673,7 +674,10 @@ function Explorer(props: { sessionId: string; cwd?: string; selected?: string; o
           if (targetEntry.kind === 'directory') setSelectedDirectory(targetEntry.path)
           const targetRow = [...tree.querySelectorAll<HTMLElement>('[data-tree-path]')]
             .find(row => row.dataset.treePath === target)
-          targetRow?.scrollIntoView({ block: 'nearest' })
+          targetRow?.scrollIntoView({
+            block: 'nearest',
+            behavior: event.repeat || event.key === 'Home' || event.key === 'End' ? 'instant' : navigationScrollBehavior(),
+          })
         }
       }
       return
@@ -1858,7 +1862,9 @@ const [fontSize,setFontSize]=useState(()=>{const saved=Math.round(Number(localSt
     if (list === null || selected === null || selected === undefined) return
     const listRect = list.getBoundingClientRect()
     const tabRect = selected.getBoundingClientRect()
-    list.scrollLeft = tabScrollLeft(list.scrollLeft, listRect, tabRect)
+    const left = tabScrollLeft(list.scrollLeft, listRect, tabRect)
+    // A newly selected, already-visible tab must cancel any previous reveal.
+    scrollNavigationLeft(list, left)
   }, [active, tabs.length])
   const open=(path:string,line?:number,column?:number,highlight?:string,focusOnReveal=true,endLine?:number)=>{if(sessionId!==undefined)openForWorkspace(path,line,column,highlight,focusOnReveal,endLine)}
   // Stable handlers let the memoised side views skip re-rendering while the editor types.

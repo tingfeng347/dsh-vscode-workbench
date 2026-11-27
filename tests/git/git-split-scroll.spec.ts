@@ -9,14 +9,18 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-function setup(addedLines = 0, reviewActions?: GitSplitReviewActions) {
+function setup(addedLines = 0, reviewActions?: GitSplitReviewActions, reducedMotion = true) {
   const frames = new Map<number, FrameRequestCallback>()
   let contentTop = 0
+  let now = performance.now()
+  if (!reducedMotion) vi.spyOn(performance, 'now').mockImplementation(() => now)
+  vi.stubGlobal('matchMedia', () => ({ matches: reducedMotion }))
   let id = 0
   const flushFrame = () => {
     const current = [...frames.values()]
     frames.clear()
-    current.forEach(callback => callback(0))
+    now += 16
+    current.forEach(callback => callback(now))
   }
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++id, callback); return id })
   vi.stubGlobal('cancelAnimationFrame', (frame: number) => frames.delete(frame))
@@ -139,6 +143,43 @@ it('refreshes the cached content inset when Monaco relayouts the panes', () => {
     flushFrame()
     left.selectLine(4)
     expect(controls.querySelector<HTMLElement>('.dvw-diff-hunk-actions')!.style.top).toBe('87px')
+  } finally {
+    split.dispose()
+  }
+})
+
+it('smooths wheel input while preserving distance across reversals and fine deltas', () => {
+  const { split, left, right, frames, wheel, flushFrame } = setup(0, undefined, false)
+  try {
+    flushFrame()
+    wheel(120)
+    flushFrame()
+    const first = left.getScrollTop()
+    expect(first).toBeGreaterThan(90)
+    expect(first).toBeLessThan(120)
+    wheel(120)
+    flushFrame()
+    expect(left.getScrollTop() - first).toBeGreaterThan(first)
+    for (let i = 0; i < 60 && frames.size; i++) {
+      flushFrame()
+      expect(left.getScrollTop()).toBe(right.getScrollTop())
+    }
+    expect(left.getScrollTop()).toBe(240)
+    expect(frames.size).toBe(0)
+    wheel(120)
+    flushFrame()
+    const beforeReverse = right.getScrollTop()
+    wheel(-120)
+    flushFrame()
+    expect(right.getScrollTop()).toBeLessThan(beforeReverse)
+    for (let i = 0; i < 60 && frames.size; i++) flushFrame()
+    expect(right.getScrollTop()).toBe(240)
+    wheel(120)
+    flushFrame()
+    wheel(7)
+    flushFrame()
+    expect(left.getScrollTop()).toBe(367)
+    expect(right.getScrollTop()).toBe(367)
   } finally {
     split.dispose()
   }

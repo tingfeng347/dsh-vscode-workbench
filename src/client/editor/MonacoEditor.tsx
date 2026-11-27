@@ -20,6 +20,7 @@ declare global { interface Window { require?: { <T>(ids: string[], done: (module
 let loading: Promise<Monaco> | undefined
 /** Monaco chrome used by both editors so only the narrow native scrollbar remains. */
 export const WORKBENCH_EDITOR_CHROME = {
+  get smoothScrolling() { return !globalThis.matchMedia?.('(prefers-reduced-motion: reduce)').matches },
   // VS Code navigation: Ctrl+hover underlines definitions, multiple results open Peek, a single one jumps.
   definitionLinkOpensInPeek: false,
   gotoLocation: { multipleDefinitions: 'gotoAndPeek', multipleReferences: 'peek', multipleImplementations: 'peek', multipleTypeDefinitions: 'gotoAndPeek', multipleDeclarations: 'peek', alternativeDefinitionCommand: 'editor.action.goToReferences' },

@@ -1,5 +1,5 @@
 /** DSH host plugin for the VS Code workbench. */
-import { inspectReview, rejectReview, reviewFeed, reviewPath } from './review.ts'
+import { inspectReview, rejectReview, reviewFeed, reviewPath } from './host/review.ts'
 import { createReadStream, createWriteStream } from 'node:fs'
 import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises'
 import { appendFileSync, lstatSync, realpathSync } from 'node:fs'
@@ -12,30 +12,30 @@ import { pipeline } from 'node:stream/promises'
 import { spawn } from 'node:child_process'
 import chokidar from 'chokidar'
 import { WebSocket, WebSocketServer } from 'ws'
-import type { HostContext } from './context.ts'
+import type { HostContext } from './host/context.ts'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
-import { commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, type CommitModelCatalog, type CommitModelSelection, type DshChatModelCatalog } from './commit-message.ts'
-import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitPreviewFile, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, replaceSearchResults, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host.ts'
-import { attachLanguageServerSocket, installLsp, lspStatuses, uninstallLsp } from './lsp.ts'
-import { createDebugBridge } from './debug.ts'
-import { generateInlineCompletion, INLINE_PREFIX_LIMIT, INLINE_SUFFIX_LIMIT, INLINE_TIMEOUT_MS, isInlineCompletionPath } from './inline-completion.ts'
-import { officePdf, officePdfBuffer, officeStatus } from './office.ts'
-import { WorkspaceSite } from './site.ts'
-import type { GitStatus, SearchFileEdits, SearchRequest } from './types.ts'
-import { watchIgnore, workspaceWatchIgnores } from './watch-ignore.ts'
-import { isStaleManifest } from './workspace-watch.ts'
-import { createWorkspaceWatcher } from './workspace-watch-host.ts'
-import { connectSsh, disconnectSsh, getLiveSshConnection, liveSshConnections, listSshHosts, shellQuote, sshEnvironment, sshGit, sshCreateEntry, sshDeleteEntry, sshRenameEntry, sshUploadFile, sshListFiles, sshOpenFileDownload, sshOpenFilePreview, sshReadDocument, sshReadPreviewFile, sshReplaceSearchResults, sshSaveDocument, sshSearchWorkspace, sshStatus, sshTargetArguments, switchSshWorkspace } from './ssh.ts'
-import { SshChat, type ChatServices } from './ssh-chat.ts'
-import { readBinaryBody, readBody, send, sendError, stringField, authorize, WorkbenchError } from './wire.ts'
+import { commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, type CommitModelCatalog, type CommitModelSelection, type DshChatModelCatalog } from './shared/commit-message.ts'
+import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitPreviewFile, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, replaceSearchResults, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host/host.ts'
+import { attachLanguageServerSocket, installLsp, lspStatuses, uninstallLsp } from './host/lsp.ts'
+import { createDebugBridge } from './host/debug.ts'
+import { generateInlineCompletion, INLINE_PREFIX_LIMIT, INLINE_SUFFIX_LIMIT, INLINE_TIMEOUT_MS, isInlineCompletionPath } from './shared/inline-completion.ts'
+import { officePdf, officePdfBuffer, officeStatus } from './host/office.ts'
+import { WorkspaceSite } from './host/site.ts'
+import type { GitStatus, SearchFileEdits, SearchRequest } from './shared/types.ts'
+import { watchIgnore, workspaceWatchIgnores } from './host/watch/watch-ignore.ts'
+import { isStaleManifest } from './shared/workspace-watch.ts'
+import { createWorkspaceWatcher } from './host/watch/workspace-watch-host.ts'
+import { connectSsh, disconnectSsh, getLiveSshConnection, liveSshConnections, listSshHosts, shellQuote, sshEnvironment, sshGit, sshCreateEntry, sshDeleteEntry, sshRenameEntry, sshUploadFile, sshListFiles, sshOpenFileDownload, sshOpenFilePreview, sshReadDocument, sshReadPreviewFile, sshReplaceSearchResults, sshSaveDocument, sshSearchWorkspace, sshStatus, sshTargetArguments, switchSshWorkspace } from './host/ssh/ssh.ts'
+import { SshChat, type ChatServices } from './host/ssh/ssh-chat.ts'
+import { readBinaryBody, readBody, send, sendError, stringField, authorize, WorkbenchError } from './host/wire.ts'
 
-export { WorkbenchError } from './wire.ts'
-export * from './types.ts'
+export { WorkbenchError } from './host/wire.ts'
+export * from './shared/types.ts'
 export const name = 'dsh-vscode-workbench'
 
 // DSH services used by the workbench when present; resolved through optional injection, never a hard dependency.
-let dshDirectoryPicker: import('./context.ts').DirectoryPickerLike | undefined
-let dshWorkspaceRegistry: import('./context.ts').WorkspaceRegistryLike | undefined
+let dshDirectoryPicker: import('./host/context.ts').DirectoryPickerLike | undefined
+let dshWorkspaceRegistry: import('./host/context.ts').WorkspaceRegistryLike | undefined
 export const inject = ['webServer', 'sessions', 'connection', 'workingDirectory']
 
 /** The DSH service that hands workspace paths to the desktop, mirroring its own preview actions. */
@@ -437,7 +437,7 @@ export function apply(ctx: HostContext): void {
     if (typeof ctx.inject !== 'function') return
     // Optional injection: the callback runs once both services are active, and never if a profile omits them.
     const fiber = ctx.inject(['directoryPicker', 'workspaceRegistry'], (child) => {
-      const services = child as unknown as { directoryPicker: import('./context.ts').DirectoryPickerLike; workspaceRegistry: import('./context.ts').WorkspaceRegistryLike }
+      const services = child as unknown as { directoryPicker: import('./host/context.ts').DirectoryPickerLike; workspaceRegistry: import('./host/context.ts').WorkspaceRegistryLike }
       dshDirectoryPicker = services.directoryPicker
       dshWorkspaceRegistry = services.workspaceRegistry
       return () => { dshDirectoryPicker = undefined; dshWorkspaceRegistry = undefined }

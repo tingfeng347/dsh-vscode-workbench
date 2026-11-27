@@ -9,7 +9,7 @@
 
 ## 实现与验收
 
-- 实现：`src/client/monacoLocale.ts`；接入：`src/client/MonacoEditor.tsx`。
-- `tests/monaco-localization.spec.ts` 读取实际安装的中文包，验证补全时机、缺项覆盖及已有翻译保留；绑定当前包版本，升级 Monaco 后须重新核对索引。
+- 实现：`src/client/editor/monacoLocale.ts`；接入：`src/client/editor/MonacoEditor.tsx`。
+- `tests/editor/monaco-localization.spec.ts` 读取实际安装的中文包，验证补全时机、缺项覆盖及已有翻译保留；绑定当前包版本，升级 Monaco 后须重新核对索引。
 - 2026-11-18：`pnpm test` 354 项通过，`pnpm typecheck`、`pnpm build`、`git diff --check` 通过。
 - 独立 Chrome 无头页面加载实际 AMD 编辑器后，翻译空项为 0，当前可用的 126 个命令名称无纯英文遗漏；这不代表已经更新或验收本机 DSH 安装实例。

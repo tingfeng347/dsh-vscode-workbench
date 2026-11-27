@@ -1,0 +1,94 @@
+import { describe, expect, it } from 'vitest'
+import { readSource } from '../support/readSource.ts'
+
+describe('workbench settings section', () => {
+  it('registers a Workbench page in DSH settings and can open it', () => {
+    const index = readSource('src/client/index.tsx')
+    expect(index).toContain("name: 'settings.section'")
+    expect(index).toContain("id: SETTINGS_SECTION_ID, order: 40, label: '工作台'")
+    expect(index).toContain("name: 'settings.section.icon'")
+    expect(index).toContain('actions.openSection(SETTINGS_SECTION_ID)')
+  })
+
+  it('opens DSH settings from the activity bar instead of a private dialog', () => {
+    const workbench = readSource('src/client/workbench/Workbench.tsx')
+    expect(workbench).not.toContain('dvw-settings-backdrop')
+    expect(workbench).toContain('const settingsPage=<WorkbenchSettings')
+    expect(workbench).toContain('createPortal(settingsPage,settingsNode)')
+    expect(workbench).toContain("onActivate:()=>openSettings?.()")
+  })
+
+  it('keeps the workbench layout untouched while settings are open', () => {
+    const workbench = readSource('src/client/workbench/Workbench.tsx')
+    expect(workbench).toContain('const chatShown=chatVisible&&!showingDshPanel')
+    expect(workbench).toContain('const showingDshPanel=dshTabId!==undefined&&dshTabActive')
+  })
+
+  it('offers a code minimap switch backed by a persisted preference', () => {
+    const panel = readSource('src/client/settings/SettingsPanel.tsx')
+    const workbench = readSource('src/client/workbench/Workbench.tsx')
+    expect(panel).toContain('代码缩略图')
+    expect(panel).toContain('<Switch label="代码缩略图" checked={props.minimap} onChange={props.setMinimap}/>')
+    expect(panel).toContain('差异视图不受影响')
+    expect(workbench).toContain("storedValue('dvw:editor-minimap')")
+    expect(workbench).toContain("localStorage.setItem('dvw:editor-minimap'")
+    expect(workbench).toContain('minimap={minimap} setMinimap={setMinimap}')
+    expect(workbench).toContain('minimap={minimap} line={activeTab.line}')
+  })
+
+  it("reuses DSH's pill controls for buttons and choices", () => {
+    const panel = readSource('src/client/settings/SettingsPanel.tsx')
+    const styles = readSource('src/client/workbench/styles.ts')
+    expect(panel).toContain('className="dvw-set-selector"')
+    expect(panel).toContain('className="dvw-set-button"')
+    expect(styles).toContain('.dvw-set-selector{max-width:min(420px,40vw);border-radius:var(--dsw-radius-md,12px);background:var(--dsw-alias-bg-module-platform')
+    expect(styles).toContain('.dvw-set-button{height:36px;padding:0 14px;border:0;border-radius:var(--dsw-radius-md,12px)')
+  })
+
+  it("matches DSH's group labels and switch states", () => {
+    const styles = readSource('src/client/workbench/styles.ts')
+    expect(styles).toContain('.dvw-set-group-title{margin:18px 8px 4px;font-size:12px;font-weight:400;line-height:18px;color:var(--dsw-alias-label-tertiary,#81858c)}')
+    expect(styles).toContain('.dvw-set-switch[aria-checked=true]{background:var(--dsw-alias-brand-primary,#0f1115)}')
+    expect(styles).toContain('.dvw-set-switch[aria-checked=false] .dvw-set-knob{background:var(--dsw-alias-switch-thumb,#fff)}')
+  })
+
+  it('offers a default browser for links and HTML pages', () => {
+    const panel = readSource('src/client/settings/SettingsPanel.tsx')
+    expect(panel).toContain('默认浏览器')
+    expect(panel).toContain("['builtin', '内置浏览器']")
+    expect(panel).toContain("['system', '系统浏览器']")
+  })
+
+  it('places the three Trae-style review modes after the default browser setting', () => {
+    const panel = readSource('src/client/settings/SettingsPanel.tsx')
+    expect(panel.indexOf('默认浏览器')).toBeLessThan(panel.indexOf('AI 改动审阅'))
+    expect(panel).toContain("['all', '审阅全部改动']")
+    expect(panel).toContain("['latest', '审阅最新改动']")
+    expect(panel).toContain("['none', '无需审阅']")
+    expect(panel).toContain("props.reviewMode!=='none'")
+  })
+
+  it('lets the workbench open as a floating window', () => {
+    const panel = readSource('src/client/settings/SettingsPanel.tsx')
+    const workbench = readSource('src/client/workbench/Workbench.tsx')
+    expect(panel).toContain('打开方式')
+    expect(panel).toContain("['current', '当前窗口']")
+    expect(panel).toContain("['floating', '浮动窗口']")
+    expect(panel).toContain('dvw-set-group-title">窗口')
+    expect(panel).toContain('重置位置与大小')
+    expect(panel).toContain("props.openMode==='floating'")
+    expect(workbench).toContain("const floating=openMode==='floating'")
+    expect(workbench).toContain('data-dvw-float={floating||undefined}')
+    expect(workbench).toContain('resetFloatGeometry')
+    expect(workbench).toContain('requestFullscreen')
+    expect(workbench).toContain('fullscreenchange')
+    expect(readSource('src/client/workbench/floatWindow.ts')).toContain("OPEN_MODE_KEY = 'dvw:open-mode'")
+  })
+
+  it('leaves browser tabs out of the activity bar', () => {
+    const workbench = readSource('src/client/workbench/Workbench.tsx')
+    expect(workbench).not.toContain("id:'browser',label:'新建浏览器'")
+    expect(workbench).toContain("const ACTIVITY_VIEW_IDS = ['explorer','search','git','ssh','debug','terminal','chat'] as const")
+    expect(workbench).not.toContain("label:'新建浏览器'")
+  })
+})

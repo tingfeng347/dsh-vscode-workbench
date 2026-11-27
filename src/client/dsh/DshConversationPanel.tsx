@@ -1,3 +1,4 @@
+import { scrollNavigationLeft } from '../ui/navigationScroll.ts'
 import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { placeDshSurface, watchDshPlacement } from './dshPlacement.ts'
@@ -209,6 +210,7 @@ export function DshReviewActions(props: {
 }) {
   const [host, setHost] = useState<HTMLElement>()
   const fileList = useRef<HTMLDivElement>(null)
+  const pageTarget = useRef<number>()
   const [fileScroll, setFileScroll] = useState({ left: false, right: false })
   const updateFileScroll = useCallback(() => {
     const list = fileList.current
@@ -221,7 +223,9 @@ export function DshReviewActions(props: {
     const list = fileList.current
     if (list === null) return
     const distance = Math.max(120, Math.round(list.clientWidth * 0.75))
-    list.scrollLeft = Math.max(0, Math.min(list.scrollWidth - list.clientWidth, list.scrollLeft + direction * distance))
+    const left = Math.max(0, Math.min(list.scrollWidth - list.clientWidth, (pageTarget.current ?? list.scrollLeft) + direction * distance))
+    pageTarget.current = left
+    scrollNavigationLeft(list, left)
     updateFileScroll()
   }
   useLayoutEffect(() => {
@@ -260,8 +264,12 @@ export function DshReviewActions(props: {
     const list = fileList.current
     if (list === null) return
     updateFileScroll()
+    const resetTarget = () => { pageTarget.current = undefined }
+    list.addEventListener('scrollend', resetTarget)
+    list.addEventListener('pointerdown', resetTarget)
     list.addEventListener('scroll', updateFileScroll, { passive: true })
     const wheel = (event: WheelEvent) => {
+      resetTarget()
       if (Math.abs(event.deltaX) >= Math.abs(event.deltaY) || list.scrollWidth <= list.clientWidth) return
       event.preventDefault()
       list.scrollLeft += event.deltaY
@@ -271,6 +279,9 @@ export function DshReviewActions(props: {
     resize?.observe(list)
     window.addEventListener('resize', updateFileScroll)
     return () => {
+      resetTarget()
+      list.removeEventListener('scrollend', resetTarget)
+      list.removeEventListener('pointerdown', resetTarget)
       list.removeEventListener('scroll', updateFileScroll)
       list.removeEventListener('wheel', wheel)
       resize?.disconnect()

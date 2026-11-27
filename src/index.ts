@@ -15,7 +15,8 @@ import { WebSocket, WebSocketServer } from 'ws'
 import type { HostContext } from './host/context.ts'
 import type { LlmRuntime } from '@deepseek-ai/dsh-llm'
 import { commitCatalogFromDsh, firstSupportedCommitModel, generateCommitMessage, loadCommitModelCatalog, loadCommitProviderModels, normalizeCommitModelSelection, normalizeCommitPreferences, type CommitModelCatalog, type CommitModelSelection, type DshChatModelCatalog } from './shared/commit-message.ts'
-import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitPreviewFile, gitStatus, listFiles, monacoAsset, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, replaceSearchResults, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host/host.ts'
+import { codiconAsset, createEntry, cwdFor, deleteEntry, fileIconAsset, gitAction, gitBlameLine, gitBlameRange, gitCommitContext, gitPreviewFile, gitStatus, listFiles, openWorkspaceFromPicker, pdfWorkerAsset, xlsxAsset, readDocument, projectSources, renameEntry, saveDocument, workspaceDownloadFile, replaceSearchResults, searchWorkspace, uploadFile, workspacePath, workspacePreviewFile } from './host/host.ts'
+import { readMonacoAsset } from './host/monacoAsset.ts'
 import { attachLanguageServerSocket, installLsp, lspStatuses, uninstallLsp } from './host/lsp.ts'
 import { createDebugBridge } from './host/debug.ts'
 import { generateInlineCompletion, INLINE_PREFIX_LIMIT, INLINE_SUFFIX_LIMIT, INLINE_TIMEOUT_MS, isInlineCompletionPath } from './shared/inline-completion.ts'
@@ -667,9 +668,9 @@ export function apply(ctx: HostContext): void {
       if (!authorize(req, res, ctx.connection)) return
       try {
         const raw = decodeURIComponent(new URL(req.url ?? '/', 'http://dsh.local').pathname.slice('/dsh-vscode/monaco/'.length))
-        const asset = monacoAsset(raw)
+        const asset = await readMonacoAsset(raw)
         res.writeHead(200, { 'content-type': asset.type, 'cache-control': 'public, max-age=31536000, immutable' })
-        res.end(await readFile(asset.path))
+        res.end(asset.body)
       } catch (error) { sendError(res, error) }
     },
     auth: 'required',

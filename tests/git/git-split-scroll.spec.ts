@@ -5,16 +5,22 @@ import { connectGitSplit, type GitSplitReviewActions } from '../../src/client/gi
 
 afterEach(() => {
   vi.useRealTimers()
+  vi.restoreAllMocks()
   vi.unstubAllGlobals()
 })
 
-function setup(addedLines = 0, reviewActions?: GitSplitReviewActions) {
+function setup(addedLines = 0, reviewActions?: GitSplitReviewActions, reducedMotion = true) {
   const frames = new Map<number, FrameRequestCallback>()
+  let contentTop = 0
+  let now = performance.now()
+  if (!reducedMotion) vi.spyOn(performance, 'now').mockImplementation(() => now)
+  vi.stubGlobal('matchMedia', () => ({ matches: reducedMotion }))
   let id = 0
   const flushFrame = () => {
     const current = [...frames.values()]
     frames.clear()
-    current.forEach(callback => callback(0))
+    now += 16
+    current.forEach(callback => callback(now))
   }
   vi.stubGlobal('requestAnimationFrame', (callback: FrameRequestCallback) => { frames.set(++id, callback); return id })
   vi.stubGlobal('cancelAnimationFrame', (frame: number) => frames.delete(frame))
@@ -27,8 +33,12 @@ function setup(addedLines = 0, reviewActions?: GitSplitReviewActions) {
 
   const fakePane = (lines: number) => {
     const node = document.createElement('div')
+    const scroller = document.createElement('div')
+    scroller.className = 'monaco-scrollable-element'
+    node.append(scroller)
     root.append(node)
     let notifyScroll = (_top: number) => {}
+    let notifyLayout = () => {}
     let mouseHandler: ((event: editor.IEditorMouseEvent) => void) | undefined
     let leaveHandler: (() => void) | undefined
     let top = 0
@@ -44,7 +54,7 @@ function setup(addedLines = 0, reviewActions?: GitSplitReviewActions) {
       render: vi.fn(),
       getTopForLineNumber: (line: number) => (line - 1) * 20,
       getBottomForLineNumber: (line: number) => line * 20,
-      onDidLayoutChange: subscribe,
+      onDidLayoutChange(handler: () => void) { notifyLayout = handler; return subscribe() },
       onDidContentSizeChange: subscribe,
       onMouseDown(handler: (event: editor.IEditorMouseEvent) => void) {
         mouseHandler = handler
@@ -66,6 +76,7 @@ function setup(addedLines = 0, reviewActions?: GitSplitReviewActions) {
         return subscribe()
       },
       nativeScroll(next: number) { top = next; notifyScroll(top) },
+      layout() { notifyLayout() },
       setHiddenAreas() {},
       changeViewZones() {},
       createDecorationsCollection: () => ({ set() {} }),
@@ -86,12 +97,93 @@ function setup(addedLines = 0, reviewActions?: GitSplitReviewActions) {
   const left = fakePane(200), right = fakePane(200 + addedLines)
   for (const pane of [left, right]) {
     vi.spyOn(pane.getContainerDomNode(), 'getBoundingClientRect').mockReturnValue(new DOMRect(0, 0, 400, 160))
+    vi.spyOn(pane.getDomNode().querySelector('.monaco-scrollable-element')!, 'getBoundingClientRect')
+      .mockImplementation(() => new DOMRect(0, contentTop, 400, 160))
   }
   const split = connectGitSplit(root, [left, right] as unknown as [editor.IStandaloneCodeEditor, editor.IStandaloneCodeEditor],
     ribbons, overview, marks, document.createElement('div'), controls, () => reviewActions)
   const wheel = (deltaY: number) => root.dispatchEvent(new WheelEvent('wheel', { deltaY, cancelable: true }))
-  return { split, left, right, ribbons, marks, controls, frames, wheel, flushFrame }
+  return { split, left, right, ribbons, marks, controls, frames, wheel, flushFrame, setContentTop: (top: number) => { contentTop = top } }
 }
+
+it('keeps editor geometry reads out of scroll frames after Monaco renders', () => {
+  const { split, left, right, wheel, flushFrame } = setup()
+  try {
+    split.update([{ originalStartLineNumber: 4, originalEndLineNumber: 4,
+      modifiedStartLineNumber: 4, modifiedEndLineNumber: 4, charChanges: undefined }], false)
+    flushFrame()
+    const metrics = [left, right].flatMap(pane => [pane.getDomNode().getBoundingClientRect,
+      pane.getDomNode().querySelector('.monaco-scrollable-element')!.getBoundingClientRect])
+    metrics.forEach(metric => vi.mocked(metric).mockClear())
+
+    wheel(10)
+    flushFrame()
+    expect(left.render).toHaveBeenCalled()
+    expect(right.render).toHaveBeenCalled()
+    left.nativeScroll(30)
+    flushFrame()
+    metrics.forEach(metric => expect(metric).not.toHaveBeenCalled())
+  } finally {
+    split.dispose()
+  }
+})
+
+it('refreshes the cached content inset when Monaco relayouts the panes', () => {
+  const { split, left, controls, flushFrame, setContentTop } = setup(0, { onAsk: vi.fn() })
+  try {
+    split.update([{ originalStartLineNumber: 4, originalEndLineNumber: 4,
+      modifiedStartLineNumber: 4, modifiedEndLineNumber: 4, charChanges: undefined }], false)
+    flushFrame()
+    const group = controls.querySelector<HTMLElement>('.dvw-diff-hunk-actions')!
+    left.selectLine(4)
+    expect(group.style.top).toBe('70px')
+
+    setContentTop(17)
+    left.layout()
+    flushFrame()
+    left.selectLine(4)
+    expect(controls.querySelector<HTMLElement>('.dvw-diff-hunk-actions')!.style.top).toBe('87px')
+  } finally {
+    split.dispose()
+  }
+})
+
+it('smooths wheel input while preserving distance across reversals and fine deltas', () => {
+  const { split, left, right, frames, wheel, flushFrame } = setup(0, undefined, false)
+  try {
+    flushFrame()
+    wheel(120)
+    flushFrame()
+    const first = left.getScrollTop()
+    expect(first).toBeGreaterThan(90)
+    expect(first).toBeLessThan(120)
+    wheel(120)
+    flushFrame()
+    expect(left.getScrollTop() - first).toBeGreaterThan(first)
+    for (let i = 0; i < 60 && frames.size; i++) {
+      flushFrame()
+      expect(left.getScrollTop()).toBe(right.getScrollTop())
+    }
+    expect(left.getScrollTop()).toBe(240)
+    expect(frames.size).toBe(0)
+    wheel(120)
+    flushFrame()
+    const beforeReverse = right.getScrollTop()
+    wheel(-120)
+    flushFrame()
+    expect(right.getScrollTop()).toBeLessThan(beforeReverse)
+    for (let i = 0; i < 60 && frames.size; i++) flushFrame()
+    expect(right.getScrollTop()).toBe(240)
+    wheel(120)
+    flushFrame()
+    wheel(7)
+    flushFrame()
+    expect(left.getScrollTop()).toBe(367)
+    expect(right.getScrollTop()).toBe(367)
+  } finally {
+    split.dispose()
+  }
+})
 
 it('coalesces wheel events and reuses visible ribbons in the scroll frame', () => {
   const { split, left, right, ribbons, marks, frames, wheel, flushFrame } = setup()

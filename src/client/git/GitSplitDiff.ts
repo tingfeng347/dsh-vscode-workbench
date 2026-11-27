@@ -122,6 +122,7 @@ export function connectGitSplit(
   let folded = true
   let position = 0
   let height = 0
+  let contentTop = 0
   let max = 0
   let width = 0
   let paneWidths: Pair<number> = [0, 0]
@@ -137,6 +138,9 @@ export function connectGitSplit(
   let hideTimer: number | undefined
   let geometryDirty = true
   let wheelDelta = 0
+  let wheelRemainder = 0
+  let lastWheelFrame = 0
+  const reducedMotion = globalThis.matchMedia?.('(prefers-reduced-motion: reduce)')
   let originalDrivesScroll = false
   let resumingParallax = false
   const appliedTop: Pair<number> = [0,0]
@@ -237,12 +241,6 @@ export function connectGitSplit(
     for (const group of actionGroups.values()) group.hidden = true
     const mid = width / 2
     const [left, right] = appliedTop
-    const contentTop = Math.max(0, ...sides.map(side => {
-      const pane = side.getDomNode()
-      if (pane === null) return 0
-      const scroller = pane.querySelector<HTMLElement>('.monaco-scrollable-element')
-      return scroller === null ? 0 : scroller.getBoundingClientRect().top - pane.getBoundingClientRect().top
-    }))
     let low = 0, high = plots.length
     // A band can cross the viewport even when its two ends are both offscreen.
     while (low < high) {
@@ -307,13 +305,22 @@ export function connectGitSplit(
 
   function schedule() {
     if (frame !== 0) return
-    frame = requestAnimationFrame(()=>{
+    frame = requestAnimationFrame(now=>{
       frame = 0
       if (geometryDirty) rebuildGeometry()
       const delta = wheelDelta
       wheelDelta = 0
-      applyScroll(delta)
+      // A wheel notch adds travel to one shared timeline. Closely spaced notches
+      // build speed, and the remaining distance decays at the same rate on 60/120 Hz.
+      const directPosition = Math.max(0, Math.min(max, position + delta))
+      const remaining = Math.max(-directPosition, Math.min(max - directPosition, wheelRemainder))
+      const elapsed = Math.max(0, now - lastWheelFrame)
+      const step = Math.abs(remaining) < 0.5 ? remaining : remaining * -Math.expm1(-elapsed / 24)
+      wheelRemainder = remaining - step
+      lastWheelFrame = now
+      applyScroll(delta + step)
       draw()
+      if (wheelRemainder !== 0) schedule()
     })
   }
 
@@ -378,7 +385,7 @@ export function connectGitSplit(
   function move(target: number) {
     originalDrivesScroll = false
     resumingParallax = false
-    wheelDelta = 0
+    wheelDelta = wheelRemainder = 0
     position = Math.max(0, Math.min(max, target))
     schedule()
   }
@@ -387,6 +394,14 @@ export function connectGitSplit(
     geometryDirty = false
     height = Math.min(...sides.map(side=>side.getLayoutInfo().height))
     paneWidths = [hosts[0].getBoundingClientRect().width, hosts[1].getBoundingClientRect().width]
+    // The scroller's inset is layout geometry, independent of its scroll offset. Read it
+    // before applyScroll renders Monaco's token DOM, which would force layout here per frame.
+    contentTop = Math.max(0, ...sides.map(side => {
+      const pane = side.getDomNode()
+      if (pane === null) return 0
+      const scroller = pane.querySelector<HTMLElement>('.monaco-scrollable-element')
+      return scroller === null ? 0 : scroller.getBoundingClientRect().top - pane.getBoundingClientRect().top
+    }))
     points = [{at:0,offsets:[0,0]}]
     plots = []
     selectedPlot = undefined
@@ -480,7 +495,7 @@ export function connectGitSplit(
     if (event.defaultPrevented || event.ctrlKey || event.shiftKey || Math.abs(event.deltaY) < Math.abs(event.deltaX) || event.deltaY === 0) return
     // Let Monaco scroll the original directly. Its scroll event drives only the follower.
     if (sides[0].getDomNode()?.contains(event.target as Node)) {
-      wheelDelta = 0
+      wheelDelta = wheelRemainder = 0
       return
     }
     if (originalDrivesScroll) resumingParallax = true
@@ -488,7 +503,21 @@ export function connectGitSplit(
     event.preventDefault()
     event.stopPropagation()
     const unit = event.deltaMode === 1 ? 20 : event.deltaMode === 2 ? height : 1
-    wheelDelta += event.deltaY * unit
+    const delta = event.deltaY * unit
+    // Fine pixel deltas usually include the touchpad driver's own inertia.
+    if (reducedMotion?.matches || (event.deltaMode === 0 && (Math.abs(delta) < 40 || !Number.isInteger(delta)))) {
+      wheelDelta += wheelRemainder + delta
+      wheelRemainder = 0
+    } else {
+      if (Math.sign(wheelRemainder) !== Math.sign(delta)) {
+        wheelDelta += wheelRemainder
+        wheelRemainder = 0
+        lastWheelFrame = performance.now()
+      }
+      // Apply most travel on the first paint; only the small tail needs easing.
+      wheelDelta += delta * 0.65
+      wheelRemainder += delta * 0.35
+    }
     schedule()
   }
 
@@ -508,7 +537,7 @@ export function connectGitSplit(
       if (!event.scrollTopChanged || !points.length || event.scrollTop === appliedTop[index]) return
       if (index === 0) {
         originalDrivesScroll = true
-        wheelDelta = 0
+        wheelDelta = wheelRemainder = 0
         if (!geometryDirty) {
           applyScroll(0)
           draw()

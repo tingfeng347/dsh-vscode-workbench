@@ -2,6 +2,7 @@
 import { readFileSync } from 'node:fs'
 import { runInNewContext } from 'node:vm'
 import { afterEach, expect, it, vi } from 'vitest'
+import { MONACO_ASSET_BASE } from '../../src/shared/monacoAssets.ts'
 
 const bundle = readFileSync('node_modules/monaco-editor/min/vs/nls.messages.zh-cn.js', 'utf8')
 const globals = window as unknown as { _VSCODE_NLS_MESSAGES?: Array<string | null> }
@@ -35,6 +36,20 @@ it('loads a complete Chinese message table before Monaco registers its commands'
   const { loadMonaco } = await import('../../src/client/editor/MonacoEditor.tsx')
   await expect(loadMonaco()).resolves.toBe(window.monaco)
   expect(register).toHaveBeenCalledWith({ id: 'vue', extensions: ['.vue'], aliases: ['Vue'] })
+  expect(loader.config).toHaveBeenCalledWith(expect.objectContaining({
+    paths: { vs: new URL(`${MONACO_ASSET_BASE}vs`, location.href).href },
+  }))
+})
+
+it('loads the AMD loader from the revised path when an old immutable asset may be cached', async () => {
+  const { loadMonaco } = await import('../../src/client/editor/MonacoEditor.tsx')
+  const loading = loadMonaco()
+  const script = document.head.querySelector<HTMLScriptElement>(`script[src="${MONACO_ASSET_BASE}vs/loader.js"]`)
+  expect(script).not.toBeNull()
+  const failed = expect(loading).rejects.toThrow('Monaco 编辑器加载失败')
+  script!.dispatchEvent(new Event('error'))
+  await failed
+  expect(script!.isConnected).toBe(false)
 })
 
 it('translates hard-coded inline-edit labels without replacing action behavior', async () => {

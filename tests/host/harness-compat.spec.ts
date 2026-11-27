@@ -14,6 +14,7 @@ import { WebSocket } from 'ws'
 import { apply, inject } from '../../src/index.ts'
 import type { HostContext, WorkbenchWebServer } from '../../src/host/context.ts'
 import { mainViewSession } from '../../src/client/dsh/session.ts'
+import { MONACO_ASSET_BASE } from '../../src/shared/monacoAssets.ts'
 
 const cleanup: Array<() => void | Promise<void>> = []
 afterEach(async () => { for (const dispose of cleanup.splice(0).reverse()) await dispose() })
@@ -76,6 +77,11 @@ describe('Harness 0.2 host integration', () => {
     cleanup.push(() => new Promise<void>((resolve, reject) => request.close(error => error ? reject(error) : resolve())))
     const base = `http://127.0.0.1:${(request.address() as AddressInfo).port}`
     expect((await fetch(`${base}/dsh-vscode/codicons/codicon.ttf`)).status).toBe(200)
+    const monaco = await fetch(`${base}${MONACO_ASSET_BASE}vs/editor/editor.main.js`)
+    expect(monaco.status).toBe(200)
+    expect(monaco.headers.get('content-type')).toBe('text/javascript')
+    expect(monaco.headers.get('cache-control')).toContain('immutable')
+    expect(await monaco.text()).toContain('_renderSectionHeaders(N){if(this._model.getSectionHeaderDecorationsInViewport(N.startLineNumber,N.endLineNumber).length===0)return;const')
     expect((await fetch(`${base}/dsh-vscode/api/workspace`, {
       method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ sessionId: 'missing' }),
     })).status).toBe(404)

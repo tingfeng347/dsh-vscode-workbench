@@ -218,6 +218,8 @@ it('keeps overflowed project files reachable with visible scroll controls', asyn
   })
 
   const list = document.querySelector<HTMLElement>('.dvw-review-composer-files')!
+  const scrollTo = vi.fn(({ left }: ScrollToOptions) => { list.scrollLeft = left ?? 0 })
+  Object.defineProperty(list, 'scrollTo', { value: scrollTo })
   Object.defineProperty(list, 'clientWidth', { configurable: true, value: 220 })
   Object.defineProperty(list, 'scrollWidth', { configurable: true, value: 720 })
   await act(async () => list.dispatchEvent(new Event('scroll')))
@@ -228,7 +230,9 @@ it('keeps overflowed project files reachable with visible scroll controls', asyn
     return button!
   })
   await act(async () => next.click())
-  expect(list.scrollLeft).toBeGreaterThan(0)
+  expect(scrollTo).toHaveBeenLastCalledWith({ left: 165, behavior: 'smooth' })
+  await act(async () => next.click())
+  expect(scrollTo).toHaveBeenLastCalledWith({ left: 330, behavior: 'smooth' })
   expect(document.querySelector('.dvw-review-composer-scroll[data-direction=previous]')).not.toBeNull()
   await act(async () => root.unmount())
 })

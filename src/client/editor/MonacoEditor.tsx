@@ -13,6 +13,7 @@ import { isIndexedModel, projectModelPath } from './typescriptProject.ts'
 import { isLspPreviewModel } from '../lsp/lspWorkspace.ts'
 import { completeMonacoChineseMessages, localizeMonacoActions } from './monacoLocale.ts'
 import { registerInlineCompletion, type InlineCompletionSettings } from './inlineCompletion.ts'
+import { MONACO_ASSET_BASE } from '../../shared/monacoAssets.ts'
 
 type Monaco = typeof import('monaco-editor')
 declare global { interface Window { require?: { <T>(ids: string[], done: (module: T) => void, error?: (cause: unknown) => void): void; config(value: unknown): void }; monaco?: Monaco } }
@@ -184,7 +185,7 @@ export function loadMonaco(): Promise<Monaco> {
     const start = () => {
       const loader = window.require
       if (loader === undefined) return reject(new Error('Monaco 编辑器加载器不可用'))
-      const base = new URL('/dsh-vscode/monaco/', location.href).href
+      const base = new URL(MONACO_ASSET_BASE, location.href).href
       window.MonacoEnvironment = { getWorkerUrl: () => URL.createObjectURL(new Blob([monacoWorkerBootstrap(base)], { type: 'text/javascript' })) }
       loader.config({ paths: { vs: `${base}vs` }, 'vs/nls': { availableLanguages: { '*': 'zh-cn' } } })
       loader(['vs/nls.messages.zh-cn'], () => {
@@ -207,7 +208,7 @@ export function loadMonaco(): Promise<Monaco> {
       }, reject)
     }
     if (window.require !== undefined) { start(); return }
-    const script = document.createElement('script'); script.src = '/dsh-vscode/monaco/vs/loader.js'; script.onload = start; script.onerror = () => { script.remove(); reject(new Error('Monaco 编辑器加载失败')) }; document.head.append(script)
+    const script = document.createElement('script'); script.src = `${MONACO_ASSET_BASE}vs/loader.js`; script.onload = start; script.onerror = () => { script.remove(); reject(new Error('Monaco 编辑器加载失败')) }; document.head.append(script)
   }).catch(error => { loading = undefined; throw error })
   return loading
 }

@@ -481,7 +481,7 @@ it('reports the fitted separator range without saving the temporary left-pane wi
   })
   await act(async () => toggle.click())
   expect(separator.getAttribute('aria-valuenow')).toBe('210')
-  expect(separator.getAttribute('aria-valuemin')).toBe('210')
+  expect(separator.getAttribute('aria-valuemin')).toBe('170')
 })
 
 

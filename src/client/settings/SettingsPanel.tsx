@@ -35,6 +35,8 @@ export interface WorkbenchSettingsProps {
   setPrimarySideVisible(value: boolean): void
   chatVisible: boolean
   setChatVisible(value: boolean): void
+  conversationNavigation: boolean
+  setConversationNavigation(value: boolean): void
   statusVisible: boolean
   setStatusVisible(value: boolean): void
   markdownView: MarkdownView
@@ -322,6 +324,9 @@ export function WorkbenchSettings(props: WorkbenchSettingsProps) {
       </Row>
       <Row title="显示 DSH 对话栏" description="右侧的 DSH 对话面板，可以随时用 Ctrl+Alt+B 切换。">
         <Switch label="显示 DSH 对话栏" checked={props.chatVisible} onChange={props.setChatVisible}/>
+      </Row>
+      <Row title="对话轮次导航" description="在 DSH 对话左侧显示轮次刻度，悬停预览问题与回复，点击跳转到对应轮次。">
+        <Switch label="对话轮次导航" checked={props.conversationNavigation} onChange={props.setConversationNavigation}/>
       </Row>
       <Row title="显示底部状态栏">
         <Switch label="显示底部状态栏" checked={props.statusVisible} onChange={props.setStatusVisible}/>

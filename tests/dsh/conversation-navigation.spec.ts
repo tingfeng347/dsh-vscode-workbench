@@ -92,6 +92,49 @@ it('adapts the navigation rail when its existing turn button hydrates', async ()
   expect(rail.parentElement?.getAttribute('data-dvw-turn-navigation-slot')).toBe('on')
 })
 
+it.each(['data-phase', 'data-dvw-native-conversation'])(
+  'adapts an already-mounted rail when the embedded conversation activates via %s',
+  async attribute => {
+    document.body.innerHTML = '<section id="conversation"><div data-conversation-scroll><div><div><nav aria-label="轮次导航"><div><button data-index="0" aria-label="跳转到第 1 轮"></button></div></nav></div><div><div>对话</div></div></div></div></section>'
+    cleanup.push(installConversationNavigation(true))
+    const root = document.getElementById('conversation')!
+    const rail = root.querySelector('nav')!
+    expect(rail.hasAttribute('data-dvw-turn-navigation')).toBe(false)
+
+    root.setAttribute(attribute, attribute === 'data-phase' ? 'active' : 'visible')
+    await settle()
+
+    expect(rail.getAttribute('data-dvw-turn-navigation')).toBe('on')
+    expect(rail.parentElement?.getAttribute('data-dvw-turn-navigation-slot')).toBe('on')
+  },
+)
+
+it('refreshes the native rail layout when the right sidebar receives its first size', async () => {
+  let notifyResize: ResizeObserverCallback | undefined
+  const observed: Element[] = []
+  class TestResizeObserver {
+    constructor(callback: ResizeObserverCallback) { notifyResize = callback }
+    observe(target: Element) { observed.push(target) }
+    unobserve() {}
+    disconnect() {}
+  }
+  vi.stubGlobal('ResizeObserver', TestResizeObserver)
+  document.body.innerHTML = '<div data-rightbar-col><section data-phase="active"><div data-conversation-scroll><div data-rail-slot><nav aria-label="轮次导航"><button data-index="0" aria-label="跳转到第 1 轮"></button><button data-index="1" aria-label="跳转到第 2 轮"></button></nav></div><div data-composer-seat></div></div></section></div>'
+  const scroller = document.querySelector<HTMLElement>('[data-conversation-scroll]')!
+  Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 360 })
+  Object.defineProperty(document.querySelector('[data-composer-seat]')!, 'offsetHeight', { value: 96 })
+
+  cleanup.push(installConversationNavigation(true))
+  expect(observed).toContain(document.querySelector('[data-rightbar-col]'))
+  expect(observed).toContain(scroller)
+  notifyResize?.([], {} as ResizeObserver)
+  await settle()
+
+  expect(scroller.style.getPropertyValue('--dsh-composer-height')).toBe('96px')
+  expect(scroller.style.getPropertyValue('--dsh-conversation-viewport-height')).toBe('360px')
+  expect(document.querySelector('nav')?.getAttribute('data-dvw-turn-navigation')).toBe('on')
+})
+
 it('does not rescan navigation during streamed text updates or mark virtualization', async () => {
   document.body.innerHTML = conversation()
   cleanup.push(installConversationNavigation(true))

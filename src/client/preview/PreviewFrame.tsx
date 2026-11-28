@@ -18,7 +18,7 @@ export function PreviewFrame({ src, path, children }: { src: string; path: strin
   return <section className="dvw-document-preview" aria-label={name + ' 预览'}>
     <header className="dvw-preview-header">
       <span className="dvw-preview-path" title={path}>{path}</span>
-      {local && sessionId !== null && <OpenWith key={JSON.stringify([sessionId, path])} sessionId={sessionId} path={path}/>}
+      {local && sessionId !== null && <OpenWith key={JSON.stringify([sessionId, path])} sessionId={sessionId} path={path} compact/>}
       <a className="dvw-icon" href={src} download={name} aria-label="下载文件" title="下载文件"><Icon name="cloud-download"/></a>
     </header>
     <div className="dvw-preview-body">{children}</div>

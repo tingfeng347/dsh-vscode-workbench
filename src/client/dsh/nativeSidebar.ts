@@ -12,6 +12,11 @@ const fullscreenFallbacks = new WeakMap<NativeSidebarApi, Set<string>>()
 
 interface DockLayout { width: number; fullscreen: boolean; pushAvailable: boolean }
 
+/** Expand the official sidebar without opening or selecting any sidebar tab. */
+export function openNativeSidebarOnly(sidebar: { shown: boolean; toggle(): void }): void {
+  if (!sidebar.shown) sidebar.toggle()
+}
+
 function findPanel(sessionId: string, open = false) {
   return Array.from(document.querySelectorAll<HTMLElement>(panelSelector)).find(node =>
     node.dataset.sidebarRightSession === sessionId && node.closest('[hidden]') === null
@@ -117,6 +122,9 @@ export function useNativeSidebar(sidebar: NativeSidebarApi | undefined, sessionI
   const [requestedSession, setRequestedSession] = useState<string>()
   const [dock, setDock] = useState<(DockLayout & { sessionId: string })>()
   const dismiss = useCallback(() => setRequestedSession(undefined), [])
+  const present = useCallback(() => {
+    if (ready) setRequestedSession(sessionId)
+  }, [ready, sessionId])
 
   useLayoutEffect(() => {
     if (!visible || requestedSession !== sessionId) setRequestedSession(undefined)
@@ -178,7 +186,7 @@ export function useNativeSidebar(sidebar: NativeSidebarApi | undefined, sessionI
       }
     }
   }
-  return { ready, shown, fullscreen: shown && dock.fullscreen, width: shown ? dock.width : 0, toggle, dismiss }
+  return { ready, shown, fullscreen: shown && dock.fullscreen, width: shown ? dock.width : 0, toggle, present, dismiss }
 }
 
 export function fitNativeSidebarLayout({ viewportWidth, dockWidth, sideWidth, chatWidth, minChatWidth, chatVisible, sideVisible, editorVisible }: {
@@ -189,7 +197,9 @@ export function fitNativeSidebarLayout({ viewportWidth, dockWidth, sideWidth, ch
   // Open content always retains a quarter of the editor/chat area; empty editors yield it all.
   const minContentWidth = editorVisible ? Math.ceil(minChatWidth * 4 / 3) : minChatWidth
   const chatFits = available >= minContentWidth
-  const contentReserve = chatVisible && chatFits ? minContentWidth : editorVisible ? 100 : 0
+  const contentReserve = chatVisible && chatFits
+    ? minContentWidth
+    : editorVisible ? sideVisible ? 100 : 0 : 0
   const sideLimit = Math.max(0, available - contentReserve)
   const fittedSideWidth = sideVisible ? Math.min(sideWidth, sideLimit) : 0
   const contentWidth = Math.max(0, available - fittedSideWidth)

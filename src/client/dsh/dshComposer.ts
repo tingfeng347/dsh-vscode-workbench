@@ -75,9 +75,12 @@ export function referenceSeparator(draft: string, reference: string): string {
 const COMPOSER = '[data-composer-input],textarea'
 
 /** The DSH composer input, preferring the copy shown in the workbench's right column. */
-export function findDshComposer(documentRoot: Document = document): HTMLElement | null {
-  return documentRoot.querySelector<HTMLElement>(`[data-dvw-conversation-panel] [data-composer-card] :is(${COMPOSER})`)
-    ?? documentRoot.querySelector<HTMLElement>(`[data-composer-card] :is(${COMPOSER})`)
+export function findDshComposer(root: Document | HTMLElement = document): HTMLElement | null {
+  const selector = `[data-composer-card] :is(${COMPOSER})`
+  return root.querySelector<HTMLElement>(`[data-dvw-conversation-panel] ${selector}`)
+    ?? root.querySelector<HTMLElement>(`[data-dvw-native-conversation="visible"] ${selector}`)
+    ?? Array.from(root.querySelectorAll<HTMLElement>(selector)).find(input =>
+      input.closest('[hidden], [inert], [data-dvw-native-conversation="hidden"]') === null) ?? null
 }
 
 function composerEditable(input: HTMLElement): boolean {
@@ -157,9 +160,10 @@ function insertLexicalReference(input: LexicalComposerElement, reference: DshRef
 }
 
 /** Append plain text or one native DSH file chip so the official input machine owns the edit. */
-export async function insertIntoDshComposer(reference: string | DshReferenceInsert, documentRoot: Document = document): Promise<boolean> {
-  const input = findDshComposer(documentRoot)
+export async function insertIntoDshComposer(reference: string | DshReferenceInsert, root: Document | HTMLElement = document): Promise<boolean> {
+  const input = findDshComposer(root)
   if (input === null || !composerEditable(input)) return false
+  const documentRoot = input.ownerDocument
   const fallback = typeof reference === 'string' ? reference : reference.fallback
   const text = referenceSeparator(composerText(input), fallback) + (fallback.endsWith('\n') ? fallback : `${fallback} `)
   input.focus()
@@ -178,6 +182,7 @@ export async function insertIntoDshComposer(reference: string | DshReferenceInse
   selection?.removeAllRanges(); selection?.addRange(range)
   // Lexical adopts the DOM caret on selectionchange; paste only after it has.
   await nextFrame()
+  if (!input.isConnected || documentRoot.activeElement !== input) return false
   // Lexical's paste handler keeps line breaks and records one undo step; insertText is the fallback.
   if (typeof DataTransfer === 'function' && typeof ClipboardEvent === 'function') {
     const data = new DataTransfer(); data.setData('text/plain', text)

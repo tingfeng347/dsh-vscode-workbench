@@ -5,10 +5,17 @@ import { resolve } from 'node:path'
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { expect, it, vi } from 'vitest'
-import { useNativeSidebar } from '../../src/client/dsh/nativeSidebar.ts'
+import { openNativeSidebarOnly, useNativeSidebar } from '../../src/client/dsh/nativeSidebar.ts'
 import { installStyles } from '../../src/client/workbench/styles.ts'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+
+it('opens only the native sidebar and leaves an already-open sidebar unchanged', () => {
+  const toggle = vi.fn()
+  openNativeSidebarOnly({ shown: false, toggle })
+  openNativeSidebarOnly({ shown: true, toggle })
+  expect(toggle).toHaveBeenCalledOnce()
+})
 
 // Keep the host's real transition declarations in the cascade. Only unwrap CSS
 // Modules' global selectors; jsdom does not simulate animation frames themselves.

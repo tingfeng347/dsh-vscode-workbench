@@ -3,10 +3,32 @@ import { useCallback, useLayoutEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { placeDshSurface, watchDshPlacement } from './dshPlacement.ts'
 import type { WorkbenchColorScheme } from '../workbench/service.ts'
+import { CONVERSATION_ACTION_SETTINGS_EVENT, getConversationActionVisibility } from './conversationActionVisibility.ts'
 
 export const CONVERSATION_OPEN_ICON = 'dsh-vscode-workbench.open-conversation'
 export const CONVERSATION_CLOSE_ICON = 'dsh-vscode-workbench.close-conversation'
 export const NATIVE_SIDEBAR_OPEN_ICON = 'dsh-vscode-workbench.open-native-sidebar'
+export const CONVERSATION_VIEW_SETTINGS_EVENT = 'dvw-conversation-view-settings'
+export const CONVERSATION_VIEW_SETTINGS_ICON = 'dsh-vscode-workbench.conversation-view-settings'
+export const CONVERSATION_MENU_CHANGED_EVENT = 'dvw-conversation-menu-changed'
+
+export interface DshConversationMenuAction {
+  readonly id: string
+  readonly label: string
+  readonly icon?: { readonly key: string; readonly src?: string }
+  readonly disabled?: boolean
+  readonly children?: readonly DshConversationMenuAction[]
+}
+
+export interface DshConversationMenuResolution {
+  readonly source: {
+    getSnapshot(): readonly DshConversationMenuAction[]
+    subscribe(listener: () => void): () => void
+  }
+  readonly ready: Promise<void>
+  select(id: string): void
+  dispose(): void
+}
 
 /** Window with an inward arrow, sized by the official context menu's icon cell. */
 export function DshConversationOpenIcon() {
@@ -28,8 +50,15 @@ export function DshNativeSidebarOpenIcon() {
   </svg>
 }
 
+export function DshConversationViewsIcon() {
+  return <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" aria-hidden="true">
+    <path d="M2 3h2M2 8h2M2 13h2M7 3h7M7 8h7M7 13h7"/>
+  </svg>
+}
+
 /** Narrow contract for DSH's optional native Session Header More menu service. */
 export interface DshConversationMenus {
+  resolve?(target: { kind: 'sessionHeader'; value: { sessionId: string } }): DshConversationMenuResolution
   register(contribution: {
     id: string
     target: 'sessionHeader'
@@ -56,50 +85,66 @@ export function DshConversationMenu(props: {
 }) {
   const current = useRef(props)
   current.current = props
-  useLayoutEffect(() => props.menus?.register({
-    id: 'dsh-vscode-workbench-conversation',
-    target: 'sessionHeader',
-    order: 60,
-    resolve: target => {
-      const state = current.current
-      if (target.sessionId !== state.sessionId) return []
-      const editor = state.editor
-      return [
-        {
-          id: editor ? 'return-to-sidebar' : 'open-in-editor',
-          label: editor ? '移回侧栏' : '在编辑区打开对话',
-          ...(editor ? {} : { icon: { key: CONVERSATION_OPEN_ICON } }),
-          separatorBefore: true,
-          run: () => {
-            const latest = current.current
-            if (latest.sessionId !== target.sessionId) return
-            if (editor) latest.onReturn()
-            else latest.onOpen()
+  useLayoutEffect(() => {
+    const dispose = props.menus?.register({
+      id: 'dsh-vscode-workbench-conversation',
+      target: 'sessionHeader',
+      order: 60,
+      resolve: target => {
+        const state = current.current
+        if (target.sessionId !== state.sessionId) return []
+        const editor = state.editor
+        return [
+          ...(getConversationActionVisibility()['conversation-placement'] ? [] : [{
+            id: editor ? 'return-to-sidebar' : 'open-in-editor',
+            label: editor ? '移回侧栏' : '在编辑区打开对话',
+            icon: { key: editor ? NATIVE_SIDEBAR_OPEN_ICON : CONVERSATION_OPEN_ICON },
+            separatorBefore: true,
+            run: () => {
+              const latest = current.current
+              if (latest.sessionId !== target.sessionId) return
+              if (editor) latest.onReturn()
+              else latest.onOpen()
+            },
+          }]),
+          ...(getConversationActionVisibility()['close-conversation-bar'] ? [] : [{
+            id: 'close-conversation-bar',
+            label: '关闭对话栏',
+            icon: { key: CONVERSATION_CLOSE_ICON },
+            separatorBefore: false,
+            run: () => {
+              const latest = current.current
+              if (latest.sessionId === target.sessionId) latest.onClose()
+            },
+          }]),
+          ...(state.onOpenSidebar === undefined || getConversationActionVisibility()['open-native-sidebar'] ? [] : [{
+            id: 'open-native-sidebar',
+            label: '打开侧边栏',
+            icon: { key: NATIVE_SIDEBAR_OPEN_ICON },
+            separatorBefore: false,
+            run: () => {
+              const latest = current.current
+              if (latest.sessionId === target.sessionId) latest.onOpenSidebar?.()
+            },
+          }]),
+          {
+            id: 'configure-action-icons',
+            label: '设置显示的图标',
+            icon: { key: CONVERSATION_VIEW_SETTINGS_ICON },
+            separatorBefore: false,
+            run: () => window.dispatchEvent(new CustomEvent(CONVERSATION_ACTION_SETTINGS_EVENT, { detail: { sessionId: target.sessionId } })),
           },
-        },
-        {
-          id: 'close-conversation-bar',
-          label: '关闭对话栏',
-          icon: { key: CONVERSATION_CLOSE_ICON },
-          separatorBefore: false,
-          run: () => {
-            const latest = current.current
-            if (latest.sessionId === target.sessionId) latest.onClose()
-          },
-        },
-        ...(state.onOpenSidebar === undefined ? [] : [{
-          id: 'open-native-sidebar',
-          label: '打开侧边栏',
-          icon: { key: NATIVE_SIDEBAR_OPEN_ICON },
-          separatorBefore: false,
-          run: () => {
-            const latest = current.current
-            if (latest.sessionId === target.sessionId) latest.onOpenSidebar?.()
-          },
-        }]),
-      ]
-    },
-  }), [props.menus])
+        ]
+      },
+    })
+    return () => {
+      dispose?.()
+      window.dispatchEvent(new CustomEvent(CONVERSATION_MENU_CHANGED_EVENT, { detail: { sessionId: current.current.sessionId } }))
+    }
+  }, [props.menus])
+  useLayoutEffect(() => {
+    window.dispatchEvent(new CustomEvent(CONVERSATION_MENU_CHANGED_EVENT, { detail: { sessionId: props.sessionId } }))
+  }, [props.sessionId, props.editor, props.onOpenSidebar !== undefined])
   return null
 }
 
@@ -107,6 +152,7 @@ export function DshConversationMenu(props: {
 export function findDshConversationRoot(documentRoot: Document = document): HTMLElement | null {
   const roots = new Set<HTMLElement>()
   for (const scroller of documentRoot.querySelectorAll<HTMLElement>('[data-phase] [data-conversation-scroll]')) {
+    if (scroller.closest('[data-dvw-native-conversation]') !== null) continue
     const root = scroller.closest<HTMLElement>('[data-phase]')
     if (root instanceof HTMLElement && root.dataset.phase !== undefined) roots.add(root)
   }
@@ -200,6 +246,7 @@ export interface DshReviewFileSummary {
  * keep every interaction in the workbench's React tree.
  */
 export function DshReviewActions(props: {
+  conversationRoot?: HTMLElement | null
   visible: boolean
   files: DshReviewFileSummary[]
   count: number
@@ -237,9 +284,10 @@ export function DshReviewActions(props: {
     node.className = 'dvw-review-composer-host'
     let bar: HTMLElement | null = null
     const attach = () => {
-      const next = document.querySelector<HTMLElement>('[data-slot="conversation.composer.bar"]')
+      const root = props.conversationRoot === undefined ? document : props.conversationRoot
+      const next = root?.querySelector<HTMLElement>('[data-slot="conversation.composer.bar"]')
       const stack = next?.parentElement
-      if (next === null || stack === null || stack === undefined) return
+      if (next == null || stack == null) return
       if (bar !== next || !node.isConnected) {
         stack.insertBefore(node, next)
         bar = next
@@ -259,7 +307,7 @@ export function DshReviewActions(props: {
       node.remove()
       setHost(undefined)
     }
-  }, [props.visible, props.files.length])
+  }, [props.visible, props.files.length, props.conversationRoot])
   useLayoutEffect(() => {
     const list = fileList.current
     if (list === null) return

@@ -8,11 +8,11 @@
   DeepSeek Harness 里的 VS Code 风格工作台，集成编辑、搜索、Git、SSH 远程开发、终端、文档与网页预览。</p>
 
 <p align="center">
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-version.svg?v=69fad02e4845" alt="npm 版本"></a>
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-monthly-downloads.svg?v=646c42231640" alt="npm 月下载量"></a>
-  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-total-downloads.svg?v=cfb0bb9c72a0" alt="npm 总下载量"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-version.svg?v=9160f96cb9e7" alt="npm 版本"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-monthly-downloads.svg?v=a28f15a4e20e" alt="npm 月下载量"></a>
+  <a href="https://www.npmjs.com/package/dsh-vscode-workbench"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/npm-total-downloads.svg?v=0c2179f7ae19" alt="npm 总下载量"></a>
   <a href="https://github.com/tingfeng347/dsh-vscode-workbench/stargazers"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/github-stars.svg?v=740bd17315b3" alt="GitHub Stars"></a>
-  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/commits/main"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/last-commit.svg?v=038949c8a9d7" alt="最近提交"></a>
+  <a href="https://github.com/tingfeng347/dsh-vscode-workbench/commits/main"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/last-commit.svg?v=ee120d8cbd4c" alt="最近提交"></a>
   <a href="https://github.com/tingfeng347/dsh-vscode-workbench/blob/main/LICENSE"><img src="https://raw.githubusercontent.com/tingfeng347/dsh-vscode-workbench/main/assets/badges/license.svg?v=01e60fcc216c" alt="MIT 许可证"></a>
   <br>
   <a href="https://awesome-dsh-plugin.com/p/tingfeng347/dsh-vscode-workbench/"><img src="https://awesome-dsh-plugin.com/badge.svg" alt="awesome · DSH plugin"></a>

@@ -108,7 +108,7 @@ export async function projectSources(cwd: string, limits: { files?: number; byte
 export async function listFiles(cwd: string, path: string): Promise<FileEntry[]> {
   const { root, absolute } = await workspacePath(cwd, path)
   const values = await readdir(absolute, { withFileTypes: true })
-  const rows = await Promise.all(values.filter(item => item.name !== '.git').map(async item => {
+  const rows = await Promise.all(values.map(async item => {
     const full = join(absolute, item.name)
     if (!item.isSymbolicLink()) return { name: item.name, path: relativePath(root, full), kind: item.isDirectory() ? 'directory' as const : 'file' as const }
     const actual = await realpath(full).catch(() => undefined)

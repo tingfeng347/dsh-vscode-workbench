@@ -1,7 +1,8 @@
-import type { ISidebarRight, SidebarRightOpenResourceOptions } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
+import type { ISidebarRight, SidebarRightNavigator, SidebarRightOpenResourceOptions } from '@deepseek-ai/dsh-client-ui-sidebar-right/client'
 
 /** The part of DSH's right sidebar used by the generated-file link interceptor. */
 export type GeneratedFileOpenHost = Pick<ISidebarRight, 'mounted' | 'openResource'>
+  & Partial<Pick<SidebarRightNavigator, 'openResourceIn'>>
 
 /** A session-scoped file address decoded from `dsh-resource://file/session/…`. */
 export interface ParsedGeneratedFileAddress {
@@ -69,6 +70,8 @@ function generatedFileTarget(path: string, requested?: number): { path: string; 
 interface InstalledInterceptor {
   readonly original: ISidebarRight['openResource']
   wrapper: ISidebarRight['openResource']
+  readonly originalIn?: SidebarRightNavigator['openResourceIn']
+  wrapperIn?: SidebarRightNavigator['openResourceIn']
   isWorkbenchVisible(): boolean
   installers: number
 }
@@ -84,8 +87,9 @@ const CHANGED_FILES_CARD = '[data-changed-files="true"]'
  * A matching session-scoped file address becomes a synchronous
  * `dvw-open-generated-file` CustomEvent instead of opening DSH's sidebar
  * viewer. Unsupported addresses, other sessions, and hidden workbenches are
- * passed through to the original `openResource` method with the original
- * arguments.
+ * passed through with their original arguments. Explicit native destinations
+ * and preview kinds also keep their requested host. The optional session-scoped
+ * entry point covers DSH's tab actions on versions that expose it.
  */
 export function installGeneratedFileOpenInterceptor(
   sidebar: GeneratedFileOpenHost,
@@ -99,28 +103,41 @@ export function installGeneratedFileOpenInterceptor(
   }
 
   const original = sidebar.openResource
+  const originalIn = sidebar.openResourceIn
   const state: InstalledInterceptor = {
     original,
+    originalIn,
     wrapper: original,
     isWorkbenchVisible,
     installers: 1,
   }
+  const openInWorkbench = (address: string, options?: SidebarRightOpenResourceOptions, ownerSessionId?: string): boolean => {
+    if (!state.isWorkbenchVisible() || options?.destination !== undefined || options?.kind !== undefined) return false
+    const parsed = parseGeneratedFileAddress(address)
+    if (parsed === undefined || sidebar.mounted.getSnapshot() !== parsed.sessionId
+      || (ownerSessionId !== undefined && ownerSessionId !== parsed.sessionId)) return false
+    const target = generatedFileTarget(parsed.path, requestedLine(options))
+    window.dispatchEvent(new CustomEvent<GeneratedFileOpenDetail>(GENERATED_FILE_OPEN_EVENT, {
+      detail: { sessionId: parsed.sessionId, ...target },
+    }))
+    return true
+  }
   const wrapper = function (address: string, options?: SidebarRightOpenResourceOptions): void {
-    const parsed = state.isWorkbenchVisible()
-      ? parseGeneratedFileAddress(address)
-      : undefined
-    if (parsed !== undefined && sidebar.mounted.getSnapshot() === parsed.sessionId) {
-      const target = generatedFileTarget(parsed.path, requestedLine(options))
-      window.dispatchEvent(new CustomEvent<GeneratedFileOpenDetail>(GENERATED_FILE_OPEN_EVENT, {
-        detail: { sessionId: parsed.sessionId, ...target },
-      }))
-      return
-    }
+    if (openInWorkbench(address, options)) return
     if (arguments.length === 1) original.call(sidebar, address)
     else original.call(sidebar, address, options)
   } as ISidebarRight['openResource']
 
   state.wrapper = wrapper
+  if (originalIn !== undefined) {
+    const wrapperIn: SidebarRightNavigator['openResourceIn'] = function (sessionId, address, options): void {
+      if (openInWorkbench(address, options, sessionId)) return
+      if (arguments.length === 2) originalIn.call(sidebar, sessionId, address)
+      else originalIn.call(sidebar, sessionId, address, options)
+    }
+    state.wrapperIn = wrapperIn
+    sidebar.openResourceIn = wrapperIn
+  }
   installed.set(sidebar, state)
   sidebar.openResource = wrapper
   return installerDisposer(sidebar, state)
@@ -198,6 +215,7 @@ function installerDisposer(sidebar: GeneratedFileOpenHost, state: InstalledInter
     state.installers--
     if (state.installers > 0) return
     if (sidebar.openResource === state.wrapper) sidebar.openResource = state.original
+    if (state.wrapperIn !== undefined && sidebar.openResourceIn === state.wrapperIn) sidebar.openResourceIn = state.originalIn
     installed.delete(sidebar)
   }
 }

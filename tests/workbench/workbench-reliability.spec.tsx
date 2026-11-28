@@ -7,8 +7,11 @@ import type { MonacoDiffEditor, MonacoEditor } from '../../src/client/editor/Mon
 import { settingsHost } from '../../src/client/settings/settingsHost.ts'
 import { WorkbenchController } from '../../src/client/workbench/service.ts'
 import { disposeTypeScriptProject } from '../../src/client/editor/typescriptProject.ts'
+import { setConversationActionVisible } from '../../src/client/dsh/conversationActionVisibility.ts'
 import type { FileEntry, GitChange } from '../../src/shared/types.ts'
 import type { DshConversationMenus } from '../../src/client/dsh/DshConversationPanel.tsx'
+import { NativeConversation } from '../../src/client/dsh/nativeConversation.ts'
+import { getWatchExpanded } from '../../src/client/workspace/watch-paths.ts'
 
 type EditorProps = Parameters<typeof MonacoEditor>[0]
 type DiffProps = Parameters<typeof MonacoDiffEditor>[0]
@@ -87,6 +90,9 @@ afterEach(async () => {
   vi.useRealTimers()
 })
 async function mount(service = new WorkbenchController(), visible = true, dshPanelId?: string, handlers: { open?(panelId: string): void; restore?(): void } = {}) {
+  setConversationActionVisible('conversation-placement', false)
+  setConversationActionVisible('close-conversation-bar', false)
+  setConversationActionVisible('open-native-sidebar', false)
   if (visible) service.show()
   const node = document.createElement('div'); document.body.append(node); root = createRoot(node)
   await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" conversationMenus={conversationMenus} dshPanelId={dshPanelId} onOpenDshPanel={handlers.open} onRestoreConversation={handlers.restore}/>) })
@@ -111,7 +117,7 @@ async function setup(
   changes: typeof reviewChanges = [],
   gitChanges: GitChange[] = [],
   modelCatalog: FakeModelCatalog = defaultModelCatalog,
-  files: FileEntry[] = [],
+  files: FileEntry[] | ((path: string) => FileEntry[]) = [],
   readFailure?: (path: string) => { code: string; message: string; status?: number } | undefined,
 ) {
   disk = 'disk'; revision = 'r1'; completeSave = undefined; state.editor = undefined
@@ -124,7 +130,7 @@ async function setup(
     const doc = () => ({ path: typeof body.path === 'string' ? body.path : 'a.txt', content: binary ? '' : disk, revision, size: binary ? 0 : disk.length, binary, tooLarge: false })
     let value: unknown
     if (method === 'workspace') value = { cwd: '/tmp/audit', name: 'audit' }
-    else if (method === 'fs.list') value = files
+    else if (method === 'fs.list') value = typeof files === 'function' ? files(String(body.path ?? '')) : files
     else if (method === 'lsp.status' || method === 'ssh.connections') value = []
     else if (method === 'ssh.hosts') value = { hosts: [] }
     else if (method === 'git.status') value = { repository: '/tmp/audit', branch: 'master', ahead: 0, behind: 0, changes: gitChanges }
@@ -615,6 +621,16 @@ it('refuses a quarter that would exceed the six-pane cap while retaining center 
   expect(document.querySelectorAll('.dvw-pane')).toHaveLength(5)
   await dragTo(document.querySelector('[data-tab-path="b.txt"]')!, latest, 300, 200)
   expect(document.querySelectorAll('.dvw-pane').length).toBeLessThanOrEqual(5)
+})
+
+it.each([
+  ['report.md', '.dvw-markdown'],
+  ['image.png', '.dvw-image-preview'],
+])('opens %s from the Explorer in the workbench preview', async (path, selector) => {
+  await setup(false, { paths: [] }, [], [], defaultModelCatalog, [{ name: path, path, kind: 'file' }])
+  await act(async () => document.querySelector<HTMLElement>(`[data-tree-path="${path}"]`)!.click())
+  expect(document.querySelector(`[data-tab-path="${path}"]`)).not.toBeNull()
+  expect(document.querySelector(selector)).not.toBeNull()
 })
 
 it('opens a DSH generated-file link at its requested line in the workbench editor', async () => {
@@ -1523,12 +1539,192 @@ it('returns to the conversation from the DSH chat button while a panel is open',
   expect(document.querySelector('.dvw-chat')).not.toBeNull()
 })
 
+it('keeps the editor conversation when the native tab closes on a later render', async () => {
+  const service = await setup()
+  await act(async () => { root!.unmount() })
+  const sidebar = {
+    mounted: { getSnapshot: () => 's', subscribe: () => () => {} },
+    openTabs: { getSnapshot: () => [{ sessionId: 's', kind: 'dvw-conversation', tabId: 'chat' }] },
+    active: () => undefined,
+    closeIn: vi.fn(),
+  }
+  const slots = { snapshot: () => [{}], subscribe: () => () => {} }
+  const conversation = new NativeConversation(sidebar as never, slots as never)
+  const nativeBody = document.createElement('div')
+  document.body.append(nativeBody)
+  const release = conversation.attach('s' as never, nativeBody, false, Symbol(), 'chat' as never)
+  const node = document.createElement('div')
+  document.body.append(node)
+  root = createRoot(node)
+  await act(async () => root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit"
+    conversationMenus={conversationMenus} rightSidebar={sidebar as never} nativeConversation={conversation}/>))
+
+  await act(async () => conversationMenu!.resolve({ sessionId: 's' })[0]!.run())
+  expect(sidebar.closeIn).toHaveBeenCalledWith('s', 'chat')
+  expect(document.querySelector('[data-dvw-conversation-tab]')?.textContent).toBe('DSH 对话')
+
+  await act(async () => release())
+  expect(document.querySelector('[data-dvw-conversation-editor]')).not.toBeNull()
+})
+
 
 it('refreshes each visible directory once per refresh click', async () => {
   await setup()
   vi.mocked(fetch).mockClear()
   await act(async () => document.querySelector<HTMLButtonElement>('button[title="刷新"]')!.click())
   expect(vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/fs.list'))).toHaveLength(1)
+})
+
+it.each([
+  { target: 'src', directory: 'src', kind: 'file', name: 'next.ts' },
+  { target: 'src', directory: 'src', kind: 'directory', name: 'components' },
+  { target: 'src/app.ts', directory: 'src', kind: 'file', name: 'next.ts' },
+  { target: 'src/app.ts', directory: 'src', kind: 'directory', name: 'components' },
+  { target: '', directory: '', kind: 'file', name: 'next.ts' },
+  { target: '', directory: '', kind: 'directory', name: 'components' },
+])('creates an Explorer $kind from the context menu on $target', async ({ target, directory, kind, name }) => {
+  const levels: Record<string, FileEntry[]> = {
+    '': [{ path: 'src', name: 'src', kind: 'directory' }],
+    src: [{ path: 'src/app.ts', name: 'app.ts', kind: 'file' }],
+  }
+  await setup(false, { paths: [] }, [], [], defaultModelCatalog, path => levels[path] ?? [])
+  const tree = document.querySelector<HTMLElement>('.dvw-tree')!
+  if (target !== 'src') await act(async () => document.querySelector<HTMLElement>('[data-tree-path="src"]')!.click())
+  const row = target ? tree.querySelector<HTMLElement>(`[data-tree-path="${target}"]`)! : tree
+  await act(async () => row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true })))
+  const menus = document.querySelectorAll('[role="menu"]')
+  expect(menus).toHaveLength(1)
+  const action = [...menus[0]!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+    .find(button => button.textContent === (kind === 'file' ? '新建文件' : '新建文件夹'))
+  expect(action).toBeDefined()
+  await act(async () => action!.click())
+  const input = tree.querySelector<HTMLInputElement>('.dvw-tree-create-input')!
+  expect(input).not.toBeNull()
+  expect(document.activeElement).toBe(input)
+  expect(document.querySelector('[role="menu"]')).toBeNull()
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, name)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+  const requests = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/fs.create'))
+  expect(requests).toHaveLength(1)
+  expect(JSON.parse(String(requests[0]![1]?.body))).toMatchObject({
+    sessionId: 's', kind, path: directory ? `${directory}/${name}` : name,
+  })
+})
+
+it('resizes the primary sidebar below 210px and restores the saved width', async () => {
+  const service = await setup(false, { paths: ['a.txt'], active: 'a.txt', sideWidth: 300 })
+  const handle = () => document.querySelector<HTMLElement>('.dvw-side-resizer')!
+  const pointer = (type: string, clientX: number) => new MouseEvent(type, { bubbles: true, button: 0, clientX })
+  await act(async () => handle().dispatchEvent(pointer('pointerdown', 348)))
+  await act(async () => window.dispatchEvent(pointer('pointermove', 228)))
+  expect(handle().getAttribute('aria-valuenow')).toBe('180')
+  await act(async () => window.dispatchEvent(pointer('pointerup', 228)))
+  expect(document.body.style.cursor).toBe('')
+  expect(document.body.style.userSelect).toBe('')
+  await act(async () => service.hide())
+  await act(async () => service.show())
+  expect(handle().getAttribute('aria-valuenow')).toBe('180')
+  await act(async () => handle().dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })))
+  expect(handle().getAttribute('aria-valuenow')).toBe('170')
+  await act(async () => handle().dispatchEvent(new MouseEvent('dblclick', { bubbles: true })))
+  expect(handle().getAttribute('aria-valuenow')).toBe('210')
+})
+
+it('allows resizing when the available sidebar width is below 210px and cleans up cancelled drags', async () => {
+  vi.stubGlobal('innerWidth', 835)
+  await setup(false, { paths: ['a.txt'], active: 'a.txt', sideWidth: 300 })
+  const handle = document.querySelector<HTMLElement>('.dvw-side-resizer')!
+  expect(handle.getAttribute('aria-valuenow')).toBe('200')
+  await act(async () => handle.dispatchEvent(new MouseEvent('pointerdown', { bubbles: true, button: 0, clientX: 248 })))
+  await act(async () => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 228 })))
+  expect(handle.getAttribute('aria-valuenow')).toBe('180')
+  await act(async () => window.dispatchEvent(new Event('pointercancel')))
+  expect(document.body.style.cursor).toBe('')
+  expect(document.body.style.userSelect).toBe('')
+  expect(handle.hasAttribute('data-dragging')).toBe(false)
+  await act(async () => window.dispatchEvent(new MouseEvent('pointermove', { clientX: 298 })))
+  expect(handle.getAttribute('aria-valuenow')).toBe('180')
+})
+
+it('hides dot-prefixed Explorer entries at every level until the toolbar toggle is clicked', async () => {
+  const levels: Record<string, FileEntry[]> = {
+    '': [
+      { name: '.agents', path: '.agents', kind: 'directory' },
+      { name: 'src', path: 'src', kind: 'directory' },
+      { name: '.env', path: '.env', kind: 'file' },
+      { name: 'README.md', path: 'README.md', kind: 'file' },
+    ],
+    src: [
+      { name: '.cache', path: 'src/.cache', kind: 'directory' },
+      { name: '.env.local', path: 'src/.env.local', kind: 'file' },
+      { name: 'app.test.ts', path: 'src/app.test.ts', kind: 'file' },
+    ],
+  }
+  await setup(false, { paths: [] }, [], [], defaultModelCatalog, path => levels[path] ?? [])
+  const paths = () => [...document.querySelectorAll<HTMLElement>('[data-tree-path]')].map(row => row.dataset.treePath)
+  expect(paths()).toEqual(['src', 'README.md'])
+  const toggle = document.querySelector<HTMLButtonElement>('.dvw-toolbar [aria-label="显示隐藏文件"]')!
+  expect(toggle).not.toBeNull()
+  expect(toggle.getAttribute('aria-pressed')).toBe('false')
+  expect(toggle.querySelector('.codicon-eye-closed')).not.toBeNull()
+  await act(async () => document.querySelector<HTMLElement>('[data-tree-path="src"]')!.click())
+  expect(paths()).toEqual(['src', 'src/app.test.ts', 'README.md'])
+  const directoryReads = () => vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/fs.list')).length
+  const readsBeforeToggle = directoryReads()
+  await act(async () => toggle.click())
+  expect(toggle.getAttribute('aria-pressed')).toBe('true')
+  expect(toggle.querySelector('.codicon-eye')).not.toBeNull()
+  expect(paths()).toEqual(['.agents', 'src', 'src/.cache', 'src/.env.local', 'src/app.test.ts', '.env', 'README.md'])
+  expect(directoryReads()).toBe(readsBeforeToggle)
+  await act(async () => document.querySelector<HTMLButtonElement>('button[title="刷新"]')!.click())
+  expect(paths()).toContain('.env')
+  await act(async () => toggle.click())
+  expect(paths()).toEqual(['src', 'src/app.test.ts', 'README.md'])
+})
+
+it('keeps restored hidden directories out of the tree and clears their selection when hidden again', async () => {
+  const levels: Record<string, FileEntry[]> = {
+    '': [{ name: '.agents', path: '.agents', kind: 'directory' }, { name: 'README.md', path: 'README.md', kind: 'file' }],
+    '.agents': [{ name: 'guides', path: '.agents/guides', kind: 'directory' }],
+    '.agents/guides': [{ name: 'policy.md', path: '.agents/guides/policy.md', kind: 'file' }],
+  }
+  localStorage.setItem('dvw:tree:/tmp/audit', JSON.stringify(['.agents', '.agents/guides']))
+  await setup(false, { paths: [] }, [], [], defaultModelCatalog, path => levels[path] ?? [])
+  expect(document.querySelector('[data-tree-path=".agents"]')).toBeNull()
+  expect(getWatchExpanded()).toEqual([''])
+  const requests = vi.mocked(fetch).mock.calls.filter(([url]) => String(url).endsWith('/fs.list'))
+  expect(requests.map(([, init]) => JSON.parse(String(init?.body)).path)).toEqual([''])
+  const toggle = document.querySelector<HTMLButtonElement>('.dvw-toolbar [aria-label="显示隐藏文件"]')!
+  await act(async () => toggle.click())
+  expect(document.querySelector('[data-tree-path=".agents/guides/policy.md"]')).not.toBeNull()
+  expect(getWatchExpanded()).toContain('.agents/guides')
+  for (const path of ['README.md', '.agents/guides', '.agents/guides/policy.md']) {
+    await act(async () => document.querySelector<HTMLElement>(`[data-tree-path="${path}"]`)!.dispatchEvent(new MouseEvent('click', { bubbles: true, ctrlKey: true })))
+  }
+  expect(document.querySelector('[title="上传文件到 .agents/guides"]')).not.toBeNull()
+  await act(async () => toggle.click())
+  expect(document.querySelector('[data-tree-path=".agents"]')).toBeNull()
+  expect(getWatchExpanded()).toEqual([''])
+  expect(document.querySelector('[title="上传文件到 工作区根目录"]')).not.toBeNull()
+  expect(document.querySelector('[data-tree-path="README.md"]')?.getAttribute('aria-selected')).toBe('true')
+  const tree = document.querySelector<HTMLElement>('.dvw-tree')!
+  await act(async () => tree.dispatchEvent(new KeyboardEvent('keydown', { key: 'Delete', bubbles: true })))
+  const dialog = document.querySelector('[role="alertdialog"]')!
+  expect(dialog.textContent).toContain('README.md')
+  expect(dialog.textContent).not.toContain('.agents')
+})
+
+it('starts with hidden entries concealed when the Explorer is reopened, matching the workspace directory browser', async () => {
+  const service = await setup(false, { paths: [] }, [], [], defaultModelCatalog, [{ name: '.env', path: '.env', kind: 'file' }])
+  await act(async () => document.querySelector<HTMLButtonElement>('.dvw-toolbar [aria-label="显示隐藏文件"]')!.click())
+  expect(document.querySelector('[data-tree-path=".env"]')).not.toBeNull()
+  await act(async () => service.hide())
+  await act(async () => service.show())
+  expect(document.querySelector('.dvw-toolbar [aria-label="显示隐藏文件"]')?.getAttribute('aria-pressed')).toBe('false')
+  expect(document.querySelector('[data-tree-path=".env"]')).toBeNull()
 })
 
 it('does not read restored documents while hidden', async () => {

@@ -33,6 +33,14 @@ it('keeps the preferred chat width when an editor is open again', () => {
   expect(layout.chatFits).toBe(true)
 })
 
+it('keeps the primary sidebar visible beside the native conversation on narrow screens', () => {
+  const layout = fitNativeSidebarLayout({ ...base, viewportWidth: 760, dockWidth: 300 })
+  expect(layout.sideWidth).toBe(210)
+  expect(layout.chatFits).toBe(false)
+  expect(layout.chatWidth).toBe(151)
+  expect(layout.sideWidth + layout.chatWidth + 51 + 48 + 300).toBe(760)
+})
+
 it('uses a hidden primary sidebar’s space without letting widths become negative', () => {
   const layout = fitNativeSidebarLayout({ ...base, viewportWidth: 850, dockWidth: 300, editorVisible: false, sideVisible: false })
   expect(layout.chatFits).toBe(true)

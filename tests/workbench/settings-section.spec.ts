@@ -20,7 +20,8 @@ describe('workbench settings section', () => {
 
   it('keeps the workbench layout untouched while settings are open', () => {
     const workbench = readSource('src/client/workbench/Workbench.tsx')
-    expect(workbench).toContain('const chatShown=chatVisible&&!showingDshPanel')
+    expect(workbench).toContain('const chatShown=!sidebarConversationShown&&chatVisible&&!showingDshPanel')
+    expect(workbench).toContain('const sidebarConversationShown=useConversationSidebar&&sidebarConversation!==undefined&&!dshTabActive')
     expect(workbench).toContain('const showingDshPanel=dshTabId!==undefined&&dshTabActive')
   })
 
@@ -34,6 +35,16 @@ describe('workbench settings section', () => {
     expect(workbench).toContain("localStorage.setItem('dvw:editor-minimap'")
     expect(workbench).toContain('minimap={minimap} setMinimap={setMinimap}')
     expect(workbench).toContain('minimap={minimap} line={activeTab.line}')
+  })
+
+  it('offers a persisted native conversation navigation switch even while the workbench is hidden', () => {
+    const panel = readSource('src/client/settings/SettingsPanel.tsx')
+    const workbench = readSource('src/client/workbench/Workbench.tsx')
+    expect(panel).toContain('<Switch label="对话轮次导航" checked={props.conversationNavigation} onChange={props.setConversationNavigation}/>')
+    expect(workbench).toContain("storedValue('dvw:conversation-navigation')!=='off'")
+    expect(workbench).toContain("localStorage.setItem('dvw:conversation-navigation',conversationNavigation?'on':'off')")
+    expect(workbench).toContain('conversationNavigation={conversationNavigation} setConversationNavigation={setConversationNavigation}')
+    expect(workbench.indexOf('useEffect(()=>installConversationNavigation(conversationNavigation)')).toBeLessThan(workbench.indexOf('if(!snapshot.visible)return settingsNode'))
   })
 
   it("reuses DSH's pill controls for buttons and choices", () => {

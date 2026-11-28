@@ -28,6 +28,6 @@ describe('Binary diffs', () => {
     const workbench = readSource('src/client/workbench/Workbench.tsx')
     expect(workbench).toContain('openCommitPreview(preview.commit,preview.path,title)')
     expect(workbench).toContain("&commit=${encodeURIComponent(commit)}")
-    expect(workbench).toContain('<img src={activeTab.imageUrl}')
+    expect(workbench).toContain('<ImagePreview key={activeTab.path} src={activeTab.imageUrl} path={activeTab.diffSourcePath??activeTab.path}')
   })
 })

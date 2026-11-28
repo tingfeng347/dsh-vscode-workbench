@@ -1,13 +1,28 @@
 // @vitest-environment jsdom
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, expect, it, vi } from 'vitest'
-import { CONVERSATION_CLOSE_ICON, CONVERSATION_OPEN_ICON, DshConversationCloseIcon, DshConversationMenu, DshConversationOpenIcon, DshNativeSidebarOpenIcon, DshConversationPanel, DshReviewActions, findDshConversationRoot, type DshConversationMenus } from '../../src/client/dsh/DshConversationPanel.tsx'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { CONVERSATION_CLOSE_ICON, CONVERSATION_OPEN_ICON, CONVERSATION_VIEW_SETTINGS_EVENT, CONVERSATION_VIEW_SETTINGS_ICON, DshConversationCloseIcon, DshConversationMenu, DshConversationOpenIcon, DshConversationViewsIcon, DshNativeSidebarOpenIcon, DshConversationPanel, DshReviewActions, findDshConversationRoot, type DshConversationMenus } from '../../src/client/dsh/DshConversationPanel.tsx'
 import { SshChatTarget } from '../../src/client/ssh/SshChatTarget.tsx'
+import { SidebarConversationHeader } from '../../src/client/dsh/SidebarConversationHeader.tsx'
+import { CONVERSATION_ACTION_SETTINGS_KEY, setConversationActionVisible, visibleConversationToolbarActions } from '../../src/client/dsh/conversationActionVisibility.ts'
+import { ConversationActionVisibilitySettings } from '../../src/client/dsh/ConversationActionVisibilitySettings.tsx'
 
 Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
 
-afterEach(() => { document.body.replaceChildren(); document.body.removeAttribute('data-dvw-conversation-active') })
+afterEach(() => {
+  document.body.replaceChildren()
+  document.body.removeAttribute('data-dvw-conversation-active')
+  localStorage.removeItem(CONVERSATION_ACTION_SETTINGS_KEY)
+  setConversationActionVisible('conversation-placement', true)
+  setConversationActionVisible('close-conversation-bar', false)
+  setConversationActionVisible('open-native-sidebar', true)
+})
+beforeEach(() => {
+  setConversationActionVisible('conversation-placement', true)
+  setConversationActionVisible('close-conversation-bar', false)
+  setConversationActionVisible('open-native-sidebar', true)
+})
 
 it('keeps native menu registration stable and ignores actions from a previous session', async () => {
   const node = document.createElement('div')
@@ -17,6 +32,8 @@ it('keeps native menu registration stable and ignores actions from a previous se
   const dispose = vi.fn()
   const menus = { register: vi.fn((value: NonNullable<typeof contribution>) => { contribution = value; return dispose }) }
   const open = vi.fn(), latestOpen = vi.fn(), back = vi.fn(), close = vi.fn()
+  setConversationActionVisible('conversation-placement', false)
+  setConversationActionVisible('close-conversation-bar', false)
   try {
     await act(async () => root.render(<DshConversationMenu menus={menus} sessionId="a" editor={false} onOpen={open} onReturn={back} onClose={close}/>))
     const oldAction = contribution!.resolve({ sessionId: 'a' })[0]!
@@ -32,7 +49,7 @@ it('keeps native menu registration stable and ignores actions from a previous se
     oldAction.run()
     expect(latestOpen).toHaveBeenCalledTimes(1)
     expect(contribution!.resolve({ sessionId: 'a' })).toEqual([])
-    expect(contribution!.resolve({ sessionId: 'b' })[0]!.label).toBe('移回侧栏')
+    expect(contribution!.resolve({ sessionId: 'b' })[0]).toMatchObject({ label: '移回侧栏', icon: { key: 'dsh-vscode-workbench.open-native-sidebar' } })
     expect(contribution!.resolve({ sessionId: 'b' })[1]).toMatchObject({ label: '关闭对话栏', icon: { key: CONVERSATION_CLOSE_ICON } })
     expect(menus.register).toHaveBeenCalledTimes(1)
     expect(node.childNodes).toHaveLength(0)
@@ -42,7 +59,7 @@ it('keeps native menu registration stable and ignores actions from a previous se
   expect(dispose).toHaveBeenCalledTimes(1)
 })
 
-it.each([DshConversationOpenIcon, DshConversationCloseIcon, DshNativeSidebarOpenIcon])('renders the conversation menu icon as a compact current-color glyph: %s', async Icon => {
+it.each([DshConversationOpenIcon, DshConversationCloseIcon, DshNativeSidebarOpenIcon, DshConversationViewsIcon])('renders the conversation menu icon as a compact current-color glyph: %s', async Icon => {
   const node = document.createElement('div')
   document.body.append(node)
   const root = createRoot(node)
@@ -53,6 +70,39 @@ it.each([DshConversationOpenIcon, DshConversationCloseIcon, DshNativeSidebarOpen
   } finally { await act(async () => root.unmount()) }
 })
 
+it('pins selected action icons before the ellipsis and removes them from its menu', async () => {
+  const node = document.createElement('div')
+  document.body.append(node)
+  const root = createRoot(node)
+  let contribution: Parameters<DshConversationMenus['register']>[0] | undefined
+  const menus = { register: (value: NonNullable<typeof contribution>) => { contribution = value; return () => {} } }
+  const onOpen = vi.fn()
+  try {
+    await act(async () => root.render(<>
+      <DshConversationMenu menus={menus} sessionId="a" editor={false} onOpen={onOpen} onReturn={vi.fn()} onClose={vi.fn()} onOpenSidebar={vi.fn()}/>
+      <ConversationActionVisibilitySettings sessionId="a"/>
+    </>))
+    const configure = contribution!.resolve({ sessionId: 'a' }).find(item => item.id === 'configure-action-icons')
+    expect(configure).toMatchObject({ label: '设置显示的图标', icon: { key: CONVERSATION_VIEW_SETTINGS_ICON } })
+    await act(async () => configure!.run())
+    expect(node.querySelector('[role="dialog"][aria-label="设置显示的图标"]')).not.toBeNull()
+    const placement = [...node.querySelectorAll('label')].find(label => label.textContent?.includes('在编辑区打开对话'))!.querySelector('input')!
+    const openSidebar = [...node.querySelectorAll('label')].find(label => label.textContent?.includes('打开侧边栏'))!.querySelector('input')!
+    expect(placement.checked).toBe(true)
+    expect(openSidebar.checked).toBe(true)
+    expect(contribution!.resolve({ sessionId: 'a' }).some(item => item.id === 'open-in-editor')).toBe(false)
+    expect(contribution!.resolve({ sessionId: 'a' }).some(item => item.id === 'open-native-sidebar')).toBe(false)
+    await act(async () => openSidebar.click())
+    expect(contribution!.resolve({ sessionId: 'a' }).some(item => item.id === 'open-native-sidebar')).toBe(true)
+  } finally { await act(async () => root.unmount()) }
+})
+
+it('shows the configured close icon in the main header as well as in the sidebar', () => {
+  const visibility = { 'conversation-placement': true, 'open-native-sidebar': true, 'close-conversation-bar': true }
+  expect(visibleConversationToolbarActions(false, visibility)).toEqual(['conversation-placement', 'open-native-sidebar', 'close-conversation-bar'])
+  expect(visibleConversationToolbarActions(true, visibility)).toEqual(['conversation-placement', 'close-conversation-bar'])
+})
+
 it('offers an icon-labelled native sidebar opener scoped to the current session', async () => {
   const node = document.createElement('div')
   document.body.append(node)
@@ -60,6 +110,7 @@ it('offers an icon-labelled native sidebar opener scoped to the current session'
   let contribution: Parameters<DshConversationMenus['register']>[0] | undefined
   const menus = { register: (value: NonNullable<typeof contribution>) => { contribution = value; return () => {} } }
   const openSidebar = vi.fn()
+  setConversationActionVisible('open-native-sidebar', false)
   const noop = () => {}
   try {
     await act(async () => root.render(<DshConversationMenu menus={menus} sessionId="a" editor={false} onOpen={noop} onReturn={noop} onClose={noop} onOpenSidebar={openSidebar}/>))
@@ -263,4 +314,48 @@ it('attaches the SSH selector when DSH creates and replaces its composer status 
   } finally {
     await act(async () => root.unmount())
   }
+})
+
+it('renders the sidebar session title and view tabs with a working overflow menu', async () => {
+  const node = document.createElement('div')
+  document.body.append(node)
+  const root = createRoot(node)
+  const onSelect = vi.fn()
+  const setPinned = vi.fn()
+  const unpinned: string[] = []
+  const views = [
+    { id: 'chat', label: '对话' }, { id: 'trajectory', label: '轨迹' },
+    { id: 'context', label: '上下文' }, { id: 'files', label: '文件' }, { id: 'changes', label: '变更' }, { id: 'reviews', label: '审阅' },
+  ]
+  try {
+    await act(async () => root.render(<SidebarConversationHeader sessionId="session-1" title="问候 (1)" activeView="chat"
+      useConversationViews={select => select(views)} useEntryPins={select => select(unpinned)} useEntryActions={select => select(true)} selectView={onSelect} setPinned={setPinned}/>))
+    expect(node.textContent).toContain('问候 (1)')
+    expect(node.textContent).toContain('标准模式')
+    expect(node.querySelector('[role="tablist"]')?.textContent).toContain('轨迹')
+    await act(async () => window.dispatchEvent(new CustomEvent(CONVERSATION_VIEW_SETTINGS_EVENT, { detail: { sessionId: 'session-1' } })))
+    expect(node.querySelector('[role="dialog"][aria-label="设置显示的视图"]')).not.toBeNull()
+    const trajectory = [...node.querySelectorAll('label')].find(label => label.textContent?.includes('轨迹'))!
+    const trajectoryCheckbox = trajectory.querySelector('input')!
+    expect(trajectoryCheckbox.checked).toBe(true)
+    expect([...node.querySelectorAll('label')].find(label => label.textContent?.includes('对话'))?.querySelector('input')?.disabled).toBe(true)
+    await act(async () => trajectoryCheckbox.click())
+    expect(setPinned).toHaveBeenCalledWith('trajectory', false)
+    unpinned.push('trajectory')
+    await act(async () => root.render(<SidebarConversationHeader sessionId="session-1" title="问候 (1)" activeView="chat"
+      useConversationViews={select => select(views)} useEntryPins={select => select(unpinned)} useEntryActions={select => select(true)} selectView={onSelect} setPinned={setPinned}/>))
+    expect(node.querySelector('[role="tablist"]')?.textContent).not.toContain('轨迹')
+    const reviews = [...node.querySelectorAll('label')].find(label => label.textContent?.includes('审阅'))!.querySelector('input')!
+    await act(async () => reviews.click())
+    expect(setPinned).toHaveBeenCalledWith('reviews', true)
+    expect(setPinned).toHaveBeenCalledWith('changes', false)
+    unpinned.push('changes')
+    await act(async () => root.render(<SidebarConversationHeader sessionId="session-1" title="问候 (1)" activeView="chat"
+      useConversationViews={select => select(views)} useEntryPins={select => select(unpinned)} useEntryActions={select => select(true)} selectView={onSelect} setPinned={setPinned}/>))
+    expect(node.querySelector('[role="tablist"]')?.textContent).toContain('审阅')
+    await act(async () => (node.querySelector('[aria-label="更多视图"]') as HTMLButtonElement).click())
+    expect(node.querySelector('[role="menu"]')?.textContent).toContain('轨迹')
+    await act(async () => (node.querySelector('[role="menuitem"]') as HTMLButtonElement).click())
+    expect(onSelect).toHaveBeenCalledWith('trajectory')
+  } finally { await act(async () => root.unmount()) }
 })

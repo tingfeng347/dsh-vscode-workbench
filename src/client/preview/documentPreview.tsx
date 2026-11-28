@@ -1,14 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { api } from '../transport/api.ts'
+import { PdfPreview } from './PdfPreview.tsx'
+import { PreviewFrame, PreviewStatus } from './PreviewFrame.tsx'
+import { PreviewViewport, type PreviewView } from './PreviewViewport.tsx'
+import { loadPreviewRuntime } from './runtime.ts'
 
-let previewLoading: Promise<typeof import('./previewRuntime.ts')> | undefined
-let previewAttempt = 0
-function loadPreviewRuntime() {
-  const url = `/dsh-vscode/preview.js?v=${previewAttempt}`
-  return previewLoading ??= import(/* @vite-ignore */ url).catch(error => {
-    previewLoading = undefined; previewAttempt += 1; throw error
-  })
-}
+export { clampPdfScale } from './PreviewViewport.tsx'
 
 type XlsxModule = typeof import('xlsx')
 let xlsxLoading: Promise<XlsxModule> | undefined
@@ -35,14 +32,6 @@ export type DocumentPreviewKind = 'pdf' | 'office' | 'sheet' | 'download'
 const SHEET_EXTENSIONS = new Set(['xlsx', 'xlsm', 'xls', 'ods'])
 const OFFICE_EXTENSIONS = new Set(['doc', 'docx', 'ppt', 'pptx', 'odt', 'odp', 'rtf'])
 
-const MIN_PDF_SCALE = 0.5
-const MAX_PDF_SCALE = 3
-
-/** Bound PDF zoom to values that remain usable in the workbench viewport. */
-export function clampPdfScale(scale: number): number {
-  return Math.max(MIN_PDF_SCALE, Math.min(MAX_PDF_SCALE, Math.round(scale * 100) / 100))
-}
-
 /** Return the in-workbench preview supported for a document path. */
 export function documentPreviewKind(path: string): DocumentPreviewKind | undefined {
   const extension = path.split('.').at(-1)?.toLowerCase()
@@ -61,6 +50,7 @@ function SheetsPreview({ src, path }: { src: string; path: string }) {
   const [book, setBook] = useState<{ names: string[]; tables: Record<string, string[][]> }>()
   const [active, setActive] = useState('')
   const [error, setError] = useState<string>()
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
     const controller = new AbortController()
     setBook(undefined); setError(undefined)
@@ -83,139 +73,86 @@ function SheetsPreview({ src, path }: { src: string; path: string }) {
       }
     })()
     return () => controller.abort()
-  }, [src])
-  if (error !== undefined) return <div className="dvw-document-error">无法预览表格：{error}</div>
+  }, [src, attempt])
+  if (error !== undefined) return <PreviewStatus error retry={() => setAttempt(value => value + 1)}>无法预览表格，{error}</PreviewStatus>
   const rows = book?.tables[active] ?? []
   return <section className="dvw-sheet-preview" aria-label={`${path} 表格预览`}>
     {(book?.names.length ?? 0) > 1 && <div className="dvw-sheet-tabs">{book!.names.map(name => <button key={name} data-active={name === active} onClick={() => setActive(name)}>{name}</button>)}</div>}
-    <div className="dvw-sheet-scroll">{book === undefined ? <div className="dvw-message">正在加载表格…</div> : rows.length === 0 ? <div className="dvw-message">此工作表为空</div> : <table className="dvw-sheet-table"><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, column) => <td key={column} title={cell}>{cell}</td>)}</tr>)}</tbody></table>}</div>
+    <div className="dvw-sheet-scroll">{book === undefined ? <PreviewStatus>文档渲染中…</PreviewStatus> : rows.length === 0 ? <PreviewStatus>此工作表为空</PreviewStatus> : <table className="dvw-sheet-table"><tbody>{rows.map((row, index) => <tr key={index}>{row.map((cell, column) => <td key={column} title={cell}>{cell}</td>)}</tr>)}</tbody></table>}</div>
   </section>
 }
 
-function DocxPreview({ src }: { src: string }) {
+function DocxPreview({ src, view }: { src: string; view?: PreviewView }) {
   const root = useRef<HTMLDivElement>(null)
   const [error, setError] = useState<string>()
+  const [ready, setReady] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  const [width, setWidth] = useState(0)
+  useLayoutEffect(() => {
+    if (!ready) return
+    const pages = [...root.current!.querySelectorAll<HTMLElement>('section.docx')]
+    setWidth(Math.max(1, ...pages.map(page => page.offsetWidth)))
+  }, [ready])
   useEffect(() => {
     const controller = new AbortController()
-    const target = root.current
-    if (target === null) return
-    setError(undefined)
+    const target = root.current!
+    setError(undefined); setReady(false)
     void (async () => {
       try {
         const response = await fetch(src, { signal: controller.signal })
-        if (!response.ok) throw new Error(`无法读取文档 (${response.status})`)
+        if (!response.ok) throw new Error('无法读取文档（HTTP ' + response.status + '）')
+        const blob = await response.blob()
         const { renderAsync } = await loadPreviewRuntime()
         if (controller.signal.aborted) return
-        target.replaceChildren()
-        await renderAsync(await response.blob(), target, undefined, { inWrapper: false, ignoreWidth: false, ignoreHeight: false })
+        // A detached render prevents an obsolete request from replacing newer content.
+        const container = document.createElement('div')
+        await renderAsync(blob, container, undefined, { inWrapper: true, ignoreWidth: false, ignoreHeight: false })
+        if (controller.signal.aborted) return
+        target.replaceChildren(...container.childNodes)
+        setReady(true)
       } catch (cause) {
         if (!controller.signal.aborted) setError(cause instanceof Error ? cause.message : String(cause))
       }
     })()
     return () => controller.abort()
-  }, [src])
-  return error === undefined ? <div ref={root} className="dvw-docx-preview"/> : <div className="dvw-document-error">无法预览 Word 文档：{error}</div>
+  }, [src, attempt])
+  return <PreviewViewport width={width} view={view}>{() => <>
+    <div ref={root} className="dvw-docx-preview" hidden={!ready || error !== undefined}/>
+    {error !== undefined ? <PreviewStatus error retry={() => setAttempt(value => value + 1)}>无法显示 Word 文档，{error}</PreviewStatus>
+      : !ready && <PreviewStatus>文档渲染中…</PreviewStatus>}
+  </>}</PreviewViewport>
 }
 
-type PdfDocument = {
-  numPages: number
-  getPage(page: number): Promise<{ getViewport(options: { scale: number }): { width: number; height: number }; render(options: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }): { promise: Promise<void>; cancel(): void } }>
-  destroy(): void
-}
-
-function PdfPreview({ src, path }: { src: string; path: string }) {
-  const canvas = useRef<HTMLCanvasElement>(null)
-  const documentRef = useRef<PdfDocument>()
-  const [page, setPage] = useState(1)
-  const [pages, setPages] = useState(0)
-  const [scale, setScale] = useState(1)
-  const [error, setError] = useState<string>()
-
-  useEffect(() => {
-    let cancelled = false
-    let document: PdfDocument | undefined
-    setPage(1); setPages(0); setError(undefined)
-    void (async () => {
-      try {
-        const { pdf: pdfjs } = await loadPreviewRuntime()
-        pdfjs.GlobalWorkerOptions.workerSrc = '/dsh-vscode/pdfjs/worker.mjs'
-        document = await pdfjs.getDocument(src).promise as PdfDocument
-        if (cancelled) { document.destroy(); return }
-        documentRef.current = document
-        setPages(document.numPages)
-      } catch (cause) {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause))
-      }
-    })()
-    return () => { cancelled = true; documentRef.current = undefined; document?.destroy() }
-  }, [src])
-
-  useEffect(() => {
-    const document = documentRef.current
-    const target = canvas.current
-    if (document === undefined || target === null) return
-    let cancelled = false
-    let task: { promise: Promise<void>; cancel(): void } | undefined
-    void document.getPage(page).then(value => {
-      if (cancelled) return
-      const viewport = value.getViewport({ scale })
-      const ratio = window.devicePixelRatio || 1
-      target.width = Math.ceil(viewport.width * ratio)
-      target.height = Math.ceil(viewport.height * ratio)
-      target.style.width = `${viewport.width}px`
-      target.style.height = `${viewport.height}px`
-      const context = target.getContext('2d')
-      if (context === null) throw new Error('无法创建 PDF 画布')
-      context.setTransform(ratio, 0, 0, ratio, 0, 0)
-      task = value.render({ canvasContext: context, viewport })
-      return task.promise
-    }).catch(cause => { if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause)) })
-    return () => { cancelled = true; task?.cancel() }
-  }, [page, scale, pages])
-
-  return <section className="dvw-pdf-preview" aria-label={`${path} PDF 预览`}>
-    <header className="dvw-pdf-toolbar">
-      <button className="dvw-icon" title="上一页" disabled={page <= 1} onClick={() => setPage(value => Math.max(1, value - 1))}><span aria-hidden="true">‹</span></button>
-      <span>{pages === 0 ? '正在加载' : `${page} / ${pages}`}</span>
-      <button className="dvw-icon" title="下一页" disabled={pages === 0 || page >= pages} onClick={() => setPage(value => Math.min(pages, value + 1))}><span aria-hidden="true">›</span></button>
-      <span className="dvw-pdf-separator"/>
-      <button className="dvw-icon" title="缩小" disabled={scale <= MIN_PDF_SCALE} onClick={() => setScale(value => clampPdfScale(value - 0.1))}>−</button>
-      <button className="dvw-pdf-zoom" title="重置缩放" onClick={() => setScale(1)}>{Math.round(scale * 100)}%</button>
-      <button className="dvw-icon" title="放大" disabled={scale >= MAX_PDF_SCALE} onClick={() => setScale(value => clampPdfScale(value + 0.1))}>+</button>
-    </header>
-    {error === undefined ? <div className="dvw-pdf-page"><canvas ref={canvas}/></div> : <div className="dvw-document-error">无法预览 PDF：{error}</div>}
-  </section>
-}
-
-/** Session carried by the shared file URL, used for the converter status probe. */
-function sessionOfDocumentUrl(src: string): string | undefined {
-  try { return new URL(src, location.href).searchParams.get('sessionId') ?? undefined } catch { return undefined }
-}
-
-/** Word and PowerPoint open as a PDF converted on the host, matching DSH's own preview. */
-function OfficePreview({ src, path }: { src: string; path: string }) {
+/** Word and PowerPoint retain the workbench's host conversion and DOCX fallback. */
+function OfficePreview({ src, path, view }: { src: string; path: string; view?: PreviewView }) {
   const [status, setStatus] = useState<{ available: boolean; hint?: string }>()
+  const [error, setError] = useState<string>()
+  const [attempt, setAttempt] = useState(0)
   useEffect(() => {
-    const sessionId = sessionOfDocumentUrl(src)
-    if (sessionId === undefined) { setStatus({ available: false }); return }
-    let cancelled = false
-    void api<{ available: boolean; hint?: string }>('office.status', { sessionId }).then(value => { if (!cancelled) setStatus(value) }).catch(() => { if (!cancelled) setStatus({ available: false }) })
-    return () => { cancelled = true }
-  }, [src])
-  if (status === undefined) return <div className="dvw-message">正在准备 Office 预览…</div>
+    const controller = new AbortController()
+    const sessionId = new URL(src, location.href).searchParams.get('sessionId')
+    setStatus(undefined); setError(undefined)
+    if (sessionId === null) { setStatus({ available: false }); return }
+    void api<{ available: boolean; hint?: string }>('office.status', { sessionId }, controller.signal)
+      .then(value => { if (!controller.signal.aborted) setStatus(value) })
+      .catch(reason => { if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : String(reason)) })
+    return () => controller.abort()
+  }, [src, attempt])
+  if (error !== undefined) return <PreviewStatus error retry={() => setAttempt(value => value + 1)}>无法准备 Office 预览，{error}</PreviewStatus>
+  if (status === undefined) return <PreviewStatus>文档渲染中…</PreviewStatus>
   if (status.available) {
     const converted = src.replace('/dsh-vscode/ssh/file?', '/dsh-vscode/ssh/office?').replace('/dsh-vscode/file?', '/dsh-vscode/office?')
-    return <PdfPreview src={converted} path={path}/>
+    return <PdfPreview src={converted} path={path} view={view}/>
   }
-  // Without LibreOffice, newer formats still render in the browser; legacy binaries fall back to a download.
-  const extension = path.split('.').at(-1)?.toLowerCase()
-  if (extension === 'docx') return <DocxPreview src={src}/>
-  return <div className="dvw-document-download"><strong>需要 LibreOffice 才能预览此格式</strong><span>{status.hint}</span><a href={src} target="_blank" rel="noreferrer">下载 {path}</a></div>
+  if (path.toLowerCase().endsWith('.docx')) return <DocxPreview src={src} view={view}/>
+  return <PreviewStatus>需要 LibreOffice 才能预览此格式。{status.hint ?? '请下载文件或用本地应用打开。'}</PreviewStatus>
 }
 
-export function DocumentPreview({ kind, src, path }: { kind: DocumentPreviewKind; src: string; path: string }) {
-  if (kind === 'pdf') return <PdfPreview src={src} path={path}/>
-  if (kind === 'office') return <OfficePreview src={src} path={path}/>
-  if (kind === 'sheet') return <SheetsPreview src={src} path={path}/>
-  return <div className="dvw-document-download"><strong>此格式无法在浏览器中可靠渲染</strong><a href={src} target="_blank" rel="noreferrer">打开 {path}</a></div>
+export function DocumentPreview({ kind, src, path, view }: { kind: DocumentPreviewKind; src: string; path: string; view?: PreviewView }) {
+  return <PreviewFrame src={src} path={path}>
+    {kind === 'pdf' ? <PdfPreview key={src} src={src} path={path} view={view}/>
+      : kind === 'office' ? <OfficePreview key={src} src={src} path={path} view={view}/>
+      : kind === 'sheet' ? <SheetsPreview key={src} src={src} path={path}/>
+      : <PreviewStatus>此格式暂不支持预览，请下载文件或用本地应用打开。</PreviewStatus>}
+  </PreviewFrame>
 }

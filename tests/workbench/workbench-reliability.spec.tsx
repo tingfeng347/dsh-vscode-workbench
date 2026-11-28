@@ -7,6 +7,7 @@ import type { MonacoDiffEditor, MonacoEditor } from '../../src/client/editor/Mon
 import { settingsHost } from '../../src/client/settings/settingsHost.ts'
 import { WorkbenchController } from '../../src/client/workbench/service.ts'
 import { disposeTypeScriptProject } from '../../src/client/editor/typescriptProject.ts'
+import { setConversationActionVisible } from '../../src/client/dsh/conversationActionVisibility.ts'
 import type { FileEntry, GitChange } from '../../src/shared/types.ts'
 import type { DshConversationMenus } from '../../src/client/dsh/DshConversationPanel.tsx'
 import { NativeConversation } from '../../src/client/dsh/nativeConversation.ts'
@@ -89,6 +90,9 @@ afterEach(async () => {
   vi.useRealTimers()
 })
 async function mount(service = new WorkbenchController(), visible = true, dshPanelId?: string, handlers: { open?(panelId: string): void; restore?(): void } = {}) {
+  setConversationActionVisible('conversation-placement', false)
+  setConversationActionVisible('close-conversation-bar', false)
+  setConversationActionVisible('open-native-sidebar', false)
   if (visible) service.show()
   const node = document.createElement('div'); document.body.append(node); root = createRoot(node)
   await act(async () => { root!.render(<Workbench service={service} sessionId="s" cwd="/tmp/audit" conversationMenus={conversationMenus} dshPanelId={dshPanelId} onOpenDshPanel={handlers.open} onRestoreConversation={handlers.restore}/>) })

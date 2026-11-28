@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { CONVERSATION_CLOSE_ICON, CONVERSATION_OPEN_ICON, CONVERSATION_VIEW_SETTINGS_EVENT, CONVERSATION_VIEW_SETTINGS_ICON, DshConversationCloseIcon, DshConversationMenu, DshConversationOpenIcon, DshConversationViewsIcon, DshNativeSidebarOpenIcon, DshConversationPanel, DshReviewActions, findDshConversationRoot, type DshConversationMenus } from '../../src/client/dsh/DshConversationPanel.tsx'
 import { SshChatTarget } from '../../src/client/ssh/SshChatTarget.tsx'
 import { SidebarConversationHeader } from '../../src/client/dsh/SidebarConversationHeader.tsx'
@@ -14,6 +14,11 @@ afterEach(() => {
   document.body.replaceChildren()
   document.body.removeAttribute('data-dvw-conversation-active')
   localStorage.removeItem(CONVERSATION_ACTION_SETTINGS_KEY)
+  setConversationActionVisible('conversation-placement', true)
+  setConversationActionVisible('close-conversation-bar', false)
+  setConversationActionVisible('open-native-sidebar', true)
+})
+beforeEach(() => {
   setConversationActionVisible('conversation-placement', true)
   setConversationActionVisible('close-conversation-bar', false)
   setConversationActionVisible('open-native-sidebar', true)

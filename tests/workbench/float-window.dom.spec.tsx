@@ -6,6 +6,7 @@ import { Workbench } from '../../src/client/workbench/Workbench.tsx'
 import { WorkbenchController } from '../../src/client/workbench/service.ts'
 import { settingsHost } from '../../src/client/settings/settingsHost.ts'
 import type { DshConversationMenus } from '../../src/client/dsh/DshConversationPanel.tsx'
+import { setConversationActionVisible } from '../../src/client/dsh/conversationActionVisibility.ts'
 
 vi.mock('../../src/client/editor/MonacoEditor.tsx', () => ({
   MonacoEditor: () => null,
@@ -36,6 +37,9 @@ afterEach(async () => {
 })
 
 async function mount(dshPanelId?: string, onOpenDshPanel?: (id: string) => void, overrides: Pick<Parameters<typeof Workbench>[0], 'rightSidebar' | 'browser' | 'conversationMenus'> = {}): Promise<WorkbenchController> {
+  setConversationActionVisible('conversation-placement', false)
+  setConversationActionVisible('close-conversation-bar', false)
+  setConversationActionVisible('open-native-sidebar', false)
   vi.stubGlobal('WebSocket', FakeSocket)
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     const method = url.split('/').at(-1)

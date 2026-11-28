@@ -9,6 +9,17 @@ async function temp(){const value=await mkdtemp(join(tmpdir(),'dvw-'));roots.pus
 afterEach(async()=>{await Promise.all(roots.splice(0).map(path=>rm(path,{recursive:true,force:true})))})
 
 describe('workspace filesystem',()=>{
+  it('lists dot-prefixed entries so the workspace browser can toggle their visibility', async () => {
+    const root = await temp()
+    await mkdir(join(root, '.agents'))
+    await mkdir(join(root, '.git'))
+    await writeFile(join(root, '.env'), 'KEY=value')
+    await writeFile(join(root, 'README.md'), 'readme')
+    await writeFile(join(root, '.agents', '.config'), 'config')
+    const names = (await listFiles(root, '')).map(entry => entry.name)
+    expect(new Set(names)).toEqual(new Set(['.agents', '.git', '.env', 'README.md']))
+    expect((await listFiles(root, '.agents')).map(entry => entry.name)).toEqual(['.config'])
+  })
   it('lists lazily and performs guarded mutations',async()=>{const root=await temp();await mkdir(join(root,'src'));await writeFile(join(root,'src','a.ts'),'one');expect((await listFiles(root,'')).map(x=>x.name)).toEqual(['src']);const doc=await readDocument(root,'src/a.ts');await saveDocument(root,'src/a.ts','two',doc.revision);expect(await readFile(join(root,'src','a.ts'),'utf8')).toBe('two');await createEntry(root,'src/b.ts','file');await renameEntry(root,'src/b.ts','src/c.ts');expect((await listFiles(root,'src')).map(x=>x.name)).toEqual(['a.ts','c.ts'])})
   it('rejects traversal and symlink escape',async()=>{const root=await temp();const outside=await temp();await writeFile(join(outside,'secret'),'x');await symlink(outside,join(root,'link'));await expect(workspacePath(root,'../x')).rejects.toMatchObject({code:'path-outside'});await expect(readDocument(root,'link/secret')).rejects.toMatchObject({code:'path-outside'})})
   it('hides external links and follows links that stay inside the workspace',async()=>{const root=await temp();const outside=await temp();await mkdir(join(root,'src'));await writeFile(join(root,'src','inside.txt'),'inside');await writeFile(join(outside,'outside.txt'),'outside');await symlink(join(root,'src'),join(root,'internal-link'),process.platform==='win32'?'junction':'dir');await symlink(outside,join(root,'external-link'),process.platform==='win32'?'junction':'dir');expect((await listFiles(root,'')).map(entry=>[entry.name,entry.kind])).toEqual([['internal-link','directory'],['src','directory']]);expect((await listFiles(root,'internal-link')).map(entry=>entry.name)).toEqual(['inside.txt']);expect((await readDocument(root,'internal-link/inside.txt')).content).toBe('inside')})

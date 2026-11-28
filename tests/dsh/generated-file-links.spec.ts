@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import {
   GENERATED_FILE_OPEN_EVENT,
   installDshChangedFilesOpenInterceptor,
@@ -80,6 +81,62 @@ describe('generated file addresses', () => {
 })
 
 describe('generated file interceptor', () => {
+  it('intercepts scoped file opens only inside the visible workbench and the same session', () => {
+    const host = createHost('session-1')
+    const originalIn = vi.fn()
+    host.sidebar.openResourceIn = originalIn
+    let visible = true
+    const listener = listen()
+    disposers.push(installGeneratedFileOpenInterceptor(host.sidebar, () => visible))
+    const openIn = host.sidebar.openResourceIn as unknown as (sessionId: string, ...args: Parameters<OpenWithLine>) => void
+    const address = encodedAddress('session-1', 'report.md')
+    const options = { params: { line: 9 } }
+
+    openIn('session-1', address, options)
+    expect(listener.mock.calls[0]![0].detail).toEqual({ sessionId: 'session-1', path: 'report.md', line: 9 })
+    expect(originalIn).not.toHaveBeenCalled()
+    visible = false
+    openIn('session-1', address, options)
+    visible = true
+    openIn('session-2', address)
+    host.setMounted('session-2')
+    openIn('session-1', address)
+    expect(listener).toHaveBeenCalledOnce()
+    expect(originalIn.mock.calls).toEqual([['session-1', address, options], ['session-2', address], ['session-1', address]])
+    expect(originalIn.mock.contexts.every(receiver => receiver === host.sidebar)).toBe(true)
+  })
+
+  it('preserves explicit native destinations and preview kinds for both opening APIs', () => {
+    const host = createHost('session-1')
+    const originalIn = vi.fn()
+    host.sidebar.openResourceIn = originalIn
+    const listener = listen()
+    disposers.push(installGeneratedFileOpenInterceptor(host.sidebar, () => true))
+    const address = encodedAddress('session-1', 'image.png')
+    for (const options of [{ destination: 'sidebar' as const }, { destination: 'float' as const }, { kind: 'preview' }]) {
+      host.sidebar.openResource(address, options)
+      host.sidebar.openResourceIn!('session-1' as SessionId, address, options)
+      expect(host.original).toHaveBeenLastCalledWith(address, options)
+      expect(originalIn).toHaveBeenLastCalledWith('session-1', address, options)
+    }
+    expect(listener).not.toHaveBeenCalled()
+  })
+
+  it('restores both opening APIs after the last installer is disposed', () => {
+    const host = createHost('session-1')
+    const originalIn = vi.fn()
+    host.sidebar.openResourceIn = originalIn
+    const disposeFirst = installGeneratedFileOpenInterceptor(host.sidebar, () => true)
+    const wrapperIn = host.sidebar.openResourceIn
+    const disposeSecond = installGeneratedFileOpenInterceptor(host.sidebar, () => true)
+    disposeFirst()
+    expect(host.sidebar.openResourceIn).toBe(wrapperIn)
+    disposeSecond()
+    disposeSecond()
+    expect(host.sidebar.openResource).toBe(host.original)
+    expect(host.sidebar.openResourceIn).toBe(originalIn)
+  })
+
   it('opens a same-session file as a CustomEvent with its requested line', () => {
     const host = createHost('session-1')
     const listener = listen()

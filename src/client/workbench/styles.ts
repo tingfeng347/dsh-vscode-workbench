@@ -499,6 +499,11 @@ html[data-windows-titlebar]:not([data-fullscreen]) body[data-dvw-workbench-activ
 .dvw-open-with-main:hover:not(:disabled),.dvw-open-with-more:hover:not(:disabled){background:var(--dvw-hover)}
 .dvw-open-with-main:disabled,.dvw-open-with-more:disabled{opacity:.6;cursor:default}
 .dvw-open-with-main img,.dvw-open-with-menu img{object-fit:contain;flex:none}
+.dvw-preview-header .dvw-open-with{gap:0}
+.dvw-preview-header .dvw-open-with-buttons{min-width:0;border-radius:6px}
+.dvw-preview-header .dvw-open-with-main{height:30px;padding:0 9px;font-size:12px;gap:5px}
+.dvw-preview-header .dvw-open-with-more{width:28px;height:30px}
+.dvw-preview-header .dvw-open-with-main .codicon,.dvw-preview-header .dvw-open-with-more .codicon{font-size:14px}
 .dvw-open-with{position:relative}
 .dvw-open-with-menu{position:absolute!important;left:50%;top:calc(100% + 8px)!important;bottom:auto!important;transform:translateX(-50%);z-index:8;min-width:208px;padding:6px;border-radius:10px}
 .dvw-open-with-menu button{white-space:nowrap;display:flex;align-items:center;gap:9px;height:36px;padding:0 10px;font-size:13px;border-radius:7px}
